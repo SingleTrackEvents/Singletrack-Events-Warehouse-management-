@@ -4,8 +4,11 @@
 # only expose getUserMedia on a secure origin. It also makes the app installable
 # on a phone's home screen.
 #
-# `enablement: true` below turns Pages on via the API on the first run, so there
-# is no manual setting to find in the repo settings.
+# One-off setup, unavoidable: repo Settings → Pages → Source → "GitHub Actions".
+# `enablement: true` below asks the API to do it automatically, but creating a
+# Pages site needs admin rights that the workflow token does not carry, so it
+# only succeeds once a human has switched Pages on. It is left in because it
+# makes the workflow self-healing if Pages is ever turned back off.
 name: Deploy to GitHub Pages
 
 on:
@@ -45,7 +48,7 @@ jobs:
 
       - uses: actions/configure-pages@v5
         with:
-          # Switches Pages on and points it at Actions if it is not set up yet.
+          # No-op once Pages exists; see the note at the top of this file.
           enablement: true
 
       - uses: actions/upload-pages-artifact@v3
