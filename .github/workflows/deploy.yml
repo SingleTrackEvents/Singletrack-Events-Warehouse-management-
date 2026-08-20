@@ -4,7 +4,8 @@
 # only expose getUserMedia on a secure origin. It also makes the app installable
 # on a phone's home screen.
 #
-# One-off setup: repo Settings → Pages → Source → "GitHub Actions".
+# `enablement: true` below turns Pages on via the API on the first run, so there
+# is no manual setting to find in the repo settings.
 name: Deploy to GitHub Pages
 
 on:
@@ -43,6 +44,9 @@ jobs:
       - run: npm run build
 
       - uses: actions/configure-pages@v5
+        with:
+          # Switches Pages on and points it at Actions if it is not set up yet.
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
