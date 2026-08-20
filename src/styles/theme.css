@@ -1,0 +1,172 @@
+/*
+ * Design tokens.
+ *
+ * The app gets used in a warehouse, in a ute and on a ridgeline in full sun, so
+ * the palette is built for contrast first: heavy text weights, solid fills and
+ * a hi-vis accent that stays readable on a dim phone screen at midday.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Brand — eucalypt green chrome with a trail-marker orange for actions. */
+  --green-900: #0b2e22;
+  --green-800: #10402f;
+  --green-700: #16553e;
+  --green-600: #1d6b4e;
+  --green-500: #2a8a66;
+  --green-100: #d8ece3;
+  --orange-600: #c2410c;
+  --orange-500: #ea580c;
+  --orange-400: #fb923c;
+  --orange-100: #ffe8d6;
+
+  --red-600: #b91c1c;
+  --red-500: #dc2626;
+  --red-100: #fee2e2;
+  --amber-600: #b45309;
+  --amber-500: #f59e0b;
+  --amber-100: #fef3c7;
+  --blue-600: #1d4ed8;
+  --blue-500: #3b82f6;
+  --blue-100: #dbeafe;
+
+  /* Light surfaces */
+  --bg: #f4f6f4;
+  --surface: #ffffff;
+  --surface-2: #eef2ef;
+  --surface-sunken: #e6ebe7;
+  --border: #d3dcd6;
+  --border-strong: #adbbb2;
+  --text: #101614;
+  --text-muted: #55655c;
+  --text-faint: #7a8b81;
+
+  --accent: var(--orange-500);
+  --accent-ink: #ffffff;
+  --brand: var(--green-700);
+  --brand-ink: #ffffff;
+  /* The header band is its own pair: the brand colour has to stay legible as
+     text on the page background, which pulls it in a different direction from
+     a colour that works as a large filled bar. */
+  --header-bg: var(--green-700);
+  --header-ink: #ffffff;
+
+  --ok: #15803d;
+  --ok-bg: #dcfce7;
+  --warn: var(--amber-600);
+  --warn-bg: var(--amber-100);
+  --danger: var(--red-600);
+  --danger-bg: var(--red-100);
+  --info: var(--blue-600);
+  --info-bg: var(--blue-100);
+
+  /* Type scale — nudged up from web defaults for arm's-length reading. */
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.3rem;
+  --text-2xl: 1.6rem;
+  --text-3xl: 2rem;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-full: 999px;
+
+  /* Minimum comfortable target for a gloved thumb. */
+  --tap: 48px;
+
+  --shadow-sm: 0 1px 2px rgb(16 22 20 / 8%);
+  --shadow: 0 2px 8px rgb(16 22 20 / 10%);
+  --shadow-lg: 0 8px 28px rgb(16 22 20 / 18%);
+
+  --header-h: 56px;
+  --nav-h: 64px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+:root[data-theme='dark'],
+:root:not([data-theme='light']) {
+  /* Only overridden inside the dark block below — keeps light as the base. */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0d1210;
+    --surface: #161d1a;
+    --surface-2: #1d2622;
+    --surface-sunken: #101614;
+    --border: #2c3833;
+    --border-strong: #43534c;
+    --text: #eef3f0;
+    --text-muted: #9db0a6;
+    --text-faint: #74877d;
+
+    --accent: var(--orange-400);
+    --accent-ink: #21140a;
+    --brand: var(--green-500);
+    --brand-ink: #04140d;
+    --header-bg: #10402f;
+    --header-ink: #eef3f0;
+
+    --ok: #4ade80;
+    --ok-bg: #10321f;
+    --warn: #fbbf24;
+    --warn-bg: #3a2a06;
+    --danger: #f87171;
+    --danger-bg: #3d1414;
+    --info: #93c5fd;
+    --info-bg: #12244a;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow: 0 2px 10px rgb(0 0 0 / 45%);
+    --shadow-lg: 0 10px 30px rgb(0 0 0 / 60%);
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #0d1210;
+  --surface: #161d1a;
+  --surface-2: #1d2622;
+  --surface-sunken: #101614;
+  --border: #2c3833;
+  --border-strong: #43534c;
+  --text: #eef3f0;
+  --text-muted: #9db0a6;
+  --text-faint: #74877d;
+
+  --accent: var(--orange-400);
+  --accent-ink: #21140a;
+  --brand: var(--green-500);
+  --brand-ink: #04140d;
+  --header-bg: #10402f;
+  --header-ink: #eef3f0;
+
+  --ok: #4ade80;
+  --ok-bg: #10321f;
+  --warn: #fbbf24;
+  --warn-bg: #3a2a06;
+  --danger: #f87171;
+  --danger-bg: #3d1414;
+  --info: #93c5fd;
+  --info-bg: #12244a;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow: 0 2px 10px rgb(0 0 0 / 45%);
+  --shadow-lg: 0 10px 30px rgb(0 0 0 / 60%);
+}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SingleTrack Warehouse">
+  <rect width="512" height="512" rx="112" fill="#16553e"/>
+  <!-- Ridgeline: the trail the gear has to get to. -->
+  <path d="M64 344 L168 216 L232 288 L320 168 L448 344 Z" fill="#2a8a66"/>
+  <path d="M320 168 L360 223 L292 223 Z" fill="#eef3f0"/>
+  <!-- Crate stencil over the range. -->
+  <rect x="150" y="300" width="212" height="140" rx="16" fill="#ea580c"/>
+  <rect x="150" y="336" width="212" height="20" fill="#c2410c"/>
+  <rect x="238" y="300" width="36" height="140" fill="#c2410c"/>
+</svg>
