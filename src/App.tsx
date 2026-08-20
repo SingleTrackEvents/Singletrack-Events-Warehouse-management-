@@ -1,6 +1,10 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { HashRouter, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { ToastProvider } from './components/ui';
+import { SessionProvider } from './hooks/useSession';
+import { useSession } from './hooks/sessionContext';
+import { can } from './sync/permissions';
+import type { Action } from './sync/permissions';
 import { useSettings } from './hooks/useDb';
 import './styles/app.css';
 
@@ -28,12 +32,19 @@ const TemplatesScreen = lazy(() => import('./screens/TemplatesScreen'));
 const TemplateDetailScreen = lazy(() => import('./screens/TemplateDetailScreen'));
 const SettingsScreen = lazy(() => import('./screens/SettingsScreen'));
 const ScanScreen = lazy(() => import('./screens/ScanScreen'));
+const AccessScreen = lazy(() => import('./screens/AccessScreen'));
+const JoinScreen = lazy(() => import('./screens/JoinScreen'));
 
-const NAV = [
+/**
+ * Bottom tabs, each gated by the permission its screen needs. A volunteer with
+ * no business in the warehouse should not be shown a Stock tab that only leads
+ * to an empty or refusing screen.
+ */
+const NAV: Array<{ to: string; icon: string; label: string; end: boolean; needs?: Action }> = [
   { to: '/', icon: '🏠', label: 'Home', end: true },
-  { to: '/events', icon: '🏃', label: 'Events', end: false },
-  { to: '/stock', icon: '📦', label: 'Stock', end: false },
-  { to: '/transport', icon: '🚚', label: 'Transport', end: false },
+  { to: '/events', icon: '🏃', label: 'Events', end: false, needs: 'event:read' },
+  { to: '/stock', icon: '📦', label: 'Stock', end: false, needs: 'item:read' },
+  { to: '/transport', icon: '🚚', label: 'Transport', end: false, needs: 'load:read' },
   { to: '/more', icon: '⚙️', label: 'More', end: false },
 ];
 
@@ -49,9 +60,15 @@ function ThemeSync() {
 }
 
 function BottomNav() {
+  const { session } = useSession();
+  const visible = NAV.filter((entry) => !entry.needs || can(session, entry.needs));
   return (
-    <nav className="app-nav no-print" aria-label="Main">
-      {NAV.map((entry) => (
+    <nav
+      className="app-nav no-print"
+      aria-label="Main"
+      style={{ gridTemplateColumns: `repeat(${visible.length}, 1fr)` }}
+    >
+      {visible.map((entry) => (
         <NavLink key={entry.to} to={entry.to} end={entry.end}>
           <span className="icon" aria-hidden>
             {entry.icon}
@@ -67,8 +84,9 @@ export default function App() {
   return (
     <HashRouter>
       <ToastProvider>
-        <ThemeSync />
-        <div className="app">
+        <SessionProvider>
+          <ThemeSync />
+          <div className="app">
           <Suspense fallback={<div className="app-main muted">Loading…</div>}>
             <Routes>
               <Route path="/" element={<HomeScreen />} />
@@ -87,11 +105,14 @@ export default function App() {
               <Route path="/more" element={<SettingsScreen />} />
               <Route path="/scan" element={<ScanScreen />} />
               <Route path="/scan/:code" element={<ScanScreen />} />
+              <Route path="/access" element={<AccessScreen />} />
+              <Route path="/join/:token" element={<JoinScreen />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
           <BottomNav />
         </div>
+        </SessionProvider>
       </ToastProvider>
     </HashRouter>
   );

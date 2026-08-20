@@ -99,3 +99,10 @@ export function scanUrl(code: string, label: ScanLabel = {}, origin?: string): s
   const query = params.toString();
   return `${base}#/scan/${encodeURIComponent(code)}${query ? `?${query}` : ''}`;
 }
+
+/** The URL behind a volunteer invite QR. */
+export function joinUrl(token: string, origin?: string): string {
+  const base =
+    origin ?? (typeof location !== 'undefined' ? `${location.origin}${location.pathname}` : '');
+  return `${base}#/join/${encodeURIComponent(token)}`;
+}

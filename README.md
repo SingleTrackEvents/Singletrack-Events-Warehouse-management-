@@ -90,6 +90,7 @@ src/
   hooks/       Live queries (Dexie useLiveQuery) and search
   components/  Shared UI — sheets, steppers, toasts, scanner, QR codes
   screens/     One file per screen, lazily routed
+  sync/        Backend contract, role permissions, sync engine, mock server
   styles/      Design tokens and component CSS
 ```
 
@@ -98,7 +99,7 @@ against the real Dexie stack on a fake IndexedDB, so transactions and indexes ar
 exercised rather than mocked.
 
 ```bash
-npm test    # 93 tests
+npm test    # 145 tests
 ```
 
 ## Design notes
@@ -115,9 +116,76 @@ npm test    # 93 tests
 - **Scanning degrades.** Native `BarcodeDetector` where it exists, jsQR
   everywhere else (including iOS Safari), and a typed-code fallback under both.
 
+## Sync and access
+
+The app still runs perfectly with no account at all — that is the default, and
+nothing about it changed. Connecting a backend is opt-in, from More → Accounts &
+sync.
+
+### How sync works
+
+The local database stays the source of truth for everything on screen. Sync runs
+behind it and never blocks the UI, because the moment it does the app stops
+working in exactly the places it is needed: a shed with thick walls, a valley
+with no bars.
+
+- Every write stamps `syncedAt: null`, so **the outbox is a query, not a second
+  bookkeeping structure** that could drift out of step with the data.
+- A cycle pushes the outbox first, so local work is safe on the server before
+  remote changes are merged in.
+- Conflicts resolve newest-revision-wins — the same rule as the file import, so
+  a device back from a weekend offline cannot stomp fresher work by reconnecting.
+- A row edited while its push is in flight stays in the outbox. Revisions are
+  compared before anything is marked as sent.
+
+### Roles
+
+| Role | Can do |
+| --- | --- |
+| **Admin** | Everything, including the catalogue and who else has access |
+| **Crew** | Pack, adjust stock, run stocktakes, build loads |
+| **Driver** | Assigned loads, confirm deliveries |
+| **Volunteer** | One aid station's packlist; record what arrived |
+
+Volunteers are pinned to a single destination for a single event, and may only
+change what *arrived* — never what was supposed to be sent, since that would
+quietly erase the evidence of a short delivery.
+
+`src/sync/permissions.ts` holds the rules as a table you can read top to bottom.
+They run on the client so the UI can hide what someone cannot do; **a real
+backend must mirror them in row-level security.** The client copy is a courtesy,
+not a security boundary.
+
+### Two ways in
+
+Core crew sign in with an email link. Volunteers scan an invite QR at their aid
+station and type their name — no inbox, no password, nothing to remember, because
+race morning is the worst possible time to make someone set up an account. Invites
+are scoped to one destination and expire after the weekend.
+
+### Adding a real backend
+
+`src/sync/types.ts` defines a `SyncBackend` interface; everything above it —
+screens, engine, permission checks — is written against that and not against any
+particular vendor. Today the only implementation is `MockBackend`, a stand-in
+that stores rows in its own IndexedDB and applies the same conflict rule and the
+same permission checks a server will. That makes the engine and the role model
+genuinely testable, but it **cannot move data between devices** — the one thing a
+real backend is for.
+
+To go live, add an adapter implementing that interface (Supabase is the obvious
+fit: Postgres, auth, row-level security, a Sydney region) and register it in
+`src/sync/index.ts`. No caller changes.
+
+Still to do before a real race:
+- The Supabase adapter and matching row-level security policies.
+- Per-screen gating beyond the navigation tabs — the permission model exists and
+  the backend refuses disallowed writes, but individual screens do not yet hide
+  every control a limited role cannot use.
+- Realtime updates, so a change appears without waiting for the next sync.
+
 ## Possible next steps
 
-- A sync server, using the metadata already on every record.
 - Photo attachments on delivery confirmations.
 - Weight and volume per item to warn when a load won't fit in the vehicle.
 - Per-runner template scaling wired to actual entry numbers.

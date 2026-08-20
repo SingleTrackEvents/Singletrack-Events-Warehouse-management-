@@ -115,6 +115,14 @@ export default function SettingsScreen() {
           <h2>Set up</h2>
         </div>
         <div className="list">
+          <Link to="/access" className="row">
+            <span className="row-icon">👥</span>
+            <span className="row-body">
+              <span className="row-title">Accounts &amp; sync</span>
+              <span className="row-sub">Share live data with the crew and invite volunteers</span>
+            </span>
+            <span className="row-chevron">›</span>
+          </Link>
           <Link to="/templates" className="row">
             <span className="row-icon">📋</span>
             <span className="row-body">
