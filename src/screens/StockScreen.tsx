@@ -30,11 +30,23 @@ export default function StockScreen() {
   const categoryFilter = params.get('category') ?? '';
   const lowOnly = params.get('filter') === 'low';
 
-  const setParam = (key: string, value: string) => {
-    const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setParams(next, { replace: true });
+  /**
+   * The chip strip reads as one row of alternatives, so it behaves as one:
+   * choosing a category clears the low-stock filter and vice versa. Letting the
+   * two stack silently emptied the list with no visible cause — the strip
+   * scrolls sideways, so the other active chip was usually off-screen.
+   */
+  const selectOnly = (next: { category?: string; low?: boolean }) => {
+    const params = new URLSearchParams();
+    if (next.category) params.set('category', next.category);
+    if (next.low) params.set('filter', 'low');
+    setParams(params, { replace: true });
+  };
+
+  /** Drop every filter, including anything typed in the search box. */
+  const clearFilters = () => {
+    setQuery('');
+    setParams({}, { replace: true });
   };
 
   const base = (items ?? []).filter((item) => {
@@ -46,6 +58,11 @@ export default function StockScreen() {
 
   const matches = useSearch(base, query, (item) => [item.name, item.sku, item.bin, item.notes]);
   const lowCount = (items ?? []).filter(isLowStock).length;
+  const activeCategory = categories?.find((category) => category.id === categoryFilter);
+  // An empty list means something different when a filter is on than when the
+  // catalogue is genuinely empty, and the two need different ways out.
+  const filtered = Boolean(categoryFilter) || lowOnly || Boolean(query.trim());
+  const totalItems = (items ?? []).filter((item) => !item.archived).length;
 
   return (
     <Screen
@@ -79,7 +96,7 @@ export default function StockScreen() {
           type="button"
           className="chip"
           aria-pressed={!categoryFilter && !lowOnly}
-          onClick={() => setParams({}, { replace: true })}
+          onClick={() => selectOnly({})}
         >
           All
         </button>
@@ -87,7 +104,7 @@ export default function StockScreen() {
           type="button"
           className="chip"
           aria-pressed={lowOnly}
-          onClick={() => setParam('filter', lowOnly ? '' : 'low')}
+          onClick={() => selectOnly({ low: !lowOnly })}
         >
           ⚠ Low ({lowCount})
         </button>
@@ -97,7 +114,9 @@ export default function StockScreen() {
             type="button"
             className="chip"
             aria-pressed={categoryFilter === category.id}
-            onClick={() => setParam('category', categoryFilter === category.id ? '' : category.id)}
+            onClick={() =>
+              selectOnly({ category: categoryFilter === category.id ? '' : category.id })
+            }
           >
             {category.icon} {category.name}
           </button>
@@ -129,13 +148,29 @@ export default function StockScreen() {
         </div>
       ) : (
         <EmptyState
-          glyph="🔍"
-          title={query ? 'No matches' : 'Nothing here'}
-          body={query ? `Nothing matches “${query}”.` : 'Add your first item to get started.'}
+          glyph={filtered ? '🔍' : '📦'}
+          title={filtered ? 'Nothing matches those filters' : 'Nothing here yet'}
+          body={
+            filtered
+              ? [
+                  query.trim() ? `“${query.trim()}”` : '',
+                  lowOnly ? 'below reorder point' : '',
+                  activeCategory ? activeCategory.name : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+              : 'Add your first item to get started.'
+          }
           action={
-            <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
-              Add an item
-            </button>
+            filtered ? (
+              <button type="button" className="btn btn-primary" onClick={clearFilters}>
+                Show all {plural(totalItems, 'item')}
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
+                Add an item
+              </button>
+            )
           }
         />
       )}

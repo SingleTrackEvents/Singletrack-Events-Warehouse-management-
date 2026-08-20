@@ -454,6 +454,13 @@ button, input, select, textarea {
 
 .chip-row::-webkit-scrollbar { display: none; }
 
+/* Inside a sheet or card the strip must not bleed past its container the way
+   the full-width screen version deliberately does. */
+.chip-row-inline {
+  margin: 0;
+  padding: 0 0 2px;
+}
+
 .chip {
   flex: 0 0 auto;
   min-height: 38px;

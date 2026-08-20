@@ -193,6 +193,12 @@ function NewLoadSheet({
             />
           )}
         </Field>
+        {/*
+          Saved vehicles are offered as tap targets rather than a <datalist>.
+          Safari on iOS ignores datalist entirely, so half the crew would get no
+          suggestions at all, and where it does work the popup fights with the
+          scrolling sheet. Tapping a chip is also just faster than typing.
+        */}
         <Field label="Vehicle">
           {(id) => (
             <>
@@ -201,14 +207,23 @@ function NewLoadSheet({
                 className="input"
                 value={vehicle}
                 placeholder="6m Truck"
-                list="vehicle-options"
                 onChange={(event) => setVehicle(event.target.value)}
               />
-              <datalist id="vehicle-options">
-                {(settings?.vehicles ?? []).map((option) => (
-                  <option key={option} value={option} />
-                ))}
-              </datalist>
+              {settings?.vehicles.length ? (
+                <div className="chip-row chip-row-inline">
+                  {settings.vehicles.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className="chip"
+                      aria-pressed={vehicle === option}
+                      onClick={() => setVehicle(vehicle === option ? '' : option)}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </>
           )}
         </Field>
