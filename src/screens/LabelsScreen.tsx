@@ -46,7 +46,8 @@ export default function LabelsScreen() {
     );
   }
 
-  const url = scanUrl(packlist.code);
+  const label = { name: packlist.name, event: event?.name };
+  const url = scanUrl(packlist.code, label);
 
   const addContainer = async () => {
     const index = (containers?.length ?? 0) + 1;
@@ -117,7 +118,11 @@ export default function LabelsScreen() {
           <div className="label-sheet">
             {containers.map((container) => (
               <div key={container.id} className="qr-label">
-                <QrCode value={scanUrl(container.code)} size={96} alt={`QR code for ${container.code}`} />
+                <QrCode
+                  value={scanUrl(container.code, label)}
+                  size={96}
+                  alt={`QR code for ${container.code}`}
+                />
                 <div className="grow">
                   <div className="name">{packlist.name}</div>
                   <div className="code">{container.code}</div>

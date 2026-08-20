@@ -73,9 +73,29 @@ export function parseScan(raw: string): { code: string; container: string | null
   return { code: match[1], container: match[2] ?? null };
 }
 
-/** The URL encoded into a packlist's QR code. */
-export function scanUrl(code: string, origin?: string): string {
+/** Human-readable context carried alongside a code so a label describes itself. */
+export interface ScanLabel {
+  /** Packlist name, e.g. "Aid 3 — Buffalo Plateau". */
+  name?: string;
+  /** Event name, e.g. "Buffalo Stampede". */
+  event?: string;
+}
+
+/**
+ * The URL encoded into a QR label.
+ *
+ * The code alone is only a pointer into whichever device's database created it,
+ * so a label scanned on any other phone used to be a dead end. The name and
+ * event ride along in the query string, which means a crate can always tell you
+ * what it is even where the packlist itself is not stored. `parseScan` drops the
+ * query before matching, so labels printed before this change still resolve.
+ */
+export function scanUrl(code: string, label: ScanLabel = {}, origin?: string): string {
   const base =
     origin ?? (typeof location !== 'undefined' ? `${location.origin}${location.pathname}` : '');
-  return `${base}#/scan/${encodeURIComponent(code)}`;
+  const params = new URLSearchParams();
+  if (label.name) params.set('n', label.name);
+  if (label.event) params.set('e', label.event);
+  const query = params.toString();
+  return `${base}#/scan/${encodeURIComponent(code)}${query ? `?${query}` : ''}`;
 }

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { Scanner } from '../components/Scanner';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { normaliseCode, parseScan } from '../domain/codes';
+import { PACKLIST_STATUS_LABELS } from '../domain/packlists';
 
 /**
  * One scanner for everything.
@@ -52,11 +54,23 @@ async function resolve(raw: string): Promise<Resolution> {
 
 export default function ScanScreen() {
   const { code } = useParams();
+  const [search] = useSearchParams();
   const navigate = useNavigate();
   const toast = useToast();
   const [manual, setManual] = useState('');
   const [missed, setMissed] = useState<string>();
   const [busy, setBusy] = useState(false);
+
+  // A label printed by a newer build carries what it is, so an unrecognised code
+  // can still say "this crate is Aid 3 — Buffalo Plateau" rather than nothing.
+  const labelName = search.get('n') ?? '';
+  const labelEvent = search.get('e') ?? '';
+
+  // Offered as a fallback when a code does not resolve on this device.
+  const localPacklists = useLiveQuery(
+    async () => alive(await db.packlists.toArray()).slice(0, 25),
+    [],
+  );
 
   const handle = useCallback(
     async (value: string) => {
@@ -115,15 +129,52 @@ export default function ScanScreen() {
 
       {missed ? (
         <div className="card card-pad mt-4">
-          <p className="small strong mb-2">Nothing matches that code.</p>
-          <p className="tiny muted mono mb-3">{missed}</p>
+          {labelName ? (
+            <>
+              <p className="small muted mb-1">That label says it is:</p>
+              <h3>{labelName}</h3>
+              {labelEvent ? <p className="small muted">{labelEvent}</p> : null}
+              <p className="mono strong mt-2">{missed}</p>
+              <div className="divider" />
+              <p className="small strong mb-2">
+                …but this device has no packlist with that code.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="small strong mb-2">Nothing matches that code.</p>
+              <p className="tiny muted mono mb-3">{missed}</p>
+            </>
+          )}
+
           <p className="tiny muted">
-            Packlist codes look like <span className="mono">AS3-7K2M</span> and crate labels add a
-            number, like <span className="mono">AS3-7K2M/02</span>. If this is a supplier barcode, open
-            the item in Stock and link it there first.
+            Packlists live on the device that built them. A label scanned with the phone's camera
+            app opens in the browser, which keeps its own separate data — so use the{' '}
+            <span className="strong">Scan</span> button inside this app instead, or import that
+            device's backup from More → Backup &amp; handover.
           </p>
+
+          {localPacklists?.length ? (
+            <>
+              <p className="small strong mt-4 mb-2">Packlists on this device</p>
+              <div className="list">
+                {localPacklists.map((packlist) => (
+                  <Link key={packlist.id} to={`/packlists/${packlist.id}`} className="row">
+                    <span className="row-body">
+                      <span className="row-title truncate">{packlist.name}</span>
+                      <span className="row-sub mono">
+                        {packlist.code} · {PACKLIST_STATUS_LABELS[packlist.status]}
+                      </span>
+                    </span>
+                    <span className="row-chevron">›</span>
+                  </Link>
+                ))}
+              </div>
+            </>
+          ) : null}
+
           <button type="button" className="btn btn-outline btn-sm mt-3" onClick={() => setMissed(undefined)}>
-            Try again
+            Scan another
           </button>
         </div>
       ) : null}
