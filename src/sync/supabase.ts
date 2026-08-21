@@ -260,7 +260,8 @@ function toPasskeyError(message: string): SyncError {
   }
   if (/no credentials|not found|no passkey/i.test(message)) {
     return new SyncError(
-      'No passkey for this site was found on this device. Sign in with email once, then add a passkey.',
+      'This phone has no passkey for the app yet. Passkeys are added from inside the app once you ' +
+        'are signed in — sign in with email, then Accounts & sync → Passkeys → Add this device.',
       'auth',
     );
   }

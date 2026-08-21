@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { HashRouter, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { AccountChip } from './components/AccountChip';
 import { ToastProvider } from './components/ui';
 import { SessionProvider } from './hooks/useSession';
 import { useSession } from './hooks/sessionContext';
@@ -150,6 +151,7 @@ export function Screen({
           {title}
           {subtitle ? <span className="sub">{subtitle}</span> : null}
         </h1>
+        <AccountChip />
         {actions ?? (
           <button
             type="button"

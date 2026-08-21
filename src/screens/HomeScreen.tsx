@@ -5,10 +5,63 @@ import { EmptyState, Pill, ProgressBar } from '../components/ui';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useEvents, useItems, useSettings } from '../hooks/useDb';
+import { useSession } from '../hooks/sessionContext';
+import { ROLE_LABELS } from '../sync/types';
 import { lowStockItems } from '../domain/stock';
 import { progressFor } from '../domain/packlists';
-import { daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
+import { daysUntil, formatDateRange, formatDateTime, plural, relativeDays } from '../domain/format';
 import { LOAD_STATUS_LABELS } from '../domain/transport';
+
+/**
+ * Says plainly who is signed in and whether their work has left the phone.
+ *
+ * The sync state is not a technical detail here: a crew member who has packed
+ * four stations needs to know that landed somewhere before they drive out of
+ * range, and "it looked fine" is not good enough.
+ */
+function AccountBanner() {
+  const { backend, session, pending, phase, lastSyncAt } = useSession();
+  if (!backend) return null;
+
+  if (!session) {
+    return (
+      <Link to="/access" className="card card-pad mb-4" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
+        <div className="spread">
+          <span className="strong">Not signed in</span>
+          <Pill tone="warn">Tap to sign in</Pill>
+        </div>
+        <p className="tiny muted mt-2">Working on this device only — nothing is shared with the crew.</p>
+      </Link>
+    );
+  }
+
+  const busy = phase === 'pushing' || phase === 'pulling';
+  const tone = phase === 'error' ? 'danger' : pending > 0 || busy ? 'accent' : 'ok';
+
+  return (
+    <Link to="/access" className="card card-pad mb-4" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
+      <div className="spread">
+        <span className="grow truncate">
+          <span className="strong">{session.displayName}</span>
+          <span className="muted"> · {ROLE_LABELS[session.role]}</span>
+        </span>
+        <Pill tone={tone}>
+          {phase === 'error'
+            ? 'Sync problem'
+            : busy
+              ? 'Syncing…'
+              : pending > 0
+                ? `${pending} waiting`
+                : 'Synced'}
+        </Pill>
+      </div>
+      <p className="tiny muted mt-2">
+        {session.email ?? 'Joined by invite'}
+        {lastSyncAt ? ` · last synced ${formatDateTime(lastSyncAt)}` : ' · not synced yet'}
+      </p>
+    </Link>
+  );
+}
 
 /**
  * The screen the crew lands on. It answers the three questions asked most often
@@ -17,6 +70,7 @@ import { LOAD_STATUS_LABELS } from '../domain/transport';
  */
 export default function HomeScreen() {
   const navigate = useNavigate();
+  const { session } = useSession();
   const settings = useSettings();
   const events = useEvents();
   const items = useItems();
@@ -65,10 +119,15 @@ export default function HomeScreen() {
   );
 
   const low = items ? lowStockItems(items) : [];
-  const greeting = settings?.crewName ? `Gidday ${settings.crewName.split(' ')[0]}` : 'Warehouse';
+  // The signed-in account wins over the device's own crew name, which is left
+  // over from offline-only mode and would otherwise greet you as someone else.
+  const who = session?.displayName || settings?.crewName;
+  const greeting = who ? `Gidday ${who.split(' ')[0]}` : 'Warehouse';
 
   return (
     <Screen title="SingleTrack Warehouse" subtitle={greeting}>
+      <AccountBanner />
+
       {/* Scanning is the fastest way in, so it gets the biggest button. */}
       <button type="button" className="btn btn-primary btn-lg btn-block mb-4" onClick={() => navigate('/scan')}>
         ⛶ Scan a crate or item

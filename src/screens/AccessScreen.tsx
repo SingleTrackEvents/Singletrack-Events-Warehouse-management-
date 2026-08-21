@@ -93,11 +93,36 @@ export default function AccessScreen() {
             {backend.isReal ? '' : ' — a stand-in for trying the flow, not a real server.'}
           </p>
         </div>
+        {/*
+          Order matters here. A passkey can only be used on a phone that has
+          already had one added, so leading with it sent every first-time user
+          into a failure. Email comes first until the device has been set up,
+          and the wording says which is which rather than leaving people to
+          guess from two buttons that look equally valid.
+        */}
+        <div className="card card-pad mb-3">
+          <p className="small strong">First time on this phone?</p>
+          <p className="tiny muted mt-2">
+            Sign in with email once. Then add a passkey and this phone will sign you in with your
+            face or fingerprint from then on — no email involved.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="btn btn-primary btn-lg btn-block mb-4"
+          onClick={() => setSigningIn(true)}
+        >
+          ✉️ Sign in with email
+        </button>
+
         {backend.supportsPasskeys && backend.signInWithPasskey ? (
           <>
+            <div className="divider" />
+            <p className="small strong center mb-2">Already added a passkey here?</p>
             <button
               type="button"
-              className="btn btn-primary btn-lg btn-block mb-2"
+              className="btn btn-outline btn-block"
               disabled={passkeyBusy}
               onClick={() => {
                 setPasskeyBusy(true);
@@ -114,26 +139,20 @@ export default function AccessScreen() {
                   .finally(() => setPasskeyBusy(false));
               }}
             >
-              {passkeyBusy ? 'Waiting…' : '🔑 Sign in with a passkey'}
+              {passkeyBusy ? 'Waiting…' : '🔑 Use my passkey'}
             </button>
-            <p className="tiny muted center mb-4">
-              Face, fingerprint or your device PIN. No email, nothing to wait for.
-            </p>
             {passkeyError ? (
-              <p className="small center mb-3" style={{ color: 'var(--danger)' }}>
+              <p className="small center mt-3" style={{ color: 'var(--danger)' }}>
                 {passkeyError}
               </p>
             ) : null}
           </>
-        ) : null}
+        ) : (
+          <p className="tiny muted center mb-3">
+            This browser does not support passkeys, so email sign-in is the only option here.
+          </p>
+        )}
 
-        <button
-          type="button"
-          className={`btn btn-block mb-3 ${backend.supportsPasskeys ? 'btn-outline' : 'btn-primary btn-lg'}`}
-          onClick={() => setSigningIn(true)}
-        >
-          ✉️ Sign in with email
-        </button>
         <p className="small muted center">
           Volunteers do not sign in — scan the QR the crew give you at your aid station.
         </p>
