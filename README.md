@@ -187,13 +187,19 @@ trying the flow) and `SupabaseBackend`.
    links bounce to `http://localhost:3000`: Supabase silently ignores a redirect
    that is not on the allow-list and falls back to the Site URL, whose default
    is localhost.
-4. Authentication → Passkeys → enable, and set:
+4. Authentication → Emails → edit the **Magic Link** template so it includes the
+   code as well as the link: add `{{ .Token }}` somewhere in the body. Signing
+   in by code is the path that works inside an installed app — following the
+   link opens the phone's default browser, which for a home-screen app is a
+   separate place with its own storage, so the tab ends up signed in and the app
+   does not.
+5. Authentication → Passkeys → enable, and set:
    - **Relying Party ID** — the bare domain, no scheme or path
      (`singletrackevents.github.io`)
    - **Relying Party Origins** — the full origin
      (`https://singletrackevents.github.io`)
    - **Display Name** — what the phone shows during the prompt
-5. Authentication → Emails → SMTP Settings → connect a real email sender.
+6. Authentication → Emails → SMTP Settings → connect a real email sender.
    **The built-in one allows only a couple of messages an hour for the entire
    project.** Passkeys make this far less pressing — each person needs one email
    ever — but the first sign-in on every account still goes through it.

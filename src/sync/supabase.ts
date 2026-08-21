@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { SYNCED_TABLES, db } from '../db/db';
+import { getAuthNotice, setAuthNotice } from './authRedirect';
 import { cleanDisplayName, displayNameFromEmail } from './names';
 import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
@@ -356,9 +357,63 @@ export class SupabaseBackend implements SyncBackend {
   async currentSession(): Promise<Session | null> {
     const { data } = await this.client.auth.getSession();
     if (!data.session) return null;
-    const membership = await this.membership();
-    if (!membership) return null;
+
+    let membership = await this.membership();
+    if (!membership) {
+      // Arriving back from an email link: Supabase has authenticated the
+      // person, but nothing has claimed a membership for them yet. Without
+      // this the app finds an account it cannot describe and shows the sign-in
+      // screen to someone who is already signed in.
+      membership = await this.claimMembership(data.session.user.email ?? '');
+      if (!membership) return null;
+    }
     return sessionFrom(data.session.user, membership, data.session.access_token);
+  }
+
+  /**
+   * Claim a membership for the signed-in user. The first person to arrive
+   * becomes the admin; for anyone else this raises, and the reason is kept so
+   * the sign-in screen can explain rather than silently showing a login form.
+   */
+  private async claimMembership(email: string): Promise<MembershipRow | null> {
+    const { data, error } = await this.client.rpc('ensure_membership', {
+      p_display_name: displayNameFromEmail(email),
+    });
+    if (error) {
+      setAuthNotice(toSyncError(error.message).message);
+      return null;
+    }
+    return data as MembershipRow;
+  }
+
+  /**
+   * Finish a sign-in with the six-digit code from the email.
+   *
+   * This is the path that works everywhere. Following the link opens whatever
+   * the phone considers the default browser, which for an installed app is a
+   * different place with its own separate storage — so the tab that opens is
+   * signed in and the app on the home screen is not. Typing the code into the
+   * copy of the app you are actually using avoids the problem entirely.
+   */
+  async verifyEmailCode(email: string, code: string): Promise<Session> {
+    const { data, error } = await this.client.auth.verifyOtp({
+      email: email.trim().toLowerCase(),
+      token: code.replace(/\s+/g, ''),
+      type: 'email',
+    });
+    if (error) throw toSyncError(error.message);
+    if (!data.session || !data.user) {
+      throw new SyncError('That code did not work. Check it and try again.', 'auth');
+    }
+
+    const membership = await this.claimMembership(data.user.email ?? '');
+    if (!membership) {
+      throw new SyncError(
+        getAuthNotice() || 'No access yet — ask an admin for an invite.',
+        'permission',
+      );
+    }
+    return sessionFrom(data.user, membership, data.session.access_token);
   }
 
   /** The caller's own membership row, or null if they have not been granted one. */

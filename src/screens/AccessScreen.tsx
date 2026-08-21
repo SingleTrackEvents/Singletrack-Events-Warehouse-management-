@@ -278,28 +278,36 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
   const { backend, setSession } = useSession();
   const toast = useToast();
   const [email, setEmail] = useState('');
-  const [sent, setSent] = useState<{ email: string; devLink?: string }>();
+  const [sent, setSent] = useState<{ email: string; devLink?: string; devCode?: string }>();
+  const [code, setCode] = useState('');
   const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
 
   const send = async () => {
     if (!backend) return;
     setError(undefined);
+    setBusy(true);
     try {
       const challenge = await backend.signInWithEmail(email);
-      setSent({ email: challenge.email, devLink: challenge.devLink });
+      setSent({ email: challenge.email, devLink: challenge.devLink, devCode: challenge.devCode });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not send the link.');
+      setError(cause instanceof Error ? cause.message : 'Could not send the code.');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const complete = async (token: string) => {
-    if (!backend) return;
+  const finish = async (run: () => Promise<import('../sync/types').Session>) => {
+    setError(undefined);
+    setBusy(true);
     try {
-      setSession(await backend.completeEmailSignIn(token));
+      setSession(await run());
       toast('Signed in');
       onClose();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'That link did not work.');
+      setError(cause instanceof Error ? cause.message : 'That did not work.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -308,13 +316,32 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
       title="Sign in"
       onClose={onClose}
       footer={
-        sent ? undefined : (
+        sent ? (
+          <>
+            <button type="button" className="btn btn-outline" onClick={() => setSent(undefined)}>
+              Back
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={code.trim().length < 6 || busy || !backend?.verifyEmailCode}
+              onClick={() => void finish(() => backend!.verifyEmailCode!(sent.email, code))}
+            >
+              {busy ? 'Checking…' : 'Sign in'}
+            </button>
+          </>
+        ) : (
           <>
             <button type="button" className="btn btn-outline" onClick={onClose}>
               Cancel
             </button>
-            <button type="button" className="btn btn-primary" disabled={!email.trim()} onClick={() => void send()}>
-              Send link
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!email.trim() || busy}
+              onClick={() => void send()}
+            >
+              {busy ? 'Sending…' : 'Send code'}
             </button>
           </>
         )
@@ -323,32 +350,61 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
       {sent ? (
         <div className="stack">
           <p className="small">
-            A sign-in link is on its way to <span className="strong">{sent.email}</span>. Open it on
-            this phone and you are in — no password to remember.
+            Check <span className="strong">{sent.email}</span> and type the six-digit code from the
+            message.
           </p>
-          {sent.devLink ? (
+
+          {backend?.verifyEmailCode ? (
+            <Field label="Code from the email">
+              {(id) => (
+                <input
+                  id={id}
+                  className="input mono"
+                  style={{ fontSize: '1.6rem', letterSpacing: '0.35em', textAlign: 'center' }}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={8}
+                  autoFocus
+                  value={code}
+                  onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ''))}
+                />
+              )}
+            </Field>
+          ) : null}
+
+          {/*
+            Typing the code beats tapping the link on a phone. A link opens
+            whatever the phone treats as the default browser, and for an app
+            installed to the home screen that is a separate place with its own
+            storage — so the tab that opens ends up signed in while the app you
+            were using does not.
+          */}
+          <p className="tiny muted">
+            There is a link in the email too, but on a phone it opens a browser tab rather than this
+            app — and only the tab ends up signed in. The code is the reliable way.
+          </p>
+
+          {sent.devCode ? (
             <div className="card card-pad" style={{ background: 'var(--warn-bg)' }}>
               <p className="tiny strong" style={{ color: 'var(--warn)' }}>
                 Demo server
               </p>
               <p className="tiny mt-2">
-                There is no real inbox here, so the link is handed straight back. Tap to complete
-                sign-in.
+                No real inbox here. The code is <span className="mono strong">{sent.devCode}</span>.
               </p>
-              <button
-                type="button"
-                className="btn btn-primary btn-block mt-3"
-                onClick={() => void complete(sent.devLink!)}
-              >
-                Follow the link
-              </button>
             </div>
+          ) : null}
+
+          {error ? (
+            <p className="small" style={{ color: 'var(--danger)' }}>
+              {error}
+            </p>
           ) : null}
         </div>
       ) : (
         <div className="stack">
           <LinkFailureNotice />
-          <Field label="Email" hint="We send a link — there is no password to set or share.">
+          <Field label="Email" hint="We send a six-digit code — no password to set or share.">
             {(id) => (
               <input
                 id={id}

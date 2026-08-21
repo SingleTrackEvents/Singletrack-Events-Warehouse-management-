@@ -82,6 +82,8 @@ export interface SignInChallenge {
    * can be exercised without an inbox. A real backend leaves this undefined.
    */
   devLink?: string;
+  /** Development only: the code the mock will accept. */
+  devCode?: string;
 }
 
 /* ---------------------------------------------------------------- invites -- */
@@ -174,6 +176,13 @@ export interface SyncBackend {
 
   /** Finish an email sign-in from the token in the link. */
   completeEmailSignIn(token: string): Promise<Session>;
+
+  /**
+   * Finish an email sign-in with the code from the message instead of the link.
+   * Works inside an installed app, where following a link lands in a different
+   * browser with its own storage.
+   */
+  verifyEmailCode?(email: string, code: string): Promise<Session>;
 
   /** Join from an invite QR, supplying only a display name. */
   joinWithInvite(token: string, displayName: string): Promise<Session>;

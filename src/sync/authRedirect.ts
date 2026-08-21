@@ -78,6 +78,22 @@ export function getAuthRedirect(): AuthRedirect {
   return captured;
 }
 
+/**
+ * Record why a sign-in did not fully succeed, so the sign-in screen can say so.
+ *
+ * Used when someone is authenticated but has no access yet — showing them a
+ * plain login form in that state is the most confusing possible response,
+ * because the thing it asks them to do is the thing they just did.
+ */
+export function setAuthNotice(message: string): void {
+  captured = { code: 'no_access', message };
+}
+
+/** The current notice, if any. */
+export function getAuthNotice(): string | null {
+  return captured.message;
+}
+
 export function clearAuthRedirect(): void {
   captured = EMPTY;
 }

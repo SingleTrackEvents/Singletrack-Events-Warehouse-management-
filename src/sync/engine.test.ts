@@ -372,6 +372,35 @@ describe('invites and volunteer access', () => {
   });
 });
 
+describe('signing in with a code instead of a link', () => {
+  it('accepts the code from the email', async () => {
+    const challenge = await backend.signInWithEmail('jess@singletrack.test');
+    const session = await backend.verifyEmailCode('jess@singletrack.test', challenge.devCode!);
+
+    expect(session.email).toBe('jess@singletrack.test');
+    expect(session.role).toBe('admin');
+  });
+
+  it('rejects the wrong code', async () => {
+    await backend.signInWithEmail('jess@singletrack.test');
+    await expect(backend.verifyEmailCode('jess@singletrack.test', '000000')).rejects.toThrow(
+      /did not work/i,
+    );
+  });
+
+  it('ignores spacing in a code someone has typed out', async () => {
+    const challenge = await backend.signInWithEmail('jess@singletrack.test');
+    const spaced = challenge.devCode!.replace(/(\d{3})(\d{3})/, '$1 $2');
+    await expect(backend.verifyEmailCode('jess@singletrack.test', spaced)).resolves.toBeTruthy();
+  });
+
+  it('leaves the device signed in afterwards, as following a link would', async () => {
+    const challenge = await backend.signInWithEmail('jess@singletrack.test');
+    await backend.verifyEmailCode('jess@singletrack.test', challenge.devCode!);
+    expect(await backend.currentSession()).not.toBeNull();
+  });
+});
+
 describe('naming yourself', () => {
   it('guesses a sensible name from the email to start with', async () => {
     const challenge = await backend.signInWithEmail('jess.nolan@singletrack.test');

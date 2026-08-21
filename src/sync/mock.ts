@@ -99,6 +99,13 @@ function roleForEmail(): Role {
   return 'admin';
 }
 
+/** A stable six-digit code for an address, standing in for an emailed one. */
+function codeFor(email: string): string {
+  let hash = 0;
+  for (const char of email) hash = (hash * 31 + char.charCodeAt(0)) % 1_000_000;
+  return String(hash).padStart(6, '0');
+}
+
 /** Short, unambiguous invite token, e.g. "J7QM-4KTP". */
 function inviteToken(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRTUVWXY346789';
@@ -123,9 +130,19 @@ export class MockBackend implements SyncBackend {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) {
       throw new SyncError('That does not look like an email address.', 'invalid');
     }
-    // A real backend emails this; the mock hands it back so the flow is testable.
+    // A real backend emails these; the mock hands them back so the flow is
+    // testable without an inbox. The code is derived from the address so it
+    // stays the same across a reload.
     const token = `email:${address}`;
-    return { sent: true, email: address, devLink: token };
+    return { sent: true, email: address, devLink: token, devCode: codeFor(address) };
+  }
+
+  async verifyEmailCode(email: string, code: string): Promise<Session> {
+    const address = email.trim().toLowerCase();
+    if (code.replace(/\s+/g, '') !== codeFor(address)) {
+      throw new SyncError('That code did not work. Check it and try again.', 'auth');
+    }
+    return this.completeEmailSignIn(`email:${address}`);
   }
 
   async completeEmailSignIn(token: string): Promise<Session> {
