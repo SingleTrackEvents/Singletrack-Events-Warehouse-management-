@@ -192,6 +192,12 @@ export interface SyncBackend {
   listPasskeys?(): Promise<Passkey[]>;
   deletePasskey?(passkeyId: string): Promise<void>;
 
+  /**
+   * Change the name shown on this account. A name guessed from an email is a
+   * starting point, not an answer — plenty of work addresses are not names.
+   */
+  setDisplayName?(name: string): Promise<Session>;
+
   /** Send local changes. Must be safe to call repeatedly with the same rows. */
   push(session: Session, changes: ChangeSet): Promise<PushResult>;
 

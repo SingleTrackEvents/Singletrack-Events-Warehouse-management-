@@ -4,6 +4,7 @@ import { ALL_TABLES, newId, nowIso } from '../db/db';
 import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import { shouldReplace } from '../domain/backup';
+import { cleanDisplayName, displayNameFromEmail } from './names';
 import { inScope, writableTables } from './permissions';
 import type {
   ChangeSet,
@@ -98,15 +99,6 @@ function roleForEmail(): Role {
   return 'admin';
 }
 
-function displayNameFromEmail(email: string): string {
-  const [name] = email.split('@');
-  return name
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
 /** Short, unambiguous invite token, e.g. "J7QM-4KTP". */
 function inviteToken(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRTUVWXY346789';
@@ -185,6 +177,15 @@ export class MockBackend implements SyncBackend {
 
   async signOut(): Promise<void> {
     saveSession(null);
+  }
+
+  async setDisplayName(name: string): Promise<Session> {
+    const current = loadSession();
+    if (!current) throw new SyncError('Not signed in.', 'auth');
+    const next = { ...current, displayName: cleanDisplayName(name) || current.displayName };
+    saveSession(next);
+    await server.sessions.put({ ...next, key: next.token });
+    return next;
   }
 
   async push(session: Session, changes: ChangeSet): Promise<PushResult> {

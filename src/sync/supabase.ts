@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { SYNCED_TABLES, db } from '../db/db';
+import { cleanDisplayName, displayNameFromEmail } from './names';
 import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import type {
@@ -191,7 +192,8 @@ export function fromWire(rows: Array<{ table_name: TableName; data: SyncMeta }>)
 function sessionFrom(user: User, membership: MembershipRow, token: string): Session {
   return {
     userId: user.id,
-    displayName: membership.display_name || user.email?.split('@')[0] || 'Crew',
+    displayName:
+      membership.display_name || displayNameFromEmail(user.email ?? '') || 'Crew',
     email: user.email ?? null,
     role: membership.role,
     scope: { eventId: membership.event_id, destinationId: membership.destination_id },
@@ -393,10 +395,26 @@ export class SupabaseBackend implements SyncBackend {
     // The first person to sign in becomes the admin; everyone else needs an
     // invite, and this raises for them.
     const { data: membership, error } = await this.client.rpc('ensure_membership', {
-      p_display_name: data.session.user.email?.split('@')[0] ?? '',
+      p_display_name: displayNameFromEmail(data.session.user.email ?? ''),
     });
     if (error) throw toSyncError(error.message);
     return sessionFrom(data.session.user, membership as MembershipRow, data.session.access_token);
+  }
+
+  /** Rename this account. */
+  async setDisplayName(name: string): Promise<Session> {
+    const { data: sessionData } = await this.client.auth.getSession();
+    if (!sessionData.session) throw new SyncError('Not signed in.', 'auth');
+
+    const { data, error } = await this.client.rpc('update_display_name', {
+      p_display_name: cleanDisplayName(name),
+    });
+    if (error) throw toSyncError(error.message);
+    return sessionFrom(
+      sessionData.session.user,
+      data as MembershipRow,
+      sessionData.session.access_token,
+    );
   }
 
   /**

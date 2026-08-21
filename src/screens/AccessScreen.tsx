@@ -32,6 +32,7 @@ export default function AccessScreen() {
   const [signingOut, setSigningOut] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyError, setPasskeyError] = useState<string>();
+  const [renaming, setRenaming] = useState(false);
 
   const invites = useLiveQuery(async () => {
     if (!backend || !session || session.role !== 'admin') return [] as Invite[];
@@ -175,6 +176,11 @@ export default function AccessScreen() {
           </div>
           <Pill tone={session.role === 'admin' ? 'ok' : 'info'}>{ROLE_LABELS[session.role]}</Pill>
         </div>
+        {backend.setDisplayName ? (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRenaming(true)}>
+            ✎ Change my name
+          </button>
+        ) : null}
         <p className="tiny muted">{ROLE_BLURBS[session.role]}</p>
         <ul className="small muted mt-2" style={{ paddingLeft: '1.1em', margin: 0 }}>
           {describeRole(session.role).map((line) => (
@@ -241,6 +247,8 @@ export default function AccessScreen() {
       </button>
 
       {inviting ? <InviteSheet onClose={() => setInviting(false)} /> : null}
+
+      {renaming ? <RenameSheet onClose={() => setRenaming(false)} /> : null}
 
       {signingOut ? (
         <ConfirmSheet
@@ -362,6 +370,71 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
           ) : null}
         </div>
       )}
+    </Sheet>
+  );
+}
+
+/**
+ * Change the name the crew see against your work.
+ *
+ * The name guessed from an email is only ever a guess — "info@" and
+ * "chad471@" are not names — and it is what shows on every packlist, count and
+ * delivery signature, so it needs to be correctable.
+ */
+function RenameSheet({ onClose }: { onClose: () => void }) {
+  const { backend, session, setSession } = useSession();
+  const toast = useToast();
+  const [name, setName] = useState(session?.displayName ?? '');
+  const [error, setError] = useState<string>();
+
+  return (
+    <Sheet
+      title="Change my name"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!name.trim()}
+            onClick={() => {
+              void backend
+                ?.setDisplayName?.(name)
+                .then((next) => {
+                  setSession(next);
+                  toast('Name updated');
+                  onClose();
+                })
+                .catch((cause: unknown) =>
+                  setError(cause instanceof Error ? cause.message : 'Could not save that.'),
+                );
+            }}
+          >
+            Save
+          </button>
+        </>
+      }
+    >
+      <Field label="Your name" hint="Shown on packlists, counts and delivery signatures.">
+        {(id) => (
+          <input
+            id={id}
+            className="input"
+            autoFocus
+            autoCapitalize="words"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        )}
+      </Field>
+      {error ? (
+        <p className="small mt-3" style={{ color: 'var(--danger)' }}>
+          {error}
+        </p>
+      ) : null}
     </Sheet>
   );
 }

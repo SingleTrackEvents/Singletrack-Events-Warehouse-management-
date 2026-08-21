@@ -218,6 +218,10 @@ offering the button.
 
 The first person to sign in becomes the admin; everyone after needs an invite.
 
+**If you have already run the schema**, run it again after pulling — it adds an
+`update_display_name` function so people can correct the name guessed from their
+email. It is re-runnable, so running the whole file again is safe.
+
 **The server is a sync log, not a query surface.** One `records` table keyed by
 `(table_name, id)`, with `event_id` and `destination_id` lifted out as columns
 purely so policies can filter on them. The app queries its local database and

@@ -372,6 +372,38 @@ describe('invites and volunteer access', () => {
   });
 });
 
+describe('naming yourself', () => {
+  it('guesses a sensible name from the email to start with', async () => {
+    const challenge = await backend.signInWithEmail('jess.nolan@singletrack.test');
+    const session = await backend.completeEmailSignIn(challenge.devLink!);
+    expect(session.displayName).toBe('Jess Nolan');
+  });
+
+  it('lets someone correct the guess', async () => {
+    await adminSession();
+    const renamed = await backend.setDisplayName('Chad Freeman');
+
+    expect(renamed.displayName).toBe('Chad Freeman');
+    // And it sticks across a reload, since the crew see it on every packlist.
+    expect((await backend.currentSession())!.displayName).toBe('Chad Freeman');
+  });
+
+  it('keeps the role and scope untouched when renaming', async () => {
+    const before = await adminSession();
+    const after = await backend.setDisplayName('Someone Else');
+
+    expect(after.role).toBe(before.role);
+    expect(after.scope).toEqual(before.scope);
+    expect(after.userId).toBe(before.userId);
+  });
+
+  it('ignores an empty name rather than blanking the account', async () => {
+    const before = await adminSession();
+    const after = await backend.setDisplayName('   ');
+    expect(after.displayName).toBe(before.displayName);
+  });
+});
+
 describe('email sign-in', () => {
   it('rejects something that is not an email', async () => {
     await expect(backend.signInWithEmail('not-an-email')).rejects.toThrow(/email address/i);

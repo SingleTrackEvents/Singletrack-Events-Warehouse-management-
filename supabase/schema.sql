@@ -239,6 +239,36 @@ begin
 end;
 $$;
 
+-- Rename yourself.
+--
+-- Writes to memberships are otherwise admin-only, so this is a narrow
+-- security-definer door that can change one column on one row: the caller's own
+-- display name. It cannot touch role, scope or expiry.
+create or replace function public.update_display_name(p_display_name text)
+returns public.memberships
+language plpgsql security definer set search_path = public as $$
+declare
+  updated public.memberships;
+begin
+  if auth.uid() is null then
+    raise exception 'Not signed in';
+  end if;
+  if coalesce(trim(p_display_name), '') = '' then
+    raise exception 'Please enter a name';
+  end if;
+
+  update public.memberships
+  set display_name = left(trim(p_display_name), 120)
+  where user_id = auth.uid()
+  returning * into updated;
+
+  if not found then
+    raise exception 'No access yet — ask an admin for an invite';
+  end if;
+  return updated;
+end;
+$$;
+
 -- Turn an invite token into a scoped membership for the caller.
 create or replace function public.redeem_invite(p_token text, p_display_name text)
 returns public.memberships
@@ -375,6 +405,7 @@ revoke all on function public.push_records(jsonb) from public;
 grant execute on function public.push_records(jsonb) to authenticated;
 grant execute on function public.ensure_membership(text) to authenticated;
 grant execute on function public.redeem_invite(text, text) to authenticated;
+grant execute on function public.update_display_name(text) to authenticated;
 
 -- Older deployments had a laxer scope check; remove it so nothing calls it.
 drop function if exists public.in_my_scope(text, text);
