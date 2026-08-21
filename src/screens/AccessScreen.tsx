@@ -4,6 +4,7 @@ import { QrCode } from '../components/QrCode';
 import { ConfirmSheet, Field, Pill, Sheet } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { useSession } from '../hooks/sessionContext';
+import { SUPABASE_CONFIGURED } from '../sync';
 import { useDestinations, useEvents } from '../hooks/useDb';
 import { describeRole } from '../sync/permissions';
 import { ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
@@ -22,7 +23,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
  * set up an account.
  */
 export default function AccessScreen() {
-  const { backend, session, connectDemo, disconnect, setSession, sync, pending, phase, lastSyncAt, lastError } =
+  const { backend, session, connectDemo, connectServer, disconnect, setSession, sync, pending, phase, lastSyncAt, lastError } =
     useSession();
   const toast = useToast();
   const [signingIn, setSigningIn] = useState(false);
@@ -45,26 +46,36 @@ export default function AccessScreen() {
           </p>
         </div>
 
-        <div className="card card-pad">
+        <div className="card card-pad mb-3">
           <h3>Turn on sync</h3>
           <p className="small muted mt-2 mb-3">
             A shared database lets the warehouse, the drivers and each aid station work from the same
             live packlists, with different levels of access.
           </p>
-          <div className="card card-pad mb-3" style={{ background: 'var(--warn-bg)' }}>
-            <p className="small strong" style={{ color: 'var(--warn)' }}>
-              No hosted backend is connected yet.
-            </p>
-            <p className="tiny mt-2">
-              You can switch on an <span className="strong">on-device demo server</span> to try the
-              sign-in, roles and invite flow end to end. It stores data on this phone only, so it
-              will not move anything between devices — that needs the real backend.
-            </p>
-          </div>
-          <button type="button" className="btn btn-primary btn-block" onClick={connectDemo}>
-            Try the demo server
+          <button
+            type="button"
+            className="btn btn-primary btn-lg btn-block"
+            disabled={!SUPABASE_CONFIGURED}
+            onClick={() => void connectServer()}
+          >
+            ☁️ Connect to the SingleTrack server
           </button>
+          <p className="tiny muted mt-2">
+            The first person to sign in becomes the admin. Everyone after that needs an invite.
+          </p>
         </div>
+
+        <details className="card card-pad">
+          <summary className="small strong">Try it without a server</summary>
+          <p className="tiny muted mt-3">
+            The <span className="strong">on-device demo server</span> exercises the sign-in, roles
+            and invite flow without touching the real database. It stores everything on this phone,
+            so it will not move data between devices.
+          </p>
+          <button type="button" className="btn btn-outline btn-block mt-3" onClick={connectDemo}>
+            Use the demo server
+          </button>
+        </details>
       </Screen>
     );
   }

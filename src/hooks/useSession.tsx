@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { BACKEND_ENABLED_KEY, connectDemoBackend, getBackend, restoreBackend, setBackend } from '../sync';
+import {
+  BACKEND_ENABLED_KEY,
+  connectDemoBackend,
+  connectSupabase,
+  getBackend,
+  restoreBackend,
+  setBackend,
+} from '../sync';
 import { SessionContext } from './sessionContext';
 import type { SessionContextValue } from './sessionContext';
 import { getLastSync, markAllDirty, pendingCount, resetCursor, runSync } from '../sync/engine';
@@ -60,6 +67,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setBackendState(created);
   }, []);
 
+  const connectServer = useCallback(async () => {
+    const created = connectSupabase();
+    localStorage.setItem(BACKEND_ENABLED_KEY, 'supabase');
+    setBackendState(created);
+    // Following an email link lands back here with a session already live.
+    setSessionState(await created.currentSession());
+  }, []);
+
   const disconnect = useCallback(async () => {
     await getBackend()?.signOut();
     setBackend(null);
@@ -93,10 +108,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SessionContextValue>(
     () => ({
       backend, session, ready, phase, pending, lastSyncAt, lastError,
-      connectDemo, disconnect, setSession: applySession, sync, refreshPending,
+      connectDemo, connectServer, disconnect, setSession: applySession, sync, refreshPending,
     }),
     [backend, session, ready, phase, pending, lastSyncAt, lastError,
-     connectDemo, disconnect, applySession, sync, refreshPending],
+     connectDemo, connectServer, disconnect, applySession, sync, refreshPending],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

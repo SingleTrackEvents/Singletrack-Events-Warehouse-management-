@@ -1,4 +1,4 @@
-import { ALL_TABLES, db, nowIso } from '../db/db';
+import { ALL_TABLES, SYNCED_TABLES, db, nowIso } from '../db/db';
 import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import { shouldReplace } from '../domain/backup';
@@ -60,7 +60,7 @@ export interface SyncStatus {
 export async function collectOutbox(session: Session | null): Promise<ChangeSet> {
   const allowed = writableTables(session);
   const changes: ChangeSet = {};
-  for (const table of ALL_TABLES) {
+  for (const table of SYNCED_TABLES) {
     if (allowed !== 'all' && !allowed.includes(table)) continue;
     const rows = (await db[table].toArray()) as SyncMeta[];
     const dirty = rows.filter((row) => row.syncedAt === null).slice(0, BATCH);

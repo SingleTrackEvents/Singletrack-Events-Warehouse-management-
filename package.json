@@ -14,6 +14,7 @@
     "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "dexie": "^4.4.5",
     "dexie-react-hooks": "^4.4.0",
     "jsqr": "^1.4.0",

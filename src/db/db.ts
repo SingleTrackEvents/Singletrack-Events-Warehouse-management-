@@ -135,6 +135,15 @@ export const ALL_TABLES = [
 
 export type TableName = (typeof ALL_TABLES)[number];
 
+/**
+ * Tables that travel between devices.
+ *
+ * `settings` is deliberately excluded: it holds the crew member's own name,
+ * theme and vehicle list, which belong to the phone rather than the warehouse.
+ * Syncing it would have one person's dark mode follow everyone around.
+ */
+export const SYNCED_TABLES = ALL_TABLES.filter((table) => table !== 'settings');
+
 export const SETTINGS_ID = 'settings';
 
 export function defaultSettings(): Settings {

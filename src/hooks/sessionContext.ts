@@ -17,6 +17,7 @@ export interface SessionContextValue {
   lastSyncAt: string | null;
   lastError: string | null;
   connectDemo: () => void;
+  connectServer: () => Promise<void>;
   disconnect: () => Promise<void>;
   setSession: (session: Session | null) => void;
   sync: () => Promise<void>;
@@ -32,6 +33,7 @@ export const SessionContext = createContext<SessionContextValue>({
   lastSyncAt: null,
   lastError: null,
   connectDemo: () => {},
+  connectServer: async () => {},
   disconnect: async () => {},
   setSession: () => {},
   sync: async () => {},

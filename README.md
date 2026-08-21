@@ -95,7 +95,8 @@ src/
   hooks/       Live queries (Dexie useLiveQuery) and search
   components/  Shared UI — sheets, steppers, toasts, scanner, QR codes
   screens/     One file per screen, lazily routed
-  sync/        Backend contract, role permissions, sync engine, mock server
+  sync/        Backend contract, role permissions, sync engine, Supabase adapter
+supabase/      Database schema and row-level security policies
   styles/      Design tokens and component CSS
 ```
 
@@ -104,7 +105,7 @@ against the real Dexie stack on a fake IndexedDB, so transactions and indexes ar
 exercised rather than mocked.
 
 ```bash
-npm test    # 145 tests
+npm test    # 160 tests
 ```
 
 ## Design notes
@@ -168,24 +169,46 @@ station and type their name — no inbox, no password, nothing to remember, beca
 race morning is the worst possible time to make someone set up an account. Invites
 are scoped to one destination and expire after the weekend.
 
-### Adding a real backend
+### The Supabase backend
 
 `src/sync/types.ts` defines a `SyncBackend` interface; everything above it —
-screens, engine, permission checks — is written against that and not against any
-particular vendor. Today the only implementation is `MockBackend`, a stand-in
-that stores rows in its own IndexedDB and applies the same conflict rule and the
-same permission checks a server will. That makes the engine and the role model
-genuinely testable, but it **cannot move data between devices** — the one thing a
-real backend is for.
+screens, engine, permission checks — is written against that rather than a
+vendor. Two implementations exist: `MockBackend` (an on-device stand-in for
+trying the flow) and `SupabaseBackend`.
 
-To go live, add an adapter implementing that interface (Supabase is the obvious
-fit: Postgres, auth, row-level security, a Sydney region) and register it in
-`src/sync/index.ts`. No caller changes.
+**Setup, once:** open the Supabase SQL editor and run `supabase/schema.sql`
+whole. It is re-runnable. Then, in Authentication → Providers, enable **Email**
+(magic links) and **Anonymous sign-ins** — volunteers get an anonymous account
+behind the scenes so they never have to make one.
+
+The first person to sign in becomes the admin; everyone after needs an invite.
+
+**The server is a sync log, not a query surface.** One `records` table keyed by
+`(table_name, id)`, with `event_id` and `destination_id` lifted out as columns
+purely so policies can filter on them. The app queries its local database and
+never this one, so mirroring the relational shape would buy nothing and cost a
+great deal of schema and migration risk.
+
+Conflict resolution lives in the `push_records` function rather than the client,
+because two phones can push at once and only the database can settle that safely.
+
+**Security note.** The browser holds only a publishable key, so the row-level
+security policies in `supabase/schema.sql` *are* the access control — the checks
+in `src/sync/permissions.ts` only shape the UI. Two things worth understanding
+before trusting it:
+
+- Scope columns are supplied by the client, so `row_in_scope` is deliberately
+  strict: a scoped user is denied any row whose own scope is null, rather than
+  treating null as "applies everywhere".
+- `push_records` is `security definer`, so it repeats by hand every check the
+  policies would have made. Change one and you must change the other.
 
 Still to do before a real race:
-- The Supabase adapter and matching row-level security policies.
+- **Test it with two real phones.** The adapter is written and its mapping is
+  unit-tested, but it has never spoken to the live project — this environment
+  cannot reach `supabase.co`.
 - Per-screen gating beyond the navigation tabs — the permission model exists and
-  the backend refuses disallowed writes, but individual screens do not yet hide
+  the server refuses disallowed writes, but individual screens do not yet hide
   every control a limited role cannot use.
 - Realtime updates, so a change appears without waiting for the next sync.
 
