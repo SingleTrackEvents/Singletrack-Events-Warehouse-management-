@@ -176,10 +176,17 @@ screens, engine, permission checks — is written against that rather than a
 vendor. Two implementations exist: `MockBackend` (an on-device stand-in for
 trying the flow) and `SupabaseBackend`.
 
-**Setup, once:** open the Supabase SQL editor and run `supabase/schema.sql`
-whole. It is re-runnable. Then, in Authentication → Providers, enable **Email**
-(magic links) and **Anonymous sign-ins** — volunteers get an anonymous account
-behind the scenes so they never have to make one.
+**Setup, once:**
+
+1. Supabase → SQL Editor → run `supabase/schema.sql` whole. It is re-runnable.
+2. Authentication → Providers → enable **Email** (magic links) and **Anonymous
+   sign-ins**. Volunteers get an anonymous account behind the scenes so they
+   never have to make one.
+3. Authentication → URL Configuration → set **Site URL** to where the app is
+   served, and add the same URL under **Redirect URLs**. Miss this and sign-in
+   links bounce to `http://localhost:3000`: Supabase silently ignores a redirect
+   that is not on the allow-list and falls back to the Site URL, whose default
+   is localhost.
 
 The first person to sign in becomes the admin; everyone after needs an invite.
 

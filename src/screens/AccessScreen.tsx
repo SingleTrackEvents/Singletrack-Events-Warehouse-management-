@@ -5,6 +5,7 @@ import { ConfirmSheet, Field, Pill, Sheet } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { useSession } from '../hooks/sessionContext';
 import { SUPABASE_CONFIGURED } from '../sync';
+import { clearAuthRedirect, getAuthRedirect } from '../sync/authRedirect';
 import { useDestinations, useEvents } from '../hooks/useDb';
 import { describeRole } from '../sync/permissions';
 import { ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
@@ -83,6 +84,7 @@ export default function AccessScreen() {
   if (!session) {
     return (
       <Screen title="Sign in" back="/more">
+        <LinkFailureNotice />
         <div className="card card-pad mb-3">
           <p className="small muted">
             Connected to <span className="strong">{backend.name}</span>
@@ -276,6 +278,7 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
         </div>
       ) : (
         <div className="stack">
+          <LinkFailureNotice />
           <Field label="Email" hint="We send a link — there is no password to set or share.">
             {(id) => (
               <input
@@ -299,6 +302,33 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Sheet>
+  );
+}
+
+/**
+ * Explains a failed email link instead of dropping someone on the home screen
+ * wondering why nothing happened.
+ */
+function LinkFailureNotice() {
+  const [failure, setFailure] = useState(getAuthRedirect());
+  if (!failure.message) return null;
+  return (
+    <div className="card card-pad mb-3" style={{ background: 'var(--danger-bg)' }}>
+      <p className="small strong" style={{ color: 'var(--danger)' }}>
+        That sign-in link did not work
+      </p>
+      <p className="tiny mt-2">{failure.message}</p>
+      <button
+        type="button"
+        className="btn btn-outline btn-sm mt-3"
+        onClick={() => {
+          clearAuthRedirect();
+          setFailure({ code: null, message: null });
+        }}
+      >
+        Dismiss
+      </button>
+    </div>
   );
 }
 
