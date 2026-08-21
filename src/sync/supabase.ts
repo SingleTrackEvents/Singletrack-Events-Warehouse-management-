@@ -201,11 +201,29 @@ function sessionFrom(user: User, membership: MembershipRow, token: string): Sess
   };
 }
 
-/** Turn a Postgres error into something worth showing a person. */
-function toSyncError(message: string): SyncError {
+/**
+ * Turn a server error into something worth showing a person.
+ *
+ * The rate-limit case matters most: Supabase's built-in email service allows
+ * only a couple of messages an hour across the whole project, and its raw
+ * message does not say that — so someone retrying a failed sign-in burns
+ * through the allowance in under a minute and has no idea why.
+ */
+export function toSyncError(message: string): SyncError {
   const text = message.replace(/^.*?:\s*/, '');
-  if (/invite/i.test(text)) return new SyncError(text, 'auth');
+
+  if (/rate limit/i.test(text) || /too many requests/i.test(text)) {
+    return new SyncError(
+      'Too many sign-in emails have been requested. The built-in email service only allows a couple an hour, ' +
+        'and the limit covers the whole project — trying a different address will not help. ' +
+        'Wait about an hour and request one link, or set up a proper email sender in Supabase to remove the limit.',
+      'auth',
+    );
+  }
+  // Order matters: the no-access message ends "...ask an admin for an invite",
+  // so it has to be matched before the invite rule or it lands in the wrong bucket.
   if (/no access/i.test(text)) return new SyncError(text, 'permission');
+  if (/invite/i.test(text)) return new SyncError(text, 'auth');
   if (/not signed in/i.test(text)) return new SyncError(text, 'auth');
   return new SyncError(text || 'Something went wrong talking to the server.', 'network');
 }

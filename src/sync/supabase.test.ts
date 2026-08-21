@@ -186,3 +186,36 @@ describe('wire format', () => {
     expect(round).toEqual(original);
   });
 });
+
+describe('error messages', () => {
+  it('explains the email rate limit, which the raw message does not', async () => {
+    const { toSyncError } = await import('./supabase');
+    const error = toSyncError('AuthApiError: email rate limit exceeded');
+
+    expect(error.kind).toBe('auth');
+    // The three things someone actually needs to know.
+    expect(error.message).toMatch(/couple an hour/i);
+    expect(error.message).toMatch(/whole project/i);
+    expect(error.message).toMatch(/wait about an hour/i);
+  });
+
+  it('also catches the plain 429 wording', async () => {
+    const { toSyncError } = await import('./supabase');
+    expect(toSyncError('Too Many Requests').kind).toBe('auth');
+  });
+
+  it('keeps invite failures as auth problems', async () => {
+    const { toSyncError } = await import('./supabase');
+    expect(toSyncError('That invite has expired').kind).toBe('auth');
+  });
+
+  it('treats a missing membership as a permission problem', async () => {
+    const { toSyncError } = await import('./supabase');
+    expect(toSyncError('No access yet — ask an admin for an invite').kind).toBe('permission');
+  });
+
+  it('falls back to something readable for an empty error', async () => {
+    const { toSyncError } = await import('./supabase');
+    expect(toSyncError('').message).toMatch(/went wrong/i);
+  });
+});

@@ -187,6 +187,11 @@ trying the flow) and `SupabaseBackend`.
    links bounce to `http://localhost:3000`: Supabase silently ignores a redirect
    that is not on the allow-list and falls back to the Site URL, whose default
    is localhost.
+4. Authentication → Emails → SMTP Settings → connect a real email sender.
+   **The built-in one allows only a couple of messages an hour for the entire
+   project**, which is fine for a first test and useless the moment a second
+   person tries to sign in. Any transactional provider works; the free tiers are
+   far more than a race weekend needs.
 
 The first person to sign in becomes the admin; everyone after needs an invite.
 
