@@ -139,6 +139,17 @@ export interface PullResult {
   more: boolean;
 }
 
+/* --------------------------------------------------------------- passkeys -- */
+
+/** A passkey registered against an account, as shown in the access screen. */
+export interface Passkey {
+  id: string;
+  /** What the person called it: "Jess's iPhone". */
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
 /* ---------------------------------------------------------------- backend -- */
 
 export interface SyncBackend {
@@ -150,6 +161,12 @@ export interface SyncBackend {
   /** The stored session, if the device is already signed in. */
   currentSession(): Promise<Session | null>;
 
+  /**
+   * Whether this backend can do passkeys. Checked before offering them, since
+   * it depends on both the backend and the device having support.
+   */
+  readonly supportsPasskeys: boolean;
+
   /** Start an email sign-in. The user completes it by following the link. */
   signInWithEmail(email: string): Promise<SignInChallenge>;
 
@@ -160,6 +177,18 @@ export interface SyncBackend {
   joinWithInvite(token: string, displayName: string): Promise<Session>;
 
   signOut(): Promise<void>;
+
+  /**
+   * Sign in with a passkey — face, fingerprint or device PIN. No email, so
+   * nothing to deliver and nothing to wait for.
+   */
+  signInWithPasskey?(): Promise<Session>;
+
+  /** Add a passkey to the device currently signed in. */
+  registerPasskey?(name: string): Promise<Passkey>;
+
+  listPasskeys?(): Promise<Passkey[]>;
+  deletePasskey?(passkeyId: string): Promise<void>;
 
   /** Send local changes. Must be safe to call repeatedly with the same rows. */
   push(session: Session, changes: ChangeSet): Promise<PushResult>;

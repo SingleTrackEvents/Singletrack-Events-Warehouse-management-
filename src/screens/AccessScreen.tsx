@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Screen } from '../App';
 import { QrCode } from '../components/QrCode';
 import { ConfirmSheet, Field, Pill, Sheet } from '../components/ui';
@@ -9,7 +9,7 @@ import { clearAuthRedirect, getAuthRedirect } from '../sync/authRedirect';
 import { useDestinations, useEvents } from '../hooks/useDb';
 import { describeRole } from '../sync/permissions';
 import { ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
-import type { Invite, Role, Scope } from '../sync/types';
+import type { Invite, Passkey as PasskeyType, Role, Scope } from '../sync/types';
 import { formatDateTime, plural } from '../domain/format';
 import { joinUrl } from '../domain/codes';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -30,6 +30,8 @@ export default function AccessScreen() {
   const [signingIn, setSigningIn] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string>();
 
   const invites = useLiveQuery(async () => {
     if (!backend || !session || session.role !== 'admin') return [] as Invite[];
@@ -91,7 +93,45 @@ export default function AccessScreen() {
             {backend.isReal ? '' : ' — a stand-in for trying the flow, not a real server.'}
           </p>
         </div>
-        <button type="button" className="btn btn-primary btn-lg btn-block mb-3" onClick={() => setSigningIn(true)}>
+        {backend.supportsPasskeys && backend.signInWithPasskey ? (
+          <>
+            <button
+              type="button"
+              className="btn btn-primary btn-lg btn-block mb-2"
+              disabled={passkeyBusy}
+              onClick={() => {
+                setPasskeyBusy(true);
+                setPasskeyError(undefined);
+                void backend
+                  .signInWithPasskey!()
+                  .then((next) => {
+                    setSession(next);
+                    toast(`Signed in as ${next.displayName}`);
+                  })
+                  .catch((cause: unknown) => {
+                    setPasskeyError(cause instanceof Error ? cause.message : 'That did not work.');
+                  })
+                  .finally(() => setPasskeyBusy(false));
+              }}
+            >
+              {passkeyBusy ? 'Waiting…' : '🔑 Sign in with a passkey'}
+            </button>
+            <p className="tiny muted center mb-4">
+              Face, fingerprint or your device PIN. No email, nothing to wait for.
+            </p>
+            {passkeyError ? (
+              <p className="small center mb-3" style={{ color: 'var(--danger)' }}>
+                {passkeyError}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        <button
+          type="button"
+          className={`btn btn-block mb-3 ${backend.supportsPasskeys ? 'btn-outline' : 'btn-primary btn-lg'}`}
+          onClick={() => setSigningIn(true)}
+        >
           ✉️ Sign in with email
         </button>
         <p className="small muted center">
@@ -152,6 +192,8 @@ export default function AccessScreen() {
           {phase === 'pushing' || phase === 'pulling' ? 'Syncing…' : '↻ Sync now'}
         </button>
       </div>
+
+      <PasskeySection />
 
       {session.role === 'admin' ? (
         <section className="section">
@@ -302,6 +344,128 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Sheet>
+  );
+}
+
+/**
+ * Passkeys for the signed-in account.
+ *
+ * Registering needs a live session, so the first sign-in on an account is still
+ * by email — but only ever once. After a passkey is added, that device signs in
+ * with a face or a fingerprint and never touches email again.
+ */
+function PasskeySection() {
+  const { backend, session } = useSession();
+  const toast = useToast();
+  const [passkeys, setPasskeys] = useState<PasskeyType[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const [removing, setRemoving] = useState<PasskeyType>();
+
+  // Bumped to re-read the list after adding or removing one.
+  const [reloads, setReloads] = useState(0);
+  const refresh = useCallback(() => setReloads((n) => n + 1), []);
+
+  useEffect(() => {
+    if (!backend?.listPasskeys) return;
+    // Guarded so a slow response cannot land after the section unmounts, or
+    // overwrite a newer list if the backend changed while it was in flight.
+    let cancelled = false;
+    void backend.listPasskeys().then((found) => {
+      if (!cancelled) setPasskeys(found);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [backend, reloads]);
+
+  if (!backend?.supportsPasskeys || !backend.registerPasskey) return null;
+  // A volunteer's access is a short-lived guest session; a passkey would outlive
+  // the invite it came from, which is not what anyone means by revoking access.
+  if (session?.guest) return null;
+
+  const add = () => {
+    setBusy(true);
+    setError(undefined);
+    const suggested = `${session?.displayName ?? 'My'} — this device`;
+    void backend
+      .registerPasskey!(suggested)
+      .then(() => {
+        toast('Passkey added — no more sign-in emails on this device');
+        refresh();
+      })
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'That did not work.'))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <section className="section">
+      <div className="section-head">
+        <h2>Passkeys</h2>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={add}>
+          {busy ? 'Waiting…' : '+ Add this device'}
+        </button>
+      </div>
+
+      {passkeys.length ? (
+        <div className="list">
+          {passkeys.map((passkey) => (
+            <div key={passkey.id} className="row row-static">
+              <span className="row-icon">🔑</span>
+              <span className="row-body">
+                <span className="row-title truncate">{passkey.name}</span>
+                <span className="row-sub">
+                  Added {formatDateTime(passkey.createdAt)}
+                  {passkey.lastUsedAt ? ` · last used ${formatDateTime(passkey.lastUsedAt)}` : ''}
+                </span>
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                aria-label={`Remove ${passkey.name}`}
+                onClick={() => setRemoving(passkey)}
+              >
+                🗑
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="card card-pad small muted">
+          Add a passkey and this phone signs in with your face, fingerprint or PIN — no email link
+          to wait for, which matters when reception is poor.
+        </div>
+      )}
+
+      {error ? (
+        <p className="small mt-2" style={{ color: 'var(--danger)' }}>
+          {error}
+        </p>
+      ) : null}
+
+      {removing ? (
+        <ConfirmSheet
+          title={`Remove ${removing.name}?`}
+          body="That device will need an email link to sign in again."
+          confirmLabel="Remove"
+          tone="danger"
+          onCancel={() => setRemoving(undefined)}
+          onConfirm={() => {
+            const target = removing;
+            setRemoving(undefined);
+            void backend
+              .deletePasskey?.(target.id)
+              .then(() => {
+                toast('Passkey removed');
+                refresh();
+              })
+              .catch((cause: unknown) =>
+                setError(cause instanceof Error ? cause.message : 'Could not remove it.'),
+              );
+          }}
+        />
+      ) : null}
+    </section>
   );
 }
 

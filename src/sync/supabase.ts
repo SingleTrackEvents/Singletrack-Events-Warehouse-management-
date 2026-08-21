@@ -7,6 +7,7 @@ import type {
   ChangeSet,
   CreateInviteInput,
   Invite,
+  Passkey,
   PullResult,
   PushResult,
   Role,
@@ -228,16 +229,126 @@ export function toSyncError(message: string): SyncError {
   return new SyncError(text || 'Something went wrong talking to the server.', 'network');
 }
 
+/**
+ * Does this browser have WebAuthn at all?
+ *
+ * Old devices and some in-app browsers do not, and offering a passkey button
+ * that can only fail is worse than not offering one.
+ */
+export function deviceSupportsPasskeys(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.PublicKeyCredential !== 'undefined' &&
+    typeof navigator !== 'undefined' &&
+    Boolean(navigator.credentials)
+  );
+}
+
+/**
+ * WebAuthn failures are mostly the person cancelling or the domain being
+ * misconfigured, and the raw messages say neither.
+ */
+function toPasskeyError(message: string): SyncError {
+  if (/NotAllowed|abort|cancel/i.test(message)) {
+    return new SyncError('Passkey cancelled — nothing has changed.', 'auth');
+  }
+  if (/rp|relying party|origin|domain/i.test(message)) {
+    return new SyncError(
+      'This site is not on the passkey allow-list. An admin needs to add it under ' +
+        'Authentication → Passkeys in Supabase, using the bare domain as the Relying Party ID.',
+      'permission',
+    );
+  }
+  if (/no credentials|not found|no passkey/i.test(message)) {
+    return new SyncError(
+      'No passkey for this site was found on this device. Sign in with email once, then add a passkey.',
+      'auth',
+    );
+  }
+  return new SyncError(message || 'The passkey could not be used.', 'auth');
+}
+
 export class SupabaseBackend implements SyncBackend {
   readonly name = 'Supabase';
   readonly isReal = true;
+  readonly supportsPasskeys = deviceSupportsPasskeys();
 
   private client: SupabaseClient;
 
   constructor(url: string, publishableKey: string) {
     this.client = createClient(url, publishableKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        // Passkeys are behind an opt-in flag while the API is in beta; without
+        // it every passkey method throws.
+        experimental: { passkey: true },
+      },
     });
+  }
+
+  /**
+   * Sign in with a passkey.
+   *
+   * The whole WebAuthn ceremony is handled by the client library: it asks the
+   * server for a challenge, calls navigator.credentials.get(), and posts the
+   * signed result back. Nothing is delivered by email, so none of the failure
+   * modes that plagued magic links apply.
+   */
+  async signInWithPasskey(): Promise<Session> {
+    const { data, error } = await this.client.auth.signInWithPasskey();
+    if (error) throw toPasskeyError(error.message);
+    if (!data?.session || !data.user) {
+      throw new SyncError('That passkey did not produce a session.', 'auth');
+    }
+
+    const { data: membership, error: membershipError } = await this.client.rpc('ensure_membership', {
+      p_display_name: data.user.email?.split('@')[0] ?? '',
+    });
+    if (membershipError) throw toSyncError(membershipError.message);
+    return sessionFrom(data.user, membership as MembershipRow, data.session.access_token);
+  }
+
+  /**
+   * Add a passkey to whoever is signed in on this device.
+   *
+   * Registration needs an existing session, so the very first sign-in on an
+   * account still has to happen by email. After that the email is never needed
+   * again on that device.
+   */
+  async registerPasskey(name: string): Promise<Passkey> {
+    const { data, error } = await this.client.auth.registerPasskey();
+    if (error) throw toPasskeyError(error.message);
+    if (!data) throw new SyncError('The passkey was not saved.', 'auth');
+
+    // The name is set separately: registration itself takes no label.
+    const friendlyName = name.trim().slice(0, 120);
+    if (friendlyName) {
+      await this.client.auth.passkey.update({ passkeyId: data.id, friendlyName });
+    }
+    return {
+      id: data.id,
+      name: friendlyName || data.friendly_name || 'This device',
+      createdAt: data.created_at,
+      lastUsedAt: null,
+    };
+  }
+
+  async listPasskeys(): Promise<Passkey[]> {
+    const { data, error } = await this.client.auth.passkey.list();
+    if (error || !data) return [];
+    return data.map((entry) => ({
+      id: entry.id,
+      name: entry.friendly_name || 'Unnamed device',
+      createdAt: entry.created_at,
+      lastUsedAt: entry.last_used_at ?? null,
+    }));
+  }
+
+  async deletePasskey(passkeyId: string): Promise<void> {
+    const { error } = await this.client.auth.passkey.delete({ passkeyId });
+    if (error) throw toPasskeyError(error.message);
   }
 
   async currentSession(): Promise<Session | null> {

@@ -187,11 +187,34 @@ trying the flow) and `SupabaseBackend`.
    links bounce to `http://localhost:3000`: Supabase silently ignores a redirect
    that is not on the allow-list and falls back to the Site URL, whose default
    is localhost.
-4. Authentication → Emails → SMTP Settings → connect a real email sender.
+4. Authentication → Passkeys → enable, and set:
+   - **Relying Party ID** — the bare domain, no scheme or path
+     (`singletrackevents.github.io`)
+   - **Relying Party Origins** — the full origin
+     (`https://singletrackevents.github.io`)
+   - **Display Name** — what the phone shows during the prompt
+5. Authentication → Emails → SMTP Settings → connect a real email sender.
    **The built-in one allows only a couple of messages an hour for the entire
-   project**, which is fine for a first test and useless the moment a second
-   person tries to sign in. Any transactional provider works; the free tiers are
-   far more than a race weekend needs.
+   project.** Passkeys make this far less pressing — each person needs one email
+   ever — but the first sign-in on every account still goes through it.
+
+### Passkeys
+
+Crew sign in with a face, a fingerprint or a device PIN. Nothing is delivered,
+so none of the failure modes email brings — undeliverable links, one-time tokens
+consumed by preview scanners, a project-wide rate limit — apply at all.
+
+Registering a passkey needs a live session, so the **first** sign-in on an
+account is still by email. After that, that device never needs email again. Each
+device gets its own passkey; they are listed and revocable under Accounts & sync.
+
+Volunteers are deliberately excluded: their access is a short-lived guest session
+tied to an invite, and a passkey would outlive the invite it came from.
+
+The API is in beta and behind `experimental: { passkey: true }`, so it may change
+without notice. The email path is kept as a fallback for exactly that reason, and
+for devices with no WebAuthn support — `deviceSupportsPasskeys()` checks before
+offering the button.
 
 The first person to sign in becomes the admin; everyone after needs an invite.
 

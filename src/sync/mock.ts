@@ -118,6 +118,9 @@ function inviteToken(): string {
 export class MockBackend implements SyncBackend {
   readonly name = 'On-device demo server';
   readonly isReal = false;
+  // The stand-in cannot do a real WebAuthn ceremony, and pretending otherwise
+  // would hide the one thing worth testing about passkeys.
+  readonly supportsPasskeys = false;
 
   async currentSession(): Promise<Session | null> {
     return loadSession();
