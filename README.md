@@ -7,6 +7,11 @@ one arm, or at an aid station on a ridgeline with no phone reception. Everything
 runs on the device — install it once and it keeps working with the mobile data
 turned off.
 
+**Live app:** https://singletrackevents.github.io/Singletrack-Events-Warehouse-management-/
+
+Open it on a phone and use "Add to Home Screen" to install it. Every push to
+`claude/warehouse-management-trail-events-wrbycb` rebuilds and redeploys it.
+
 ## What it does
 
 **Stock** — an item catalogue with categories, bin locations, pack sizes and
