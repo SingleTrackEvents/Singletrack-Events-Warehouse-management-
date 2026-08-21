@@ -131,6 +131,30 @@ describe('a full cycle', () => {
     expect(await pendingCount()).toBe(0);
   });
 
+  it('still receives another device rows after pushing its own', async () => {
+    // The two-phone case, which single-device tests never exercise: device A
+    // has already put rows on the server, then device B signs in with local
+    // work of its own and syncs. B must end up holding both.
+    const session = await adminSession();
+    await backend.push(session, {
+      items: [{
+        id: 'from-device-a', createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z', deletedAt: null, rev: 1,
+        deviceId: 'device-a', syncedAt: null,
+        name: 'Packed by the other phone', sku: 'OTHER', categoryId: null, unit: 'each',
+        packSize: 1, bin: 'A1', qtyOnHand: 3, minQty: 0, barcode: null, notes: '',
+        consumable: false, archived: false,
+      } as never],
+    });
+
+    // Device B's own local work, not yet on the server.
+    await makeItem('made on device B');
+    await runSync(backend, session);
+
+    expect(await db.items.get('from-device-a')).toBeDefined();
+    expect((await db.items.get('from-device-a'))!.name).toBe('Packed by the other phone');
+  });
+
   it('carries a soft delete across so the removal replicates', async () => {
     const item = await makeItem('cubes');
     const session = await adminSession();

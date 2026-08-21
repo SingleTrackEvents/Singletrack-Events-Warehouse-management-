@@ -51,7 +51,6 @@ interface PushResponse {
   stale: number;
   refused: number;
   conflicts: Array<{ table_name: TableName; data: SyncMeta }>;
-  cursor: number;
 }
 
 interface MembershipRow {
@@ -434,7 +433,7 @@ export class SupabaseBackend implements SyncBackend {
     // Children inherit their packlist's or load's scope; without this the
     // security policies would see a null scope and reject the write.
     const rows = toWire(changes, await loadParentScopes(changes));
-    if (!rows.length) return { accepted: 0, stale: 0, refused: 0, conflicts: {}, cursor: '0' };
+    if (!rows.length) return { accepted: 0, stale: 0, refused: 0, conflicts: {} };
 
     const { data, error } = await this.client.rpc('push_records', { p_rows: rows });
     if (error) throw toSyncError(error.message);
@@ -445,7 +444,6 @@ export class SupabaseBackend implements SyncBackend {
       stale: response.stale,
       refused: response.refused,
       conflicts: fromWire(response.conflicts ?? []),
-      cursor: String(response.cursor),
     };
   }
 

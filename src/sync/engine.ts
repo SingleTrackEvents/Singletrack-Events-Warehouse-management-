@@ -166,7 +166,7 @@ export async function runSync(
     }
 
     await markSynced(outbox);
-    setCursor(result.cursor);
+    // The cursor is not touched here on purpose — see PushResult.
 
     // A batch that moved nothing forward would loop forever; refused rows are
     // marked synced above so they cannot wedge the queue.

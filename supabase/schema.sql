@@ -303,7 +303,6 @@ declare
   stale integer := 0;
   refused integer := 0;
   conflicts jsonb := '[]'::jsonb;
-  max_seq bigint := 0;
 begin
   if role is null then
     raise exception 'No access yet — ask an admin for an invite';
@@ -360,14 +359,14 @@ begin
     accepted := accepted + 1;
   end loop;
 
-  select coalesce(max(seq), 0) into max_seq from public.records;
-
+  -- No cursor is returned on purpose. The client's pull cursor may only
+  -- advance from a pull; handing back the table's max seq here made a device
+  -- skip rows another device had already written but it had never received.
   return jsonb_build_object(
     'accepted', accepted,
     'stale', stale,
     'refused', refused,
-    'conflicts', conflicts,
-    'cursor', max_seq
+    'conflicts', conflicts
   );
 end;
 $$;

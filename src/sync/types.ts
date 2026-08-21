@@ -127,8 +127,10 @@ export interface PushResult {
    * back so the client can apply them without waiting for the next pull.
    */
   conflicts: ChangeSet;
-  /** Cursor to pass to the next pull. */
-  cursor: string;
+  // Deliberately no cursor here. The pull cursor may only ever advance as the
+  // result of a pull: letting a push move it made a device mark itself as
+  // having seen rows it had never received, so a second phone uploading its own
+  // work would silently skip everything the first phone had already sent.
 }
 
 export interface PullResult {

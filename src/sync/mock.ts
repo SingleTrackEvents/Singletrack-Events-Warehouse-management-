@@ -190,7 +190,7 @@ export class MockBackend implements SyncBackend {
   async push(session: Session, changes: ChangeSet): Promise<PushResult> {
     this.assertLive(session);
     const allowed = writableTables(session);
-    const result: PushResult = { accepted: 0, stale: 0, refused: 0, conflicts: {}, cursor: '0' };
+    const result: PushResult = { accepted: 0, stale: 0, refused: 0, conflicts: {} };
 
     const flat: Array<[TableName, SyncMeta]> = [];
     for (const table of ALL_TABLES) {
@@ -225,7 +225,6 @@ export class MockBackend implements SyncBackend {
       result.accepted += 1;
     }
 
-    result.cursor = String(base + offset);
     return result;
   }
 

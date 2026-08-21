@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   BACKEND_ENABLED_KEY,
@@ -13,6 +13,9 @@ import type { SessionContextValue } from './sessionContext';
 import { getLastSync, markAllDirty, pendingCount, resetCursor, runSync } from '../sync/engine';
 import type { SyncPhase } from '../sync/engine';
 import type { Session, SyncBackend } from '../sync/types';
+
+/** How often to sync while the app is open and online. */
+const SYNC_INTERVAL_MS = 45_000;
 
 /**
  * Session and sync state for the whole app.
@@ -30,6 +33,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState(0);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(getLastSync());
   const [lastError, setLastError] = useState<string | null>(null);
+  // Guards against overlapping sync runs.
+  const syncing = useRef(false);
 
   // Restore the connection and session from the last time the app was open.
   useEffect(() => {
@@ -49,6 +54,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const sync = useCallback(async () => {
     const current = getBackend();
     if (!current || !session) return;
+    // A slow sync must not have a second one pile in behind it, or the same
+    // rows get pushed twice and the phase indicator flickers.
+    if (syncing.current) return;
+    syncing.current = true;
     setLastError(null);
     try {
       await runSync(current, session, setPhase);
@@ -57,6 +66,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setPhase('error');
       setLastError(cause instanceof Error ? cause.message : 'Sync failed.');
     } finally {
+      syncing.current = false;
       await refreshPending();
     }
   }, [session, refreshPending]);
@@ -93,15 +103,37 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshPending]);
 
-  // Sync when a connection returns, and shortly after signing in.
+  /**
+   * Keep the two devices in step.
+   *
+   * Syncing only once after sign-in was not enough: everything the crew did
+   * afterwards sat in the outbox until the app was reloaded. So it also runs on
+   * a timer, when the connection comes back, and whenever the app returns to
+   * the foreground — which on a phone is the moment that actually matters,
+   * since the app is backgrounded between every job.
+   */
   useEffect(() => {
     if (!backend || !session) return;
-    const onOnline = () => void sync();
-    window.addEventListener('online', onOnline);
-    const timer = setTimeout(() => void sync(), 800);
+
+    const attempt = () => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      void sync();
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') attempt();
+    };
+
+    const first = setTimeout(attempt, 800);
+    const timer = setInterval(attempt, SYNC_INTERVAL_MS);
+    window.addEventListener('online', attempt);
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
-      window.removeEventListener('online', onOnline);
-      clearTimeout(timer);
+      clearTimeout(first);
+      clearInterval(timer);
+      window.removeEventListener('online', attempt);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [backend, session, sync]);
 
