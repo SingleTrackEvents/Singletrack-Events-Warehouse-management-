@@ -9,6 +9,9 @@
 # Pages site needs admin rights that the workflow token does not carry, so it
 # only succeeds once a human has switched Pages on. It is left in because it
 # makes the workflow self-healing if Pages is ever turned back off.
+# Action versions are pinned to major tags on purpose. GitHub pushes updates —
+# including the move off Node 20, which leaves the runners in September 2026 —
+# to those tags, so the Pages actions keep working without edits here.
 name: Deploy to GitHub Pages
 
 on:
@@ -30,9 +33,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -51,7 +54,7 @@ jobs:
           # No-op once Pages exists; see the note at the top of this file.
           enablement: true
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: dist
 
