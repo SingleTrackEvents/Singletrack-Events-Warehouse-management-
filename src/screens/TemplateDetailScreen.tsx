@@ -123,16 +123,16 @@ export default function TemplateDetailScreen() {
           title="Add to template"
           exclude={(lines ?? []).map((line) => line.itemId)}
           onClose={() => setPicking(false)}
-          onPick={(chosen) => {
+          onPick={(picks) => {
             let sort = nextSort(lines ?? []);
             void createMany(
               db.templateLines,
-              chosen.map((item) => {
+              picks.map((pick) => {
                 sort += 10;
                 return {
                   templateId: template.id,
-                  itemId: item.id,
-                  qty: 1,
+                  itemId: pick.item.id,
+                  qty: pick.qty,
                   mandatory: false,
                   perRunner: false,
                   note: '',
@@ -140,7 +140,7 @@ export default function TemplateDetailScreen() {
                 };
               }),
             ).then(() => {
-              toast(`${plural(chosen.length, 'item')} added`);
+              toast(`${plural(picks.length, 'item')} added`);
               setPicking(false);
             });
           }}

@@ -294,10 +294,11 @@ export default function PacklistScreen() {
           title="Add to packlist"
           exclude={(lines ?? []).map((line) => line.itemId)}
           onClose={() => setPicking(false)}
-          onPick={(chosen) => {
+          onPick={(picks) => {
             void (async () => {
-              for (const item of chosen) await addLine(packlist.id, item.id, 1);
-              toast(`${plural(chosen.length, 'item')} added`);
+              for (const pick of picks) await addLine(packlist.id, pick.item.id, pick.qty);
+              const units = picks.reduce((sum, pick) => sum + pick.qty, 0);
+              toast(`${plural(picks.length, 'item')} added · ${units} total`);
               setPicking(false);
             })();
           }}

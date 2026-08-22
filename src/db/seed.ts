@@ -1,6 +1,6 @@
 import { db, getSettings } from './db';
 import { create, createMany, update } from './repo';
-import { makeCode } from '../domain/codes';
+import { prefixFor } from '../domain/codes';
 import type { AccessType, DestinationType, Item, Unit } from './types';
 
 /**
@@ -12,6 +12,34 @@ import type { AccessType, DestinationType, Item, Unit } from './types';
  * see what the app expects before entering their own gear. Settings → Data has
  * a "clear demo data" button once they are ready to start for real.
  */
+
+/**
+ * A stable id for a demo record.
+ *
+ * Two phones each seed their own copy of the demo data, and sync then merges
+ * both — which doubled every item and template. Deriving the ids from the
+ * content instead of generating random ones makes the two copies identical, so
+ * they merge into one set rather than piling up. It also makes "remove the demo
+ * data" a matter of matching a prefix.
+ */
+export function demoId(kind: string, key: string): string {
+  return `demo-${kind}-${key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+}
+
+/** True for anything created by the demo seed. */
+export function isDemoId(id: string): boolean {
+  return id.startsWith('demo-');
+}
+
+/**
+ * A stable crate code for demo packlists, so both phones print the same label.
+ * Four base-36 characters, matching the format of a real generated code.
+ */
+function demoCode(name: string): string {
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) % 1_679_616;
+  return `${prefixFor(name)}-${hash.toString(36).toUpperCase().padStart(4, '4')}`;
+}
 
 /** ISO date N days from today, for demo events that always look current. */
 function dateIn(days: number): string {
@@ -341,6 +369,7 @@ export async function seedDemoData(): Promise<void> {
 
   for (const [index, group] of CATALOGUE.entries()) {
     const category = await create(db.categories, {
+      id: demoId('cat', group.category),
       name: group.category,
       sort: (index + 1) * 10,
       icon: group.icon,
@@ -348,6 +377,7 @@ export async function seedDemoData(): Promise<void> {
     const items = await createMany(
       db.items,
       group.items.map((item) => ({
+        id: demoId('item', item.sku),
         name: item.name,
         sku: item.sku,
         categoryId: category.id,
@@ -371,6 +401,7 @@ export async function seedDemoData(): Promise<void> {
     [...skuToItem.values()]
       .filter((item) => item.qtyOnHand > 0)
       .map((item) => ({
+        id: demoId('mv', item.sku),
         itemId: item.id,
         qty: item.qtyOnHand,
         reason: 'receipt' as const,
@@ -384,6 +415,7 @@ export async function seedDemoData(): Promise<void> {
 
   for (const spec of TEMPLATES) {
     const template = await create(db.templates, {
+      id: demoId('tpl', spec.name),
       name: spec.name,
       appliesTo: spec.appliesTo,
       description: spec.description,
@@ -393,6 +425,7 @@ export async function seedDemoData(): Promise<void> {
       spec.lines
         .filter(([sku]) => skuToItem.has(sku))
         .map(([sku, qty, mandatory], index) => ({
+          id: demoId('tline', `${spec.name}-${sku}`),
           templateId: template.id,
           itemId: skuToItem.get(sku)!.id,
           qty,
@@ -405,6 +438,7 @@ export async function seedDemoData(): Promise<void> {
   }
 
   const buffalo = await create(db.events, {
+    id: demoId('event', 'Buffalo Stampede'),
     name: 'Buffalo Stampede',
     location: 'Bright, VIC',
     startDate: dateIn(12),
@@ -414,6 +448,7 @@ export async function seedDemoData(): Promise<void> {
   });
 
   await create(db.events, {
+    id: demoId('event', 'Hounslow Classic'),
     name: 'Hounslow Classic',
     location: 'Blue Mountains, NSW',
     startDate: dateIn(68),
@@ -423,6 +458,7 @@ export async function seedDemoData(): Promise<void> {
   });
 
   await create(db.events, {
+    id: demoId('event', 'Roller Coaster Run'),
     name: 'Roller Coaster Run',
     location: 'Mount Dandenong, VIC',
     startDate: dateIn(-38),
@@ -434,6 +470,7 @@ export async function seedDemoData(): Promise<void> {
   const destinations = await createMany(
     db.destinations,
     BUFFALO_DESTINATIONS.map((destination, index) => ({
+      id: demoId('dest', destination.name),
       eventId: buffalo.id,
       name: destination.name,
       type: destination.type,
@@ -464,10 +501,12 @@ export async function seedDemoData(): Promise<void> {
     if (!lines.length) continue;
 
     const packlist = await create(db.packlists, {
+      id: demoId('pl', destination.name),
       eventId: buffalo.id,
       destinationId: destination.id,
       name: destination.name,
-      code: makeCode(destination.name),
+      // Deterministic too, so both phones print the same label for it.
+      code: demoCode(destination.name),
       status: 'draft',
       packedBy: '',
       packedAt: null,
@@ -483,6 +522,7 @@ export async function seedDemoData(): Promise<void> {
     await createMany(
       db.packlistLines,
       lines.map((line, index) => ({
+        id: demoId('plline', `${destination.name}-${line.itemId}`),
         packlistId: packlist.id,
         itemId: line.itemId,
         qtyRequired: line.qty,
@@ -507,6 +547,7 @@ export async function seedDemoData(): Promise<void> {
   }
 
   const load = await create(db.loads, {
+    id: demoId('load', 'run-1'),
     eventId: buffalo.id,
     name: 'Run 1 — village + low stations',
     vehicle: '6m Truck',
@@ -522,6 +563,7 @@ export async function seedDemoData(): Promise<void> {
   await createMany(
     db.loadStops,
     destinations.slice(0, 4).map((destination, index) => ({
+      id: demoId('stop', destination.name),
       loadId: load.id,
       destinationId: destination.id,
       sort: (index + 1) * 10,

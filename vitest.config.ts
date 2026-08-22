@@ -10,5 +10,12 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.ts'],
+    // The schema tests each boot Postgres compiled to WebAssembly. Two of those
+    // starting at once on a loaded machine is enough to time one out, which
+    // showed up as an intermittent failure. Running files one at a time costs
+    // little — those tests dominate the runtime either way — and removes the
+    // flakiness rather than leaving it for CI to hit.
+    fileParallelism: false,
+    testTimeout: 30_000,
   },
 });

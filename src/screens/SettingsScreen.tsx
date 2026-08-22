@@ -9,6 +9,7 @@ import { update } from '../db/repo';
 import { useSettings } from '../hooks/useDb';
 import { downloadJson, exportAll, importBackup, isBackup, wipeAll } from '../domain/backup';
 import { seedDemoData } from '../db/seed';
+import { countDuplicates, mergeDuplicates } from '../domain/duplicates';
 import { formatDateTime, plural } from '../domain/format';
 import type { Settings } from '../db/types';
 
@@ -25,6 +26,11 @@ export default function SettingsScreen() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [wiping, setWiping] = useState(false);
   const [reseeding, setReseeding] = useState(false);
+  const [merging, setMerging] = useState(false);
+
+  // Two phones that each seeded demo data end up with two of everything once
+  // they sync, and someone will eventually add the same item twice by hand.
+  const duplicates = useLiveQuery(() => countDuplicates(), []);
 
   const counts = useLiveQuery(async () => ({
     items: await db.items.count(),
@@ -184,6 +190,25 @@ export default function SettingsScreen() {
           <h2>Data</h2>
         </div>
         <div className="list">
+          <button
+            type="button"
+            className="row"
+            disabled={!duplicates || duplicates.items + duplicates.templates === 0}
+            onClick={() => setMerging(true)}
+          >
+            <span className="row-icon">🧹</span>
+            <span className="row-body">
+              <span className="row-title">Merge duplicates</span>
+              <span className="row-sub">
+                {!duplicates
+                  ? 'Checking…'
+                  : duplicates.items + duplicates.templates === 0
+                    ? 'Nothing duplicated'
+                    : `${plural(duplicates.items, 'duplicate item')}, ${plural(duplicates.templates, 'template')}`}
+              </span>
+            </span>
+            <span className="row-chevron">›</span>
+          </button>
           <button type="button" className="row" onClick={() => setReseeding(true)}>
             <span className="row-icon">🌱</span>
             <span className="row-body">
@@ -240,6 +265,32 @@ export default function SettingsScreen() {
               await getSettings();
               toast('Device cleared');
               setWiping(false);
+            });
+          }}
+        />
+      ) : null}
+
+      {merging ? (
+        <ConfirmSheet
+          title="Merge duplicates?"
+          body={
+            <>
+              Keeps one of each and folds the rest into it. Packlists, stocktakes and the stock
+              ledger are repointed at the copy that stays, so nothing loses its history.
+              <div className="mt-2">
+                Quantities are never added together — two records for one shelf is a naming problem,
+                not twice the stock, so check the counts afterwards.
+              </div>
+            </>
+          }
+          confirmLabel="Merge"
+          onCancel={() => setMerging(false)}
+          onConfirm={() => {
+            void mergeDuplicates().then((summary) => {
+              toast(
+                `Merged ${plural(summary.itemsMerged, 'item')} and ${plural(summary.templatesMerged, 'template')}`,
+              );
+              setMerging(false);
             });
           }}
         />
