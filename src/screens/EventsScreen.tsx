@@ -1,12 +1,16 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Screen } from '../App';
-import { EmptyState, Field, Pill, Sheet } from '../components/ui';
+import { ConfirmSheet, EmptyState, Field, Pill, Sheet } from '../components/ui';
+import { SwipeToDelete } from '../components/SwipeToDelete';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { create } from '../db/repo';
 import { useEvents } from '../hooks/useDb';
-import { EVENT_STATUS_LABELS, daysUntil, formatDateRange, relativeDays } from '../domain/format';
+import { EVENT_STATUS_LABELS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
+import { describeEventRemoval, removeEvent } from '../domain/remove';
+import type { RemovalSummary } from '../domain/remove';
+import type { RaceEvent } from '../db/types';
 import type { EventStatus } from '../db/types';
 import { EVENT_STATUSES } from '../db/types';
 
@@ -20,7 +24,15 @@ const STATUS_TONE: Record<EventStatus, 'default' | 'ok' | 'warn' | 'danger' | 'i
 
 export default function EventsScreen() {
   const events = useEvents();
+  const toast = useToast();
   const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<{ event: RaceEvent; summary: RemovalSummary }>();
+
+  // The summary is read before anything changes, so the confirmation can name
+  // exactly what is about to go with it.
+  const askToRemove = (event: RaceEvent) => {
+    void describeEventRemoval(event.id).then((summary) => setRemoving({ event, summary }));
+  };
 
   const upcoming = events?.filter((event) => daysUntil(event.endDate) >= 0 && event.status !== 'closed') ?? [];
   const past = events?.filter((event) => daysUntil(event.endDate) < 0 || event.status === 'closed') ?? [];
@@ -54,18 +66,20 @@ export default function EventsScreen() {
           </div>
           <div className="list">
             {upcoming.map((event) => (
-              <Link key={event.id} to={`/events/${event.id}`} className="row">
-                <span className="row-body">
-                  <span className="row-title">{event.name}</span>
-                  <span className="row-sub">
-                    {event.location} · {formatDateRange(event.startDate, event.endDate)}
+              <SwipeToDelete key={event.id} onDelete={() => askToRemove(event)}>
+                <Link to={`/events/${event.id}`} className="row">
+                  <span className="row-body">
+                    <span className="row-title">{event.name}</span>
+                    <span className="row-sub">
+                      {event.location} · {formatDateRange(event.startDate, event.endDate)}
+                    </span>
                   </span>
-                </span>
-                <span className="row-end stack-sm" style={{ alignItems: 'flex-end' }}>
-                  <Pill tone={STATUS_TONE[event.status]}>{EVENT_STATUS_LABELS[event.status]}</Pill>
-                  <span className="tiny muted">{relativeDays(event.startDate)}</span>
-                </span>
-              </Link>
+                  <span className="row-end stack-sm" style={{ alignItems: 'flex-end' }}>
+                    <Pill tone={STATUS_TONE[event.status]}>{EVENT_STATUS_LABELS[event.status]}</Pill>
+                    <span className="tiny muted">{relativeDays(event.startDate)}</span>
+                  </span>
+                </Link>
+              </SwipeToDelete>
             ))}
           </div>
         </section>
@@ -78,21 +92,52 @@ export default function EventsScreen() {
           </div>
           <div className="list">
             {past.map((event) => (
-              <Link key={event.id} to={`/events/${event.id}`} className="row">
-                <span className="row-body">
-                  <span className="row-title">{event.name}</span>
-                  <span className="row-sub">
-                    {event.location} · {formatDateRange(event.startDate, event.endDate)}
+              <SwipeToDelete key={event.id} onDelete={() => askToRemove(event)}>
+                <Link to={`/events/${event.id}`} className="row">
+                  <span className="row-body">
+                    <span className="row-title">{event.name}</span>
+                    <span className="row-sub">
+                      {event.location} · {formatDateRange(event.startDate, event.endDate)}
+                    </span>
                   </span>
-                </span>
-                <Pill tone={STATUS_TONE[event.status]}>{EVENT_STATUS_LABELS[event.status]}</Pill>
-              </Link>
+                  <Pill tone={STATUS_TONE[event.status]}>{EVENT_STATUS_LABELS[event.status]}</Pill>
+                </Link>
+              </SwipeToDelete>
             ))}
           </div>
         </section>
       ) : null}
 
+      {events?.length ? (
+        <p className="tiny muted center mt-3">Swipe an event left to delete it.</p>
+      ) : null}
+
       {adding ? <EventSheet onClose={() => setAdding(false)} /> : null}
+
+      {removing ? (
+        <ConfirmSheet
+          title={`Delete ${removing.event.name}?`}
+          body={
+            <>
+              This also removes {plural(removing.summary.destinations, 'destination')},{' '}
+              {plural(removing.summary.packlists, 'packlist')} and{' '}
+              {plural(removing.summary.loads, 'transport run')}.
+              <div className="mt-2">
+                Stock movements are kept — the ledger is the record of what actually left the
+                warehouse, and deleting a race should not rewrite that.
+              </div>
+            </>
+          }
+          confirmLabel="Delete"
+          tone="danger"
+          onCancel={() => setRemoving(undefined)}
+          onConfirm={() => {
+            const target = removing.event;
+            setRemoving(undefined);
+            void removeEvent(target.id).then(() => toast(`${target.name} deleted`));
+          }}
+        />
+      ) : null}
     </Screen>
   );
 }

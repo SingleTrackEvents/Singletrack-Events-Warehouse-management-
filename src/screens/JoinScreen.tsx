@@ -17,7 +17,7 @@ export default function JoinScreen() {
   const { token } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
-  const { backend, session, connectDemo, setSession } = useSession();
+  const { backend, session, connectServer, setSession } = useSession();
   const [name, setName] = useState('');
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -37,17 +37,31 @@ export default function JoinScreen() {
     }
   };
 
-  if (!backend) {
+  // An invite only exists on the real server, so that is what a scanned QR must
+  // connect to. Sending it to the on-device stand-in — which has no invites —
+  // produced "that invite code was not recognised" for every volunteer.
+  const needsRealBackend = !backend || !backend.isReal;
+
+  if (needsRealBackend) {
     return (
       <Screen title="Join" back="/">
         <div className="card card-pad">
-          <h3>Sync is not switched on</h3>
+          <h3>Nearly there</h3>
           <p className="small muted mt-2 mb-3">
-            This invite needs a shared database, and this device is not connected to one.
+            This phone needs to connect to the SingleTrack server before it can use an invite.
           </p>
-          <button type="button" className="btn btn-primary btn-block" onClick={connectDemo}>
-            Connect and try again
+          <button
+            type="button"
+            className="btn btn-primary btn-lg btn-block"
+            onClick={() => void connectServer()}
+          >
+            ☁️ Connect
           </button>
+          {backend && !backend.isReal ? (
+            <p className="tiny muted mt-3">
+              This device is currently on the on-device demo server, which has no invites on it.
+            </p>
+          ) : null}
         </div>
       </Screen>
     );

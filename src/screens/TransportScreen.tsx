@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
-import { EmptyState, Field, Pill, ProgressBar, Sheet } from '../components/ui';
+import { ConfirmSheet, EmptyState, Field, Pill, ProgressBar, Sheet } from '../components/ui';
+import { SwipeToDelete } from '../components/SwipeToDelete';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useEvents, useSettings } from '../hooks/useDb';
 import { LOAD_STATUS_LABELS, createLoad, loadProgress } from '../domain/transport';
 import { formatDateTime, plural } from '../domain/format';
+import { removeLoad } from '../domain/remove';
+import type { Load } from '../db/types';
 import type { LoadStatus } from '../db/types';
 
 const TONE: Record<LoadStatus, 'default' | 'ok' | 'warn' | 'info' | 'accent'> = {
@@ -25,8 +28,10 @@ export default function TransportScreen() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const events = useEvents();
+  const toast = useToast();
   const eventFilter = params.get('event') ?? '';
   const [creating, setCreating] = useState(false);
+  const [removing, setRemoving] = useState<Load>();
 
   const loads = useLiveQuery(
     async () =>
@@ -87,7 +92,8 @@ export default function TransportScreen() {
           const progress = loadProgress((stops ?? []).filter((stop) => stop.loadId === load.id));
           const event = events?.find((entry) => entry.id === load.eventId);
           return (
-            <Link key={load.id} to={`/transport/${load.id}`} className="row">
+            <SwipeToDelete key={load.id} onDelete={() => setRemoving(load)}>
+            <Link to={`/transport/${load.id}`} className="row">
               <span className="row-icon">🚚</span>
               <span className="row-body">
                 <span className="row-title">{load.name}</span>
@@ -107,9 +113,34 @@ export default function TransportScreen() {
               </span>
               <Pill tone={TONE[load.status]}>{LOAD_STATUS_LABELS[load.status]}</Pill>
             </Link>
+            </SwipeToDelete>
           );
         })}
       </div>
+
+      {loads?.length ? (
+        <p className="tiny muted center mt-3">Swipe a run left to delete it.</p>
+      ) : null}
+
+      {removing ? (
+        <ConfirmSheet
+          title={`Delete ${removing.name}?`}
+          body={
+            <>
+              The run and its stops are removed. The packlists it was carrying stay — the gear still
+              needs packing, only the trip is cancelled.
+            </>
+          }
+          confirmLabel="Delete"
+          tone="danger"
+          onCancel={() => setRemoving(undefined)}
+          onConfirm={() => {
+            const target = removing;
+            setRemoving(undefined);
+            void removeLoad(target.id).then(() => toast(`${target.name} deleted`));
+          }}
+        />
+      ) : null}
 
       {creating ? (
         <NewLoadSheet

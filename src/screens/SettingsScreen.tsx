@@ -10,6 +10,7 @@ import { useSettings } from '../hooks/useDb';
 import { downloadJson, exportAll, importBackup, isBackup, wipeAll } from '../domain/backup';
 import { seedDemoData } from '../db/seed';
 import { countDuplicates, mergeDuplicates } from '../domain/duplicates';
+import { ListEditor } from '../components/ListEditor';
 import { formatDateTime, plural } from '../domain/format';
 import type { Settings } from '../db/types';
 
@@ -96,20 +97,12 @@ export default function SettingsScreen() {
               </select>
             )}
           </Field>
-          <Field label="Vehicles" hint="Comma separated. Offered when planning a load.">
-            {(id) => (
-              <input
-                id={id}
-                className="input"
-                value={(settings?.vehicles ?? []).join(', ')}
-                onChange={(event) =>
-                  set({
-                    vehicles: event.target.value
-                      .split(',')
-                      .map((entry) => entry.trim())
-                      .filter(Boolean),
-                  })
-                }
+          <Field label="Vehicles" hint="Offered when planning a load. Tap one to remove it.">
+            {() => (
+              <ListEditor
+                values={settings?.vehicles ?? []}
+                placeholder="6m Truck"
+                onChange={(vehicles) => set({ vehicles })}
               />
             )}
           </Field>

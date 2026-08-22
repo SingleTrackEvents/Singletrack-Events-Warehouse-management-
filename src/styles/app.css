@@ -298,6 +298,43 @@ button, input, select, textarea {
 .row-end { flex: 0 0 auto; text-align: right; }
 .row-chevron { color: var(--text-faint); font-size: 1.2rem; }
 
+/* ------------------------------------------------------------ swipe row -- */
+
+.swipe-row {
+  position: relative;
+  overflow: hidden;
+  background: var(--danger);
+}
+
+/* Sits underneath, revealed as the content slides off it. */
+.swipe-row-actions {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: flex;
+  align-items: stretch;
+}
+
+.swipe-row-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  padding: 0;
+  border: 0;
+  background: var(--danger);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.swipe-row-content {
+  position: relative;
+  background: var(--surface);
+  /* Vertical panning stays with the page; horizontal is ours to handle. */
+  touch-action: pan-y;
+}
+
 /* --------------------------------------------------------- account chip -- */
 
 .account-chip {
