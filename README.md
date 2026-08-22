@@ -104,8 +104,16 @@ Domain logic is kept out of the components and is covered by tests that run
 against the real Dexie stack on a fake IndexedDB, so transactions and indexes are
 exercised rather than mocked.
 
+**The database schema is tested too.** `src/test/pg.ts` boots Postgres in-process
+(PGlite, Postgres compiled to WebAssembly) and applies `supabase/schema.sql`
+unchanged, stubbing only the two things Supabase provides — `auth.uid()` and
+`auth.users`. That means the security policies are executed rather than assumed:
+`src/test/rls.test.ts` drops superuser privileges and checks what a volunteer can
+actually read and write. Two SQL bugs reached production before this existed,
+because the only way to run the schema was to deploy it.
+
 ```bash
-npm test    # 160 tests
+npm test    # 210 tests, including the Postgres schema and policies
 ```
 
 ## Design notes
@@ -224,9 +232,10 @@ offering the button.
 
 The first person to sign in becomes the admin; everyone after needs an invite.
 
-**If you have already run the schema**, run it again after pulling — it adds an
-`update_display_name` function so people can correct the name guessed from their
-email. It is re-runnable, so running the whole file again is safe.
+**If you have already run the schema, run it again after pulling.** It is
+re-runnable and carries its own migrations, including a fix for the `seq` column
+that made every update to an already-synced record fail with `column "seq" can
+only be updated to DEFAULT`.
 
 **The server is a sync log, not a query surface.** One `records` table keyed by
 `(table_name, id)`, with `event_id` and `destination_id` lifted out as columns
