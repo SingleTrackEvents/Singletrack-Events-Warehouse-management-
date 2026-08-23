@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { db, getSettings } from './db';
-import { alive } from './repo';
+import { alive, softDelete, update } from './repo';
 import { ensureSeeded, seedStarterData } from './seed';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { STATION_TEMPLATES } from './stationTemplates';
-import type { AccessType, DestinationType, Template } from './types';
+import type { AccessType, DestinationType, SyncMeta, Template } from './types';
 
 describe('the starting catalogue', () => {
   it('loads the real warehouse list', async () => {
@@ -126,7 +126,7 @@ describe('the starting catalogue', () => {
     expect((await getSettings()).seeded).toBe(true);
   });
 
-  it('does not seed over the top of a database that already has stock', async () => {
+  it('never writes over a database that already has stock', async () => {
     await db.items.put({
       id: 'existing',
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -151,7 +151,15 @@ describe('the starting catalogue', () => {
 
     await ensureSeeded();
 
-    expect(await db.items.count()).toBe(1);
+    // The catalogue is added alongside — the guarantee is that nothing of
+    // theirs is touched, not that nothing arrives. A database with stock in it
+    // and no seed marker is a restored backup or a device that has synced, and
+    // in both cases the catalogue belongs there too.
+    const theirs = (await db.items.get('existing'))!;
+    expect(theirs.name).toBe('Their own item');
+    expect(theirs.qtyOnHand).toBe(1);
+    expect(theirs.rev).toBe(1);
+    expect(await db.items.count()).toBeGreaterThan(1);
   });
 });
 
@@ -304,5 +312,114 @@ describe('choosing a template for a destination', () => {
     // offer something rather than silently building an empty list.
     expect(pick(templates, 'water_drop', 'helicopter')?.name).toBe('Water-only drop');
     expect(pick([], 'aid_station', '2wd')).toBeUndefined();
+  });
+});
+
+describe('topping up a device that has already seeded', () => {
+  /** A device seeded by an earlier build, before the station templates existed. */
+  async function seededWithoutStationTemplates() {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    for (const spec of STATION_TEMPLATES) {
+      const stored = alive(await db.templates.toArray()).find((t) => t.name === spec.name)!;
+      await db.templateLines.where('templateId').equals(stored.id).delete();
+      await db.templates.delete(stored.id);
+    }
+  }
+
+  it('delivers templates added after that device first ran', async () => {
+    await seededWithoutStationTemplates();
+    expect(alive(await db.templates.toArray())).toHaveLength(EVENT_LISTS.length);
+
+    await ensureSeeded();
+
+    // Without this the per-station lists shipped in a release and were
+    // invisible to everyone already using the app.
+    const templates = alive(await db.templates.toArray());
+    expect(templates).toHaveLength(EVENT_LISTS.length + STATION_TEMPLATES.length);
+    for (const spec of STATION_TEMPLATES) {
+      expect(templates.some((template) => template.name === spec.name)).toBe(true);
+    }
+  });
+
+  it('brings the lines with them', async () => {
+    await seededWithoutStationTemplates();
+
+    await ensureSeeded();
+
+    const templates = alive(await db.templates.toArray());
+    const lines = alive(await db.templateLines.toArray());
+    for (const spec of STATION_TEMPLATES) {
+      const stored = templates.find((template) => template.name === spec.name)!;
+      expect(lines.filter((line) => line.templateId === stored.id)).toHaveLength(spec.lines.length);
+    }
+  });
+
+  it('does not resurrect what the crew deleted', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    const water = alive(await db.templates.toArray()).find((t) => t.name === 'Water-only drop')!;
+    await softDelete(db.templates, water.id);
+
+    await ensureSeeded();
+
+    // A tombstone is a decision, not an absence.
+    expect(alive(await db.templates.toArray()).some((t) => t.name === 'Water-only drop')).toBe(false);
+  });
+
+  it('leaves edits alone', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    const tables = alive(await db.items.toArray()).find((item) => item.sku === 'FRN-01')!;
+    await update(db.items, tables.id, { qtyOnHand: 140, bin: 'Rack C', minQty: 200 });
+
+    await ensureSeeded();
+
+    const after = (await db.items.get(tables.id))!;
+    expect(after.qtyOnHand).toBe(140);
+    expect(after.bin).toBe('Rack C');
+    expect(after.minQty).toBe(200);
+  });
+
+  it('queues nothing when there is nothing new, so boots do not churn sync', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    const now = new Date().toISOString();
+    for (const name of ['items', 'templates', 'templateLines', 'categories'] as const) {
+      const rows = (await db[name].toArray()) as SyncMeta[];
+      await (db[name] as unknown as { bulkPut(r: SyncMeta[]): Promise<unknown> }).bulkPut(
+        rows.map((row) => ({ ...row, syncedAt: now })),
+      );
+    }
+
+    await ensureSeeded();
+    await ensureSeeded();
+
+    const unsent = ((await db.items.toArray()) as SyncMeta[]).filter((row) => row.syncedAt === null);
+    expect(unsent).toHaveLength(0);
+  });
+
+  it('gives the real catalogue to a device that only ever had the demo', async () => {
+    // Chad's phones: seeded long ago with the worked example, so seeded is set
+    // and the warehouse list has never arrived.
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    await db.items.put({
+      id: 'demo-item-HYD-CUBE20', createdAt: '', updatedAt: '', deletedAt: null, rev: 1,
+      deviceId: 't', syncedAt: null, name: 'Water cube 20L', sku: 'HYD-CUBE20', categoryId: null,
+      unit: 'each', packSize: 1, bin: 'A1', qtyOnHand: 24, minQty: 18, barcode: null, notes: '',
+      consumable: false, archived: false,
+    });
+
+    await ensureSeeded();
+
+    const items = alive(await db.items.toArray());
+    expect(items.some((item) => item.sku === 'FRN-01')).toBe(true);
+    // And the demo row is untouched — removing it is a separate, deliberate act.
+    expect(items.some((item) => item.sku === 'HYD-CUBE20')).toBe(true);
   });
 });

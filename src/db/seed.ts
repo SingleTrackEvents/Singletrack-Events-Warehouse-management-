@@ -49,14 +49,31 @@ export function isDemoId(id: string): boolean {
   return id.startsWith('demo-');
 }
 
-/** Populate an empty database. Safe to call on every boot — it exits if seeded. */
+/**
+ * Populate a new database, and top up an old one. Safe to call on every boot.
+ *
+ * A device that has seeded once used to stop here, which meant anything added
+ * to the catalogue afterwards never reached it — the four per-destination
+ * templates landed in a release and were invisible to everyone already using
+ * the app. So a device that has seeded now also receives whatever this build
+ * defines and it has never seen.
+ *
+ * Never seen is the test, not "not currently there". A record the crew deleted
+ * leaves a tombstone behind, and a tombstone is a decision: those ids are known
+ * and stay skipped, so nothing resurrects itself overnight. Records that are
+ * present are left exactly as they are, edits included.
+ */
 export async function ensureSeeded(): Promise<void> {
   try {
     const settings = await getSettings();
-    if (settings.seeded) return;
+    if (settings.seeded) {
+      await seedStarterData({ onlyMissing: true });
+      return;
+    }
     const existing = await db.items.count();
     if (existing > 0) {
       await update(db.settings, settings.id, { seeded: true });
+      await seedStarterData({ onlyMissing: true });
       return;
     }
     await seedStarterData();
@@ -67,27 +84,38 @@ export async function ensureSeeded(): Promise<void> {
   }
 }
 
-export async function seedStarterData(): Promise<void> {
+export async function seedStarterData(
+  options: { onlyMissing?: boolean } = {},
+): Promise<void> {
   // What the seeded rows were at before this run, so a reload outranks a
   // previous removal. See liftSeedRevisions below.
   const previous = await seedRevisions();
-  const bySku = new Map<string, Item>();
+  // In top-up mode every id already in the database — tombstoned included — is
+  // left alone. A full reload writes over the lot, which is what the button in
+  // Settings promises.
+  const known = options.onlyMissing ? new Set(previous.keys()) : new Set<string>();
+  const isNew = (id: string) => !known.has(id);
 
   for (const [index, group] of CATALOGUE.entries()) {
-    const category = await create(db.categories, {
-      id: seedId('cat', group.category),
-      name: group.category,
-      sort: (index + 1) * 10,
-      icon: group.icon,
-    });
+    const categoryId = seedId('cat', group.category);
+    if (isNew(categoryId)) {
+      await create(db.categories, {
+        id: categoryId,
+        name: group.category,
+        sort: (index + 1) * 10,
+        icon: group.icon,
+      });
+    }
 
-    const items = await createMany(
+    await createMany(
       db.items,
-      group.items.map((item) => ({
+      group.items
+        .filter((item) => isNew(seedId('item', item.sku)))
+        .map((item) => ({
         id: seedId('item', item.sku),
         name: item.name,
         sku: item.sku,
-        categoryId: category.id,
+        categoryId,
         unit: item.unit as Unit,
         packSize: 1,
         // Where each item lives is warehouse knowledge the spreadsheet does not
@@ -103,8 +131,12 @@ export async function seedStarterData(): Promise<void> {
       })),
     );
 
-    for (const item of items) bySku.set(item.sku, item);
   }
+
+  // Built from the database rather than from what this run happened to write,
+  // so a template line still finds its item when the item was already present.
+  const bySku = new Map<string, Item>();
+  for (const item of (await db.items.toArray()) as Item[]) bySku.set(item.sku, item);
 
   // One template per event, from that event's own packing list.
   for (const event of EVENT_LISTS) {
@@ -115,8 +147,10 @@ export async function seedStarterData(): Promise<void> {
     );
     if (!lines.length) continue;
 
+    const templateId = seedId('tpl', event.code);
+    if (!isNew(templateId)) continue;
     const template = await create(db.templates, {
-      id: seedId('tpl', event.code),
+      id: templateId,
       name: `${event.name} — full event`,
       // These are whole-event totals rather than one site's worth, so the
       // village is where they land before being split out to the stations.
@@ -144,8 +178,10 @@ export async function seedStarterData(): Promise<void> {
 
   // One per kind of destination, for building a packlist a station at a time.
   for (const spec of STATION_TEMPLATES) {
+    const templateId = seedId('tpl', spec.name);
+    if (!isNew(templateId)) continue;
     const template = await create(db.templates, {
-      id: seedId('tpl', spec.name),
+      id: templateId,
       name: spec.name,
       appliesTo: spec.appliesTo,
       scope: 'site' as const,
@@ -172,7 +208,7 @@ export async function seedStarterData(): Promise<void> {
     );
   }
 
-  await liftSeedRevisions(previous);
+  if (!options.onlyMissing) await liftSeedRevisions(previous);
 }
 
 /** Current revision of every seeded row, tombstoned ones included. */
