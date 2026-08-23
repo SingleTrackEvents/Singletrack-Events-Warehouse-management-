@@ -8,7 +8,13 @@ import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { update } from '../db/repo';
 import { useCategories, useCrewName, useItem } from '../hooks/useDb';
-import { MOVEMENT_LABELS, isLowStock, itemHistory, recordMovements, setQuantity } from '../domain/stock';
+import {
+  MOVEMENT_LABELS,
+  isLowStock,
+  itemHistory,
+  recordMovements,
+  setQuantity,
+} from '../domain/stock';
 import { formatDateTime, formatQty, formatQtyDetail } from '../domain/format';
 import type { MovementReason, Unit } from '../db/types';
 import { UNITS } from '../db/types';
@@ -67,7 +73,13 @@ export default function ItemScreen() {
             </div>
           </div>
           <div className="stack-sm" style={{ alignItems: 'flex-end' }}>
-            {isLowStock(item) ? <Pill tone="danger">Below reorder</Pill> : <Pill tone="ok">In stock</Pill>}
+            {history && !history.length && item.qtyOnHand === 0 ? (
+              <Pill>Not counted yet</Pill>
+            ) : isLowStock(item) ? (
+              <Pill tone="danger">Below reorder</Pill>
+            ) : (
+              <Pill tone="ok">In stock</Pill>
+            )}
             {category ? (
               <Pill>
                 {category.icon} {category.name}

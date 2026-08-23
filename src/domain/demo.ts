@@ -1,6 +1,12 @@
 import { db, SYNCED_TABLES } from '../db/db';
 import { alive, softDelete } from '../db/repo';
-import { demoSignature, isDemoId } from '../db/seed';
+import { isDemoId } from '../db/seed';
+import {
+  LEGACY_DEMO_CATEGORIES,
+  LEGACY_DEMO_EVENTS,
+  LEGACY_DEMO_SKUS,
+  LEGACY_DEMO_TEMPLATES,
+} from '../db/legacyDemo';
 import type { Table } from 'dexie';
 import type { Item, RaceEvent, SyncMeta, Template } from '../db/types';
 
@@ -55,13 +61,19 @@ export interface DemoFootprint {
 
 type Named = SyncMeta & { name?: string; sku?: string };
 
+const lower = (values: string[]) => new Set(values.map((value) => value.trim().toLowerCase()));
+
+const DEMO_SKUS = lower(LEGACY_DEMO_SKUS);
+const DEMO_CATEGORIES = lower(LEGACY_DEMO_CATEGORIES);
+const DEMO_TEMPLATES = lower(LEGACY_DEMO_TEMPLATES);
+const DEMO_EVENTS = lower(LEGACY_DEMO_EVENTS);
+
 function matchesCatalogue(table: string, row: Named): boolean {
   if (isDemoId(row.id)) return true;
-  const signature = demoSignature();
   const name = (row.name ?? '').trim().toLowerCase();
-  if (table === 'items') return signature.itemSkus.has((row.sku ?? '').trim().toLowerCase());
-  if (table === 'categories') return signature.categoryNames.has(name);
-  if (table === 'templates') return signature.templateNames.has(name);
+  if (table === 'items') return DEMO_SKUS.has((row.sku ?? '').trim().toLowerCase());
+  if (table === 'categories') return DEMO_CATEGORIES.has(name);
+  if (table === 'templates') return DEMO_TEMPLATES.has(name);
   return false;
 }
 
@@ -129,9 +141,8 @@ async function eventRows(
 
 /** Races that look like the seeded examples, with what is hanging off each. */
 export async function demoEventCandidates(): Promise<DemoEventCandidate[]> {
-  const signature = demoSignature();
   const events = alive((await db.events.toArray()) as RaceEvent[]).filter(
-    (event) => isDemoId(event.id) || signature.eventNames.has(event.name.trim().toLowerCase()),
+    (event) => isDemoId(event.id) || DEMO_EVENTS.has(event.name.trim().toLowerCase()),
   );
 
   const destinations = alive(await db.destinations.toArray());

@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { db } from '../db/db';
 import { create } from '../db/repo';
-import { isLowStock, lowStockItems, pieces, recordMovements, setQuantity, shortfall } from './stock';
+import {
+  isLowStock,
+  isUncounted,
+  itemsWithMovements,
+  lowStockItems,
+  pieces,
+  recordMovements,
+  setQuantity,
+  shortfall,
+} from './stock';
 import type { Item } from '../db/types';
 
 async function makeItem(overrides: Partial<Item> = {}) {
@@ -130,5 +139,58 @@ describe('pack sizes', () => {
     const carton = { qtyOnHand: 3, packSize: 24 } as Item;
     expect(pieces(carton)).toBe(72);
     expect(pieces(carton, 1)).toBe(24);
+  });
+});
+
+describe('uncounted stock', () => {
+  const item = (over: Partial<Item> = {}): Item =>
+    ({
+      id: 'i1', createdAt: '', updatedAt: '', deletedAt: null, rev: 1, deviceId: '', syncedAt: null,
+      name: 'Trestle Tables', sku: 'FRN-01', categoryId: null, unit: 'each', packSize: 1, bin: '',
+      qtyOnHand: 0, minQty: 155, barcode: null, notes: '', consumable: false, archived: false,
+      ...over,
+    }) as Item;
+
+  it('is not the same as being low', () => {
+    const never = new Set<string>();
+    // A catalogue imported from a packing list knows what the warehouse ought
+    // to carry and nothing about what is on the shelf.
+    expect(isUncounted(item(), never)).toBe(true);
+    expect(isLowStock(item(), never)).toBe(false);
+    // Without the ledger to consult, the old behaviour stands.
+    expect(isLowStock(item())).toBe(true);
+  });
+
+  it('counts a shelf genuinely counted as empty', () => {
+    // Setting a count writes a movement, so zero-on-the-ledger is a real zero.
+    const counted = new Set(['i1']);
+    expect(isUncounted(item(), counted)).toBe(false);
+    expect(isLowStock(item(), counted)).toBe(true);
+  });
+
+  it('stops being uncounted the moment a quantity is recorded', () => {
+    const never = new Set<string>();
+    expect(isUncounted(item({ qtyOnHand: 200 }), never)).toBe(false);
+    expect(isLowStock(item({ qtyOnHand: 200 }), never)).toBe(false);
+    expect(isLowStock(item({ qtyOnHand: 100 }), new Set(['i1']))).toBe(true);
+  });
+
+  it('keeps uncounted items out of the low list', () => {
+    const never = new Set<string>();
+    const rows = [item(), item({ id: 'i2', qtyOnHand: 3, minQty: 10 })];
+    expect(lowStockItems(rows, never).map((row) => row.id)).toEqual(['i2']);
+    expect(lowStockItems(rows).map((row) => row.id)).toEqual(['i1', 'i2']);
+  });
+
+  it('reads the ledger to decide', async () => {
+    const stocked = await create(db.items, {
+      name: 'Water', sku: 'W', categoryId: null, unit: 'each', packSize: 1, bin: '',
+      qtyOnHand: 0, minQty: 5, barcode: null, notes: '', consumable: false, archived: false,
+    });
+    expect(await itemsWithMovements()).toEqual(new Set());
+
+    await recordMovements([{ itemId: stocked.id, qty: 4, reason: 'receipt' }]);
+
+    expect(await itemsWithMovements()).toEqual(new Set([stocked.id]));
   });
 });

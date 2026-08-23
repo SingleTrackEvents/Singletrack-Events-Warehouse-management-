@@ -1,62 +1,115 @@
 import { describe, expect, it } from 'vitest';
 import { db, getSettings } from './db';
 import { alive } from './repo';
-import { ensureSeeded, seedDemoData } from './seed';
-import { progressFor } from '../domain/packlists';
+import { ensureSeeded, seedStarterData } from './seed';
+import { CATALOGUE, EVENT_LISTS } from './catalogue';
 
-describe('demo data', () => {
-  it('gives a new device a worked example to look at', async () => {
-    await seedDemoData();
+describe('the starting catalogue', () => {
+  it('loads the real warehouse list', async () => {
+    await seedStarterData();
 
-    expect(await db.categories.count()).toBeGreaterThan(5);
-    expect(await db.items.count()).toBeGreaterThan(40);
-    expect(await db.templates.count()).toBeGreaterThan(2);
-    expect(await db.events.count()).toBe(3);
-    expect(await db.destinations.count()).toBeGreaterThan(5);
+    const items = alive(await db.items.toArray());
+    const expected = CATALOGUE.reduce((sum, group) => sum + group.items.length, 0);
+    expect(await db.categories.count()).toBe(CATALOGUE.length);
+    expect(items).toHaveLength(expected);
+    expect(items.some((item) => item.name === 'IBC Water Container (1000L)')).toBe(true);
+    expect(items.some((item) => item.name === 'Starlink')).toBe(true);
   });
 
-  it('opens every balance on the ledger so history is complete', async () => {
-    await seedDemoData();
+  it('gives every item a unique code and a category', async () => {
+    await seedStarterData();
 
-    const items = alive(await db.items.toArray()).filter((item) => item.qtyOnHand > 0);
-    const movements = alive(await db.movements.toArray());
-
-    expect(movements).toHaveLength(items.length);
-    expect(movements.every((movement) => movement.reason === 'receipt')).toBe(true);
-    expect(movements.every((movement) => movement.balanceAfter === movement.qty)).toBe(true);
+    const items = alive(await db.items.toArray());
+    expect(new Set(items.map((item) => item.sku)).size).toBe(items.length);
+    expect(items.every((item) => item.categoryId !== null)).toBe(true);
   });
 
-  it('builds packlists at a mix of stages so each state is visible', async () => {
-    await seedDemoData();
+  it('records no quantity on hand, because the spreadsheet is not a stocktake', async () => {
+    await seedStarterData();
 
-    const packlists = alive(await db.packlists.toArray());
-    const statuses = new Set(packlists.map((packlist) => packlist.status));
-
-    expect(packlists.length).toBeGreaterThan(4);
-    expect(statuses.has('packed')).toBe(true);
-    expect(statuses.has('picking')).toBe(true);
-    expect(statuses.has('draft')).toBe(true);
+    // Putting a figure here would look like a count and would not be one. The
+    // ledger stays empty for the same reason: nothing has been received yet.
+    expect(alive(await db.items.toArray()).every((item) => item.qtyOnHand === 0)).toBe(true);
+    expect(await db.movements.count()).toBe(0);
   });
 
-  it('gives every packlist a unique scannable code', async () => {
-    await seedDemoData();
+  it('sets the low-stock level to the largest single-event requirement', async () => {
+    await seedStarterData();
 
-    const codes = alive(await db.packlists.toArray()).map((packlist) => packlist.code);
-    expect(new Set(codes).size).toBe(codes.length);
-    expect(codes.every((code) => /^[A-Z0-9]{1,5}-[A-Z0-9]{4}$/.test(code))).toBe(true);
+    const items = alive(await db.items.toArray());
+    const trestle = items.find((item) => item.name === 'Trestle Tables');
+    expect(trestle?.minQty).toBe(155);
+    // Everything is below its level until counted, which is the honest state.
+    expect(items.filter((item) => item.minQty > 0).every((item) => item.qtyOnHand < item.minQty))
+      .toBe(true);
   });
 
-  it('leaves the part-packed list genuinely part packed', async () => {
-    await seedDemoData();
+  it('builds one packing template per event', async () => {
+    await seedStarterData();
 
-    const picking = alive(await db.packlists.toArray()).find((entry) => entry.status === 'picking')!;
-    const lines = alive(await db.packlistLines.toArray()).filter(
-      (line) => line.packlistId === picking.id,
+    const templates = alive(await db.templates.toArray());
+    expect(templates).toHaveLength(EVENT_LISTS.length);
+    for (const event of EVENT_LISTS) {
+      expect(templates.some((template) => template.name.startsWith(event.name))).toBe(true);
+    }
+  });
+
+  it('fills each template from that event, not from the whole catalogue', async () => {
+    await seedStarterData();
+
+    const templates = alive(await db.templates.toArray());
+    const lines = alive(await db.templateLines.toArray());
+    const gpt = templates.find((template) => template.name.startsWith('GPT100'))!;
+    const baw = templates.find((template) => template.name.startsWith('Snow Gum'))!;
+
+    const gptLines = lines.filter((line) => line.templateId === gpt.id);
+    const bawLines = lines.filter((line) => line.templateId === baw.id);
+
+    // GPT100 is the biggest list and Baw Baw the smallest, per the spreadsheet.
+    expect(gptLines.length).toBeGreaterThan(bawLines.length);
+    expect(bawLines.length).toBeGreaterThan(0);
+    expect(lines.every((line) => line.qty > 0)).toBe(true);
+  });
+
+  it('carries the real quantities through to the template lines', async () => {
+    await seedStarterData();
+
+    const items = alive(await db.items.toArray());
+    const templates = alive(await db.templates.toArray());
+    const buffalo = templates.find((template) => template.name.startsWith('Buffalo Stampede'))!;
+    const tables = items.find((item) => item.name === 'Trestle Tables')!;
+    const line = alive(await db.templateLines.toArray()).find(
+      (entry) => entry.templateId === buffalo.id && entry.itemId === tables.id,
     );
-    const progress = progressFor(lines);
 
-    expect(progress.percent).toBeGreaterThan(0);
-    expect(progress.percent).toBeLessThan(100);
+    expect(line?.qty).toBe(155);
+  });
+
+  it('every template line points at an item that exists', async () => {
+    await seedStarterData();
+
+    const ids = new Set(alive(await db.items.toArray()).map((item) => item.id));
+    const lines = alive(await db.templateLines.toArray());
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((line) => ids.has(line.itemId))).toBe(true);
+  });
+
+  it('creates no events — those are the crew’s to enter', async () => {
+    await seedStarterData();
+
+    expect(await db.events.count()).toBe(0);
+    expect(await db.destinations.count()).toBe(0);
+    expect(await db.packlists.count()).toBe(0);
+  });
+
+  it('seeding twice collapses rather than doubling', async () => {
+    await seedStarterData();
+    const first = alive(await db.items.toArray()).length;
+
+    await seedStarterData();
+
+    expect(alive(await db.items.toArray())).toHaveLength(first);
+    expect(alive(await db.templates.toArray())).toHaveLength(EVENT_LISTS.length);
   });
 
   it('only seeds once, however many times the app boots', async () => {

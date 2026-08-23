@@ -77,16 +77,48 @@ export async function setQuantity(
   return recordMovements([{ itemId, qty: delta, reason, ...options }]);
 }
 
-/** True when an item has fallen to or below its reorder threshold. */
-export function isLowStock(item: Item): boolean {
+/**
+ * True for an item that has never had a quantity recorded either way.
+ *
+ * Not the same as having none. A catalogue imported from a packing list knows
+ * what the warehouse ought to carry and nothing about what is on the shelf, and
+ * flagging all of that as "low" would put a hundred false alarms in front of the
+ * crew on the first screen they open. Uncounted is its own state, and the answer
+ * to it is a stocktake rather than a purchase order.
+ *
+ * The ledger is the test: an item with no movement has never been counted,
+ * received or issued. Setting a count to zero writes a movement, so a shelf
+ * genuinely counted as empty reads as low, which is right.
+ */
+export function isUncounted(item: Item, itemsWithMovements: ReadonlySet<string>): boolean {
+  return !item.archived && item.qtyOnHand === 0 && !itemsWithMovements.has(item.id);
+}
+
+/**
+ * True when an item has fallen to or below its reorder threshold.
+ *
+ * Pass the set of items that appear on the ledger to keep never-counted stock
+ * out of the count; omit it and every uncounted item reads as low.
+ */
+export function isLowStock(item: Item, itemsWithMovements?: ReadonlySet<string>): boolean {
+  if (itemsWithMovements && isUncounted(item, itemsWithMovements)) return false;
   return !item.archived && item.minQty > 0 && item.qtyOnHand <= item.minQty;
 }
 
 /** Items at or below their reorder point, most urgent first. */
-export function lowStockItems(items: Item[]): Item[] {
+export function lowStockItems(items: Item[], itemsWithMovements?: ReadonlySet<string>): Item[] {
   return items
-    .filter(isLowStock)
+    .filter((item) => isLowStock(item, itemsWithMovements))
     .sort((a, b) => shortfall(b) - shortfall(a));
+}
+
+/** Ids of every item the ledger has ever touched. */
+export async function itemsWithMovements(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  for (const movement of await db.movements.toArray()) {
+    if (!movement.deletedAt) ids.add(movement.itemId);
+  }
+  return ids;
 }
 
 /** How far below the reorder point an item sits. */

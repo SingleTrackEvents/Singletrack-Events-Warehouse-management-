@@ -8,7 +8,7 @@ import { db, getSettings } from '../db/db';
 import { update } from '../db/repo';
 import { useSettings } from '../hooks/useDb';
 import { downloadJson, exportAll, importBackup, isBackup, wipeAll } from '../domain/backup';
-import { seedDemoData } from '../db/seed';
+import { seedStarterData } from '../db/seed';
 import { countDuplicates, mergeDuplicates } from '../domain/duplicates';
 import { demoFootprint, removeDemoCatalogue, removeDemoEvent } from '../domain/demo';
 import type { DemoFootprint } from '../domain/demo';
@@ -211,8 +211,10 @@ export default function SettingsScreen() {
           <button type="button" className="row" onClick={() => setReseeding(true)}>
             <span className="row-icon">🌱</span>
             <span className="row-body">
-              <span className="row-title">Reload demo data</span>
-              <span className="row-sub">Adds the worked example back alongside your data</span>
+              <span className="row-title">Reload the warehouse catalogue</span>
+              <span className="row-sub">
+                Puts the 180 items, 20 categories and event templates back
+              </span>
             </span>
             <span className="row-chevron">›</span>
           </button>
@@ -332,13 +334,13 @@ export default function SettingsScreen() {
 
       {reseeding ? (
         <ConfirmSheet
-          title="Reload the demo data?"
-          body="The example races, catalogue and templates are added again. Anything you have entered is left alone, so you may end up with duplicates."
-          confirmLabel="Reload demo"
+          title="Reload the catalogue?"
+          body="The SingleTrack item list, categories and per-event templates are added back. Anything you have entered yourself is left alone, and items already there are matched by code rather than duplicated."
+          confirmLabel="Reload"
           onCancel={() => setReseeding(false)}
           onConfirm={() => {
-            void seedDemoData().then(() => {
-              toast('Demo data reloaded');
+            void seedStarterData().then(() => {
+              toast('Catalogue reloaded');
               setReseeding(false);
             });
           }}

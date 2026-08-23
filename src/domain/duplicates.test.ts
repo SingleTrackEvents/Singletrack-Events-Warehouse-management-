@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { db } from '../db/db';
 import { alive, create } from '../db/repo';
-import { seedDemoData } from '../db/seed';
+import { seedStarterData } from '../db/seed';
 import { countDuplicates, findDuplicateItems, findDuplicateTemplates, mergeDuplicates } from './duplicates';
 import type { Item } from '../db/types';
 
@@ -168,9 +168,9 @@ describe('the two-phone case that caused this', () => {
   it('seeding twice no longer doubles anything', async () => {
     // Each phone seeds its own copy; sync merges them. With ids derived from
     // the content the two copies are the same rows, so they collapse.
-    await seedDemoData();
+    await seedStarterData();
     const afterFirst = await db.items.count();
-    await seedDemoData();
+    await seedStarterData();
 
     expect(await db.items.count()).toBe(afterFirst);
     expect((await countDuplicates()).items).toBe(0);
@@ -186,8 +186,8 @@ describe('the two-phone case that caused this', () => {
   });
 
   it('templates seeded twice collapse as well', async () => {
-    await seedDemoData();
-    await seedDemoData();
+    await seedStarterData();
+    await seedStarterData();
     expect(findDuplicateTemplates(alive(await db.templates.toArray()))).toHaveLength(0);
   });
 });
