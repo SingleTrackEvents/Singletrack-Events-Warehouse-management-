@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
-import { ConfirmSheet, Field, Pill } from '../components/ui';
+import { ConfirmSheet, Field, Pill, Sheet } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db, getSettings } from '../db/db';
 import { update } from '../db/repo';
@@ -10,7 +10,8 @@ import { useSettings } from '../hooks/useDb';
 import { downloadJson, exportAll, importBackup, isBackup, wipeAll } from '../domain/backup';
 import { seedDemoData } from '../db/seed';
 import { countDuplicates, mergeDuplicates } from '../domain/duplicates';
-import { demoFootprint, removeDemoData } from '../domain/demo';
+import { demoFootprint, removeDemoCatalogue, removeDemoEvent } from '../domain/demo';
+import type { DemoFootprint } from '../domain/demo';
 import { ListEditor } from '../components/ListEditor';
 import { formatDateTime, plural } from '../domain/format';
 import type { Settings } from '../db/types';
@@ -218,18 +219,14 @@ export default function SettingsScreen() {
           <button
             type="button"
             className="row"
-            disabled={!demo || demo.records === 0}
+            disabled={!demo || demo.empty}
             onClick={() => setRemovingDemo(true)}
           >
             <span className="row-icon">🧽</span>
             <span className="row-body">
               <span className="row-title">Remove the demo data</span>
               <span className="row-sub">
-                {!demo
-                  ? 'Checking…'
-                  : demo.records === 0
-                    ? 'Already gone'
-                    : `${plural(demo.events, 'example race')} and ${plural(demo.items, 'catalogue item')} — removed everywhere, not just here`}
+                {!demo ? 'Checking…' : demo.empty ? 'Nothing left to remove' : describeDemo(demo)}
               </span>
             </span>
             <span className="row-chevron">›</span>
@@ -322,32 +319,13 @@ export default function SettingsScreen() {
         />
       ) : null}
 
-      {removingDemo ? (
-        <ConfirmSheet
-          title="Remove the demo data?"
-          body={
-            <>
-              The example races, catalogue and templates go. Anything you have entered stays.
-              <div className="mt-2">
-                This is a real deletion, not a tidy-up of this device: it syncs, so the demo goes
-                from every phone and computer signed in to this account.
-              </div>
-              {demo?.yourRecordsAffected ? (
-                <div className="mt-2" style={{ color: 'var(--warn)' }}>
-                  {plural(demo.yourRecordsAffected, 'record')} of yours refers to a demo record — a
-                  packlist line against a demo item, say. Those will show as unknown afterwards.
-                </div>
-              ) : null}
-            </>
-          }
-          confirmLabel="Remove"
-          tone="danger"
-          onCancel={() => setRemovingDemo(false)}
-          onConfirm={() => {
-            void removeDemoData().then((removed) => {
-              toast(`Demo data removed · ${plural(removed, 'record')}`);
-              setRemovingDemo(false);
-            });
+      {removingDemo && demo ? (
+        <RemoveDemoSheet
+          footprint={demo}
+          onClose={() => setRemovingDemo(false)}
+          onDone={(removed) => {
+            toast(`Removed ${plural(removed, 'record')}`);
+            setRemovingDemo(false);
           }}
         />
       ) : null}
@@ -367,5 +345,139 @@ export default function SettingsScreen() {
         />
       ) : null}
     </Screen>
+  );
+}
+
+/** Name only what is actually still there, so the row never reads "0 items". */
+function describeDemo(demo: DemoFootprint): string {
+  const parts: string[] = [];
+  if (demo.items) parts.push(plural(demo.items, 'catalogue item'));
+  if (demo.templates) parts.push(plural(demo.templates, 'template'));
+  if (demo.events.length) parts.push(plural(demo.events.length, 'example race'));
+  return `${parts.join(', ')} — removed everywhere, not just here`;
+}
+
+/**
+ * Review what looks like demo data before removing it.
+ *
+ * The catalogue is safe to identify automatically — those SKUs are invented, so
+ * a match is as close to certain as this gets. The example races are not: they
+ * are named after real SingleTrack events, and a crew may well have adopted the
+ * demo copy as their own. So each race is listed with what is hanging off it
+ * and left unticked, and the amount of packing recorded against it is shown,
+ * because that is the thing that tells you whose race it is.
+ */
+function RemoveDemoSheet({
+  footprint,
+  onClose,
+  onDone,
+}: {
+  footprint: DemoFootprint;
+  onClose: () => void;
+  onDone: (removed: number) => void;
+}) {
+  const [catalogue, setCatalogue] = useState(footprint.catalogue > 0);
+  const [events, setEvents] = useState<Record<string, boolean>>({});
+  const [working, setWorking] = useState(false);
+
+  const chosenEvents = footprint.events.filter((entry) => events[entry.event.id]);
+  const nothingChosen = !catalogue && chosenEvents.length === 0;
+
+  const remove = async () => {
+    setWorking(true);
+    let removed = 0;
+    if (catalogue) removed += await removeDemoCatalogue();
+    for (const entry of chosenEvents) removed += await removeDemoEvent(entry.event.id);
+    onDone(removed);
+  };
+
+  return (
+    <Sheet
+      title="Remove the demo data"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={nothingChosen || working}
+            onClick={() => void remove()}
+          >
+            {working ? 'Removing…' : 'Remove'}
+          </button>
+        </>
+      }
+    >
+      <p className="small muted mb-3">
+        This is a real deletion, not a tidy-up of this device: it syncs, so whatever you pick goes
+        from every phone and computer signed in to this account.
+      </p>
+
+      {footprint.catalogue ? (
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={catalogue}
+            onChange={(event) => setCatalogue(event.target.checked)}
+          />
+          <span>
+            <span className="strong">The example catalogue</span>
+            <span className="small muted" style={{ display: 'block' }}>
+              {plural(footprint.items, 'item')}, {plural(footprint.templates, 'template')} and{' '}
+              {plural(footprint.categories, 'category', 'categories')}. Matched on the codes the
+              demo uses, so anything you added yourself is left alone.
+            </span>
+          </span>
+        </label>
+      ) : null}
+
+      {footprint.events.length ? (
+        <div className="mt-3">
+          <p className="small strong">Example races</p>
+          <p className="tiny muted mb-2">
+            These carry the names of real SingleTrack races, so the app cannot tell the worked
+            example from one you have been running for real. Tick only the ones you know are the
+            demo.
+          </p>
+          <div className="stack">
+            {footprint.events.map((entry) => (
+              <label key={entry.event.id} className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={events[entry.event.id] ?? false}
+                  onChange={(changed) =>
+                    setEvents((current) => ({
+                      ...current,
+                      [entry.event.id]: changed.target.checked,
+                    }))
+                  }
+                />
+                <span>
+                  <span className="strong">{entry.event.name}</span>
+                  <span className="small muted" style={{ display: 'block' }}>
+                    {entry.event.location} · {plural(entry.destinations, 'destination')},{' '}
+                    {plural(entry.packlists, 'packlist')}
+                  </span>
+                  {entry.packedLines ? (
+                    <span className="tiny" style={{ display: 'block', color: 'var(--warn)' }}>
+                      {plural(entry.packedLines, 'line')} already packed against it — check this is
+                      not your real one.
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <p className="tiny muted mt-3">
+        Stock movements are kept either way — the ledger is the record of what actually left the
+        warehouse.
+      </p>
+    </Sheet>
   );
 }

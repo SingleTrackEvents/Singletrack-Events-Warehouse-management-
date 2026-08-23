@@ -579,6 +579,44 @@ export async function seedDemoData(): Promise<void> {
   await liftDemoRevisions(previous);
 }
 
+/**
+ * What the demo seed writes, by content rather than by id.
+ *
+ * Databases seeded before the ids became deterministic carry random UUIDs, so
+ * the `demo-` prefix finds nothing in them — which is most of the ones already
+ * in use. These signatures identify those rows by what they are instead.
+ *
+ * Kept next to the seed data itself so the two cannot drift apart: a SKU added
+ * to the catalogue is matchable the same day.
+ */
+export interface DemoSignature {
+  /** SKUs the demo catalogue uses. Invented codes, so a match is near-certain. */
+  itemSkus: Set<string>;
+  categoryNames: Set<string>;
+  templateNames: Set<string>;
+  /**
+   * Names of the example races. Deliberately separate: these are real
+   * SingleTrack events, so a crew may well have adopted the demo copy as their
+   * own. Matching one is a question for a person, never an instruction.
+   */
+  eventNames: Set<string>;
+  destinationNames: Set<string>;
+}
+
+const lower = (values: string[]) => new Set(values.map((value) => value.trim().toLowerCase()));
+
+export function demoSignature(): DemoSignature {
+  return {
+    itemSkus: lower(CATALOGUE.flatMap((group) => group.items.map((item) => item.sku))),
+    categoryNames: lower(CATALOGUE.map((group) => group.category)),
+    templateNames: lower(TEMPLATES.map((template) => template.name)),
+    eventNames: lower(['Buffalo Stampede', 'Hounslow Classic', 'Roller Coaster Run']),
+    destinationNames: lower(
+      BUFFALO_DESTINATIONS.map((destination) => destination.name),
+    ),
+  };
+}
+
 /** Current revision of every demo row, tombstoned ones included. */
 async function demoRevisions(): Promise<Map<string, number>> {
   const revisions = new Map<string, number>();
