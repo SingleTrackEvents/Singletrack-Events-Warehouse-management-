@@ -750,7 +750,18 @@ function BuildListsSheet({
 
   const templateFor = (destination: Destination) => {
     if (choices[destination.id] !== undefined) return choices[destination.id];
-    const match = templates?.find((template) => template.appliesTo === destination.type);
+    const ofType = (templates ?? []).filter((template) => template.appliesTo === destination.type);
+    // A per-site list first. The whole-event ones are also filed under the
+    // village, and starting a single destination from a 90-line season total is
+    // never what was meant.
+    const perSite = ofType.filter((template) => template.scope !== 'event');
+    // Then the one built for how a vehicle actually reaches this destination:
+    // a van-accessible station and a quad drop need different loads.
+    const match =
+      perSite.find((template) => template.suitsAccess?.includes(destination.access)) ??
+      perSite.find((template) => !template.suitsAccess) ??
+      perSite[0] ??
+      ofType[0];
     return match?.id ?? '';
   };
 

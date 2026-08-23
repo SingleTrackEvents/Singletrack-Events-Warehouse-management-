@@ -1,6 +1,7 @@
 import { db, getSettings, SYNCED_TABLES } from './db';
 import { create, createMany, update } from './repo';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
+import { STATION_TEMPLATES } from './stationTemplates';
 import type { Item, SyncMeta, Unit } from './types';
 
 /**
@@ -8,8 +9,12 @@ import type { Item, SyncMeta, Unit } from './types';
  *
  * A new install opens on the actual gear list rather than an empty shell or a
  * made-up example — 180 items across 20 categories, taken from the consolidated
- * inventory spreadsheet, plus one packing template per event built from what
- * that event's 2025/26 list actually called for.
+ * inventory spreadsheet, and templates in two shapes.
+ *
+ * One per event, built from what that event's 2025/26 list actually called for:
+ * whole-event totals, good for checking a season against the warehouse. And one
+ * per kind of destination — standard station, remote station, village, water
+ * drop — which is the shape you want when building a packlist for Aid 3.
  *
  * Two things it deliberately does not do.
  *
@@ -116,6 +121,7 @@ export async function seedStarterData(): Promise<void> {
       // These are whole-event totals rather than one site's worth, so the
       // village is where they land before being split out to the stations.
       appliesTo: 'event_village',
+      scope: 'event' as const,
       description:
         `Everything the ${event.year} ${event.name} list called for, across all aid stations and ` +
         'the village combined. Split it across destinations as you build them.',
@@ -133,6 +139,36 @@ export async function seedStarterData(): Promise<void> {
         note: '',
         sort: (order + 1) * 10,
       })),
+    );
+  }
+
+  // One per kind of destination, for building a packlist a station at a time.
+  for (const spec of STATION_TEMPLATES) {
+    const template = await create(db.templates, {
+      id: seedId('tpl', spec.name),
+      name: spec.name,
+      appliesTo: spec.appliesTo,
+      scope: 'site' as const,
+      suitsAccess: spec.suitsAccess,
+      description: spec.description,
+    });
+
+    await createMany(
+      db.templateLines,
+      // A line whose item is missing is dropped rather than left pointing at
+      // nothing; a test keeps the two in step so this should never fire.
+      spec.lines
+        .filter(([sku]) => bySku.has(sku))
+        .map(([sku, qty, mandatory], order) => ({
+          id: seedId('tline', `${spec.name}-${sku}`),
+          templateId: template.id,
+          itemId: bySku.get(sku)!.id,
+          qty,
+          mandatory: mandatory ?? false,
+          perRunner: false,
+          note: '',
+          sort: (order + 1) * 10,
+        })),
     );
   }
 

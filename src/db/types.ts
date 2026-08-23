@@ -228,11 +228,29 @@ export interface Container extends SyncMeta {
 }
 
 /** A reusable pattern — "standard 40km aid station" — applied to new packlists. */
+/**
+ * Whether a template describes one site or a whole event.
+ *
+ * A whole-event list is a season-planning tool — useful against a truck or the
+ * warehouse, wrong as the starting point for one aid station. Keeping the two
+ * apart lets "build packlists" reach for the per-site list, which is what
+ * somebody standing at Aid 3 with a crate actually wants.
+ */
+export type TemplateScope = 'site' | 'event';
+
 export interface Template extends SyncMeta {
   name: string;
   /** Destination type this template is designed for. */
   appliesTo: DestinationType;
   description: string;
+  /** Absent on templates written before the distinction existed; those were all per-site. */
+  scope?: TemplateScope;
+  /**
+   * Vehicle access this template suits, where a destination type has more than
+   * one sensible list. A station you can drive a van to and one supplied by quad
+   * need different loads, and the destination already records which it is.
+   */
+  suitsAccess?: AccessType[];
 }
 
 export interface TemplateLine extends SyncMeta {
