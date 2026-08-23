@@ -199,6 +199,15 @@ export async function copyEvent(
  * it — the copy would eat last year's event.
  */
 function stripMeta<T extends SyncMeta>(row: T): Omit<T, keyof SyncMeta> {
-  const { id, createdAt, updatedAt, deletedAt, rev, deviceId, syncedAt, ...rest } = row;
+  const {
+    id: _id,
+    createdAt: _createdAt,
+    updatedAt: _updatedAt,
+    deletedAt: _deletedAt,
+    rev: _rev,
+    deviceId: _deviceId,
+    syncedAt: _syncedAt,
+    ...rest
+  } = row;
   return rest;
 }

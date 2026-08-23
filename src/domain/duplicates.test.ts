@@ -119,12 +119,20 @@ describe('merging', () => {
   });
 
   it('removes a duplicated template along with its lines', async () => {
-    const keep = await create(db.templates, {
+    await create(db.templates, {
       name: 'Standard aid station', appliesTo: 'aid_station', description: '',
     });
-    const drop = await create(db.templates, {
+    await create(db.templates, {
       name: 'standard aid station', appliesTo: 'aid_station', description: '',
     });
+    // Ask the merge which copy survives rather than assuming the first one
+    // does. Two records written in the same millisecond tie on createdAt and
+    // are settled by id, which is a coin flip on the name but deliberate: it
+    // makes every device reach the same answer. Assuming creation order here
+    // was a test that passed or failed depending on the clock.
+    const [group] = findDuplicateTemplates(alive(await db.templates.toArray()));
+    const keep = group.keep;
+    const drop = group.drop[0];
     const line = await create(db.templateLines, {
       templateId: drop.id, itemId: 'item-1', qty: 1, mandatory: false,
       perRunner: false, note: '', sort: 10,
