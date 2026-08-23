@@ -1,7 +1,7 @@
-import { db, getSettings } from './db';
+import { db, getSettings, SYNCED_TABLES } from './db';
 import { create, createMany, update } from './repo';
 import { prefixFor } from '../domain/codes';
-import type { AccessType, DestinationType, Item, Unit } from './types';
+import type { AccessType, DestinationType, Item, SyncMeta, Unit } from './types';
 
 /**
  * Demo dataset.
@@ -365,6 +365,9 @@ export async function ensureSeeded(): Promise<void> {
 }
 
 export async function seedDemoData(): Promise<void> {
+  // What the demo rows were at before this run, so a reload can outrank a
+  // previous removal. See liftDemoRevisions below.
+  const previous = await demoRevisions();
   const skuToItem = new Map<string, Item>();
 
   for (const [index, group] of CATALOGUE.entries()) {
@@ -572,4 +575,42 @@ export async function seedDemoData(): Promise<void> {
       notes: '',
     })),
   );
+
+  await liftDemoRevisions(previous);
+}
+
+/** Current revision of every demo row, tombstoned ones included. */
+async function demoRevisions(): Promise<Map<string, number>> {
+  const revisions = new Map<string, number>();
+  for (const name of SYNCED_TABLES) {
+    for (const row of (await db[name].toArray()) as SyncMeta[]) {
+      if (isDemoId(row.id)) revisions.set(row.id, row.rev);
+    }
+  }
+  return revisions;
+}
+
+/**
+ * Make a reload outrank whatever it replaced.
+ *
+ * Seeding writes fresh records at revision 1. That is fine on an empty device,
+ * but reloading the demo after removing it leaves the server holding a
+ * tombstone at a higher revision — and newest-revision-wins would then delete
+ * the reloaded rows on the next sync, so the demo would reappear and quietly
+ * vanish again. Lifting each row above the revision it had makes the reload the
+ * newer fact, which is what the person tapping the button meant.
+ */
+async function liftDemoRevisions(previous: Map<string, number>): Promise<void> {
+  if (!previous.size) return;
+  for (const name of SYNCED_TABLES) {
+    const rows = (await db[name].toArray()) as SyncMeta[];
+    const lifted = rows.filter((row) => {
+      const was = previous.get(row.id);
+      return was !== undefined && row.rev <= was;
+    });
+    if (!lifted.length) continue;
+    await (db[name] as unknown as { bulkPut(rows: SyncMeta[]): Promise<unknown> }).bulkPut(
+      lifted.map((row) => ({ ...row, rev: (previous.get(row.id) ?? 0) + 1, syncedAt: null })),
+    );
+  }
 }

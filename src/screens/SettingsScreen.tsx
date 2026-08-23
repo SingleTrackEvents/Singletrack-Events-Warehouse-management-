@@ -10,6 +10,7 @@ import { useSettings } from '../hooks/useDb';
 import { downloadJson, exportAll, importBackup, isBackup, wipeAll } from '../domain/backup';
 import { seedDemoData } from '../db/seed';
 import { countDuplicates, mergeDuplicates } from '../domain/duplicates';
+import { demoFootprint, removeDemoData } from '../domain/demo';
 import { ListEditor } from '../components/ListEditor';
 import { formatDateTime, plural } from '../domain/format';
 import type { Settings } from '../db/types';
@@ -28,10 +29,14 @@ export default function SettingsScreen() {
   const [wiping, setWiping] = useState(false);
   const [reseeding, setReseeding] = useState(false);
   const [merging, setMerging] = useState(false);
+  const [removingDemo, setRemovingDemo] = useState(false);
 
   // Two phones that each seeded demo data end up with two of everything once
   // they sync, and someone will eventually add the same item twice by hand.
   const duplicates = useLiveQuery(() => countDuplicates(), []);
+
+  // What the worked example still occupies, so removing it can name it.
+  const demo = useLiveQuery(() => demoFootprint(), []);
 
   const counts = useLiveQuery(async () => ({
     items: await db.items.count(),
@@ -210,6 +215,25 @@ export default function SettingsScreen() {
             </span>
             <span className="row-chevron">›</span>
           </button>
+          <button
+            type="button"
+            className="row"
+            disabled={!demo || demo.records === 0}
+            onClick={() => setRemovingDemo(true)}
+          >
+            <span className="row-icon">🧽</span>
+            <span className="row-body">
+              <span className="row-title">Remove the demo data</span>
+              <span className="row-sub">
+                {!demo
+                  ? 'Checking…'
+                  : demo.records === 0
+                    ? 'Already gone'
+                    : `${plural(demo.events, 'example race')} and ${plural(demo.items, 'catalogue item')} — removed everywhere, not just here`}
+              </span>
+            </span>
+            <span className="row-chevron">›</span>
+          </button>
           <button type="button" className="row" onClick={() => setWiping(true)}>
             <span className="row-icon">🗑</span>
             <span className="row-body">
@@ -249,7 +273,16 @@ export default function SettingsScreen() {
       {wiping ? (
         <ConfirmSheet
           title="Erase everything?"
-          body="Every item, event, packlist and movement on this device is deleted. Backups you have already exported are unaffected."
+          body={
+            <>
+              Every item, event, packlist and movement on this device is deleted. Backups you have
+              already exported are unaffected.
+              <div className="mt-2">
+                It clears this device only. While you are signed in, syncing will bring the data
+                back — to remove the worked example for everyone, use “Remove the demo data”.
+              </div>
+            </>
+          }
           confirmLabel="Erase"
           tone="danger"
           onCancel={() => setWiping(false)}
@@ -284,6 +317,36 @@ export default function SettingsScreen() {
                 `Merged ${plural(summary.itemsMerged, 'item')} and ${plural(summary.templatesMerged, 'template')}`,
               );
               setMerging(false);
+            });
+          }}
+        />
+      ) : null}
+
+      {removingDemo ? (
+        <ConfirmSheet
+          title="Remove the demo data?"
+          body={
+            <>
+              The example races, catalogue and templates go. Anything you have entered stays.
+              <div className="mt-2">
+                This is a real deletion, not a tidy-up of this device: it syncs, so the demo goes
+                from every phone and computer signed in to this account.
+              </div>
+              {demo?.yourRecordsAffected ? (
+                <div className="mt-2" style={{ color: 'var(--warn)' }}>
+                  {plural(demo.yourRecordsAffected, 'record')} of yours refers to a demo record — a
+                  packlist line against a demo item, say. Those will show as unknown afterwards.
+                </div>
+              ) : null}
+            </>
+          }
+          confirmLabel="Remove"
+          tone="danger"
+          onCancel={() => setRemovingDemo(false)}
+          onConfirm={() => {
+            void removeDemoData().then((removed) => {
+              toast(`Demo data removed · ${plural(removed, 'record')}`);
+              setRemovingDemo(false);
             });
           }}
         />

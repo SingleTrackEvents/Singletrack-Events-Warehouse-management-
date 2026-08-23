@@ -1,6 +1,7 @@
 import { ALL_TABLES, db, nowIso } from '../db/db';
 import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
+import { resetCursor } from '../sync/engine';
 
 /**
  * Backup, handover and restore.
@@ -143,11 +144,24 @@ export async function importBackup(
   return result;
 }
 
-/** Wipe every table. Used by "reset device" in settings. */
+/**
+ * Wipe every table. Used by "erase everything on this device" in settings.
+ *
+ * This is deliberately a local clear rather than a tombstone: erasing a phone
+ * you are handing back must not delete the crew's data off the server. That
+ * makes it a fresh start for this device, so the sync cursor is reset too —
+ * otherwise the device stays parked at the server's latest position, pulls
+ * nothing, and sits empty for good.
+ *
+ * It follows that on a signed-in device the data comes back on the next sync.
+ * To remove something for everyone, delete the record itself; to drop the
+ * worked example, use removeDemoData().
+ */
 export async function wipeAll(): Promise<void> {
   for (const name of ALL_TABLES) {
     await db[name].clear();
   }
+  resetCursor();
 }
 
 /** Trigger a browser download of a JSON payload. */
