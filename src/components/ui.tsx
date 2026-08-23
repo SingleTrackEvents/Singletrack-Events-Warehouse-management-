@@ -142,24 +142,34 @@ export function Stepper({
   max,
   step = 1,
   label,
+  placeholder,
 }: {
-  value: number;
+  /**
+   * Null renders an empty box. Use it where no number has been entered yet and
+   * showing one would be a guess the reader might mistake for an answer — a
+   * stocktake line, most of all.
+   */
+  value: number | null;
   onChange: (next: number) => void;
   min?: number;
   max?: number;
   step?: number;
   label?: string;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const clamp = (next: number) => Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min, next));
+  // Stepping from empty starts at the floor rather than treating blank as zero,
+  // so the first tap of + on a blank line reads as one, not one-more-than-none.
+  const current = value ?? min;
 
   return (
     <div className="stepper" onClick={(event) => event.stopPropagation()}>
       <button
         type="button"
         aria-label={`Decrease ${label ?? 'quantity'}`}
-        onClick={() => onChange(clamp(value - step))}
-        disabled={value <= min}
+        onClick={() => onChange(clamp(current - step))}
+        disabled={value === null || current <= min}
       >
         −
       </button>
@@ -167,13 +177,16 @@ export function Stepper({
         type="number"
         inputMode="numeric"
         aria-label={label ?? 'Quantity'}
-        value={draft ?? String(value)}
+        placeholder={placeholder}
+        value={draft ?? (value === null ? '' : String(value))}
         onFocus={(event) => event.currentTarget.select()}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={() => {
           if (draft !== null) {
             const parsed = Number(draft);
-            onChange(Number.isFinite(parsed) ? clamp(parsed) : value);
+            // A box cleared to nothing is left alone rather than read as zero;
+            // clearing an entry is a separate, deliberate action.
+            if (draft.trim() && Number.isFinite(parsed)) onChange(clamp(parsed));
             setDraft(null);
           }
         }}
@@ -181,8 +194,8 @@ export function Stepper({
       <button
         type="button"
         aria-label={`Increase ${label ?? 'quantity'}`}
-        onClick={() => onChange(clamp(value + step))}
-        disabled={max !== undefined && value >= max}
+        onClick={() => onChange(clamp(value === null ? min + step : current + step))}
+        disabled={max !== undefined && current >= max}
       >
         +
       </button>

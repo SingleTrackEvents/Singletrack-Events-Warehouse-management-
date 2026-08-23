@@ -387,7 +387,10 @@ export class SupabaseBackend implements SyncBackend {
   }
 
   /**
-   * Finish a sign-in with the six-digit code from the email.
+   * Finish a sign-in with the numeric code from the email.
+   *
+   * The length is a project setting in Supabase (6 to 10 digits), not something
+   * this app chooses, so nothing here assumes one.
    *
    * This is the path that works everywhere. Following the link opens whatever
    * the phone considers the default browser, which for an installed app is a

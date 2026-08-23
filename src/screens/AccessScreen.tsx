@@ -350,8 +350,7 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
       {sent ? (
         <div className="stack">
           <p className="small">
-            Check <span className="strong">{sent.email}</span> and type the six-digit code from the
-            message.
+            Check <span className="strong">{sent.email}</span> and type the code from the message.
           </p>
 
           {backend?.verifyEmailCode ? (
@@ -363,7 +362,9 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
                   style={{ fontSize: '1.6rem', letterSpacing: '0.35em', textAlign: 'center' }}
                   inputMode="numeric"
                   autoComplete="one-time-code"
-                  maxLength={8}
+                  // Supabase lets a project set 6 to 10 digits, so accept the
+                  // longest rather than assuming the default.
+                  maxLength={10}
                   autoFocus
                   value={code}
                   onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ''))}
@@ -404,7 +405,7 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
       ) : (
         <div className="stack">
           <LinkFailureNotice />
-          <Field label="Email" hint="We send a six-digit code — no password to set or share.">
+          <Field label="Email" hint="We send a short numeric code — no password to set or share.">
             {(id) => (
               <input
                 id={id}

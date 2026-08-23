@@ -61,13 +61,31 @@ export default function StocktakeDetailScreen() {
     [counts, items],
   );
 
+  /*
+   * Rows counted during this pass stay on the "To count" list.
+   *
+   * Otherwise a row vanishes from under the thumb the instant the first number
+   * lands, which makes correcting a miskey impossible and reads as the app
+   * counting the line before you were finished with it.
+   *
+   * "This pass" is a timestamp rather than a set of ids, so it needs no
+   * bookkeeping as rows are counted: a line counted after the list was built is
+   * still yours to adjust. Re-applying the filter starts a new pass and the
+   * list shortens to what genuinely remains.
+   */
+  const passKey = `${stocktakeId ?? ''}:${filter}`;
+  const [pass, setPass] = useState(() => ({ key: passKey, since: new Date().toISOString() }));
+  if (pass.key !== passKey) setPass({ key: passKey, since: new Date().toISOString() });
+
   const filtered = useMemo(() => {
     const all = counts ?? [];
     if (filter === 'all') return all;
     if (filter === 'counted') return all.filter((count) => count.counted !== null);
     if (filter === 'variance') return all.filter((count) => count.counted !== null && deltaFor(count) !== 0);
-    return all.filter((count) => count.counted === null);
-  }, [counts, filter]);
+    return all.filter(
+      (count) => count.counted === null || (count.countedAt !== null && count.countedAt >= pass.since),
+    );
+  }, [counts, filter, pass.since]);
 
   const searched = useSearch(filtered, query, (count) => {
     const item = items?.get(count.itemId);
@@ -153,7 +171,10 @@ export default function StocktakeDetailScreen() {
             type="button"
             className="chip"
             aria-pressed={filter === option}
-            onClick={() => setFilter(option)}
+            onClick={() => {
+              setFilter(option);
+              setPass({ key: `${stocktakeId ?? ''}:${option}`, since: new Date().toISOString() });
+            }}
           >
             {FILTER_LABELS[option]}
           </button>
@@ -187,7 +208,13 @@ export default function StocktakeDetailScreen() {
                 <span className="row-end stack-sm" style={{ alignItems: 'flex-end' }}>
                   <Stepper
                     label={`count of ${item?.name ?? 'item'}`}
-                    value={count.counted ?? count.expected}
+                    /*
+                     * Blank, not the expected figure. Pre-filling the system's
+                     * own number invites confirming it rather than counting,
+                     * and one stray tap would otherwise record "matches" on a
+                     * shelf nobody looked at.
+                     */
+                    value={count.counted}
                     onChange={(value) => void recordCount(count.id, value, { by: crew })}
                   />
                   {open ? (
