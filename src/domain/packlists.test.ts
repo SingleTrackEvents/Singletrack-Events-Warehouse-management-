@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { db } from '../db/db';
-import { create, createMany, liveWhere } from '../db/repo';
+import { create, createMany, liveWhere, update } from '../db/repo';
 import {
   addLine,
   applyTemplate,
@@ -308,5 +308,48 @@ describe('adding lines by hand', () => {
     const lines = await liveWhere(db.packlistLines, 'packlistId', packlist.id);
     expect(lines).toHaveLength(1);
     expect(lines[0].qtyRequired).toBe(5);
+  });
+});
+
+describe('changing what a stop needs', () => {
+  const line = (over: Partial<PacklistLine> = {}): PacklistLine =>
+    ({
+      id: 'l1', createdAt: '', updatedAt: '', deletedAt: null, rev: 1, deviceId: '', syncedAt: null,
+      packlistId: 'p1', itemId: 'i1', qtyRequired: 4, qtyPacked: 0, qtyReturned: 0,
+      mandatory: true, containerId: null, note: '', sort: 10,
+      ...over,
+    }) as PacklistLine;
+
+  it('reopens a line when the requirement rises above what is packed', async () => {
+    const stored = await create(db.packlistLines, {
+      packlistId: 'p1', itemId: 'i1', qtyRequired: 4, qtyPacked: 4, qtyReturned: 0,
+      mandatory: true, containerId: null, note: '', sort: 10,
+    });
+    expect(progressFor([stored]).linesDone).toBe(1);
+
+    // Four in the crate, six now needed: the line is short again and says so.
+    const raised = (await update(db.packlistLines, stored.id, { qtyRequired: 6 }))!;
+    const progress = progressFor([raised]);
+    expect(progress.linesDone).toBe(0);
+    expect(progress.short).toHaveLength(1);
+    expect(progress.blocking).toHaveLength(1);
+  });
+
+  it('counts a line packed when the requirement drops to what is already in', () => {
+    // Six packed against a requirement lowered to two. The extra stays in the
+    // crate; nothing is taken out, and the line is not short.
+    const progress = progressFor([line({ qtyRequired: 2, qtyPacked: 6 })]);
+    expect(progress.linesDone).toBe(1);
+    expect(progress.short).toHaveLength(0);
+    expect(progress.qtyRequired).toBe(2);
+    expect(progress.qtyPacked).toBe(6);
+  });
+
+  it('tracks the totals off the changed requirement', () => {
+    const lines = [line({ qtyRequired: 6, qtyPacked: 4 }), line({ id: 'l2', qtyRequired: 1, qtyPacked: 1 })];
+    const progress = progressFor(lines);
+    expect(progress.qtyRequired).toBe(7);
+    expect(progress.qtyPacked).toBe(5);
+    expect(progress.percent).toBe(50);
   });
 });

@@ -860,3 +860,23 @@ button, input, select, textarea {
   .app-nav { grid-template-columns: repeat(5, minmax(0, 140px)); justify-content: center; }
   .field-row { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* The required quantity on a packing line is a control, not a label: a station
+   that draws more runners than the template assumed needs to be corrected on
+   the spot. Styled to read as tappable without shouting over the item name. */
+.need-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 2px var(--space-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.need-btn:active { background: var(--surface-sunken); }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
@@ -21,9 +21,12 @@ import {
   statusIndex,
 } from '../domain/packlists';
 import { formatQty, plural } from '../domain/format';
-import type { PacklistLine, PacklistStatus } from '../db/types';
+import type { PacklistLine, PacklistStatus, Unit } from '../db/types';
 
 type Filter = 'todo' | 'all' | 'packed' | 'musthave';
+
+/** How long a completed line stays on the "To pack" list before it goes. */
+const LINGER_MS = 1000;
 
 const FILTER_LABELS: Record<Filter, string> = {
   todo: 'To pack',
@@ -69,6 +72,48 @@ export default function PacklistScreen() {
   const [confirmAdvance, setConfirmAdvance] = useState<PacklistStatus>();
   const [notesOpen, setNotesOpen] = useState(false);
   const [removingLine, setRemovingLine] = useState<PacklistLine>();
+  const [editingRequired, setEditingRequired] = useState<PacklistLine>();
+
+  /*
+   * A line that has just been completed stays on the "To pack" list for a beat.
+   *
+   * Without it the row vanishes the instant it goes green, which reads as the
+   * row disappearing rather than as the tick registering — and leaves you
+   * unsure whether you tapped the right one. A second is long enough to see the
+   * check land and short enough not to be in the way.
+   */
+  const [lingering, setLingering] = useState<ReadonlySet<string>>(new Set());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      for (const timer of pending.values()) clearTimeout(timer);
+      pending.clear();
+    };
+  }, []);
+
+  const linger = (id: string) => {
+    clearTimeout(timers.current.get(id));
+    setLingering((current) => new Set(current).add(id));
+    timers.current.set(
+      id,
+      setTimeout(() => {
+        timers.current.delete(id);
+        setLingering((current) => {
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+      }, LINGER_MS),
+    );
+  };
+
+  /** Hold the row if this change is what completed the line. */
+  const packTo = (line: PacklistLine, qtyPacked: number) => {
+    void update(db.packlistLines, line.id, { qtyPacked });
+    if (qtyPacked >= line.qtyRequired && line.qtyPacked < line.qtyRequired) linger(line.id);
+  };
 
   const progress = useMemo(() => progressFor(lines ?? []), [lines]);
   const returning = packlist ? statusIndex(packlist.status) >= statusIndex('delivered') : false;
@@ -78,8 +123,8 @@ export default function PacklistScreen() {
     if (filter === 'all') return all;
     if (filter === 'packed') return all.filter((line) => line.qtyPacked >= line.qtyRequired);
     if (filter === 'musthave') return all.filter((line) => line.mandatory);
-    return all.filter((line) => line.qtyPacked < line.qtyRequired);
-  }, [lines, filter]);
+    return all.filter((line) => line.qtyPacked < line.qtyRequired || lingering.has(line.id));
+  }, [lines, filter, lingering]);
 
   if (!packlist) {
     return (
@@ -95,7 +140,7 @@ export default function PacklistScreen() {
   /** Tapping a row is all-or-nothing; the stepper handles partial packs. */
   const toggleLine = (line: PacklistLine) => {
     const packed = line.qtyPacked >= line.qtyRequired;
-    void update(db.packlistLines, line.id, { qtyPacked: packed ? 0 : line.qtyRequired });
+    packTo(line, packed ? 0 : line.qtyRequired);
     if (!packed && navigator.vibrate) navigator.vibrate(15);
   };
 
@@ -209,13 +254,22 @@ export default function PacklistScreen() {
                   </span>
                 ) : (
                   <span className="row-end">
-                    <div className="pack-qty small muted mb-2">
-                      of {formatQty(line.qtyRequired, item?.unit ?? 'each')}
-                    </div>
+                    <button
+                      type="button"
+                      className="pack-qty need-btn mb-2"
+                      aria-label={`Change how many ${item?.name ?? 'items'} this stop needs`}
+                      onClick={(event) => {
+                        // The row itself toggles packed; this must not do both.
+                        event.stopPropagation();
+                        setEditingRequired(line);
+                      }}
+                    >
+                      of {formatQty(line.qtyRequired, item?.unit ?? 'each')} <span aria-hidden>✎</span>
+                    </button>
                     <Stepper
                       label="packed"
                       value={line.qtyPacked}
-                      onChange={(value) => void update(db.packlistLines, line.id, { qtyPacked: value })}
+                      onChange={(value) => packTo(line, value)}
                     />
                   </span>
                 )}
@@ -323,6 +377,21 @@ export default function PacklistScreen() {
           onSave={(notes) => {
             void update(db.packlists, packlist.id, { notes });
             setNotesOpen(false);
+          }}
+        />
+      ) : null}
+
+      {editingRequired ? (
+        <RequiredSheet
+          line={editingRequired}
+          itemName={items?.get(editingRequired.itemId)?.name ?? 'this item'}
+          unit={items?.get(editingRequired.itemId)?.unit ?? 'each'}
+          onClose={() => setEditingRequired(undefined)}
+          onSave={(qtyRequired) => {
+            void update(db.packlistLines, editingRequired.id, { qtyRequired }).then(() => {
+              toast(`Now needs ${formatQty(qtyRequired, items?.get(editingRequired.itemId)?.unit ?? 'each')}`);
+              setEditingRequired(undefined);
+            });
           }}
         />
       ) : null}
@@ -465,6 +534,90 @@ function NotesSheet({
         placeholder="Extra water for the plateau, chairs stay in the truck…"
         onChange={(event) => setValue(event.target.value)}
       />
+    </Sheet>
+  );
+}
+
+/**
+ * Change how many of an item a stop needs.
+ *
+ * The template is a starting point, not a rule — a station that draws more
+ * runners than the pattern assumed needs six water containers where the
+ * template said four, and the crew has to be able to say so while standing in
+ * front of the crate. Reached by tapping the "of 4" on the line.
+ *
+ * This edits the requirement for this stop only. The template behind it is
+ * untouched, so one busy aid station does not quietly re-plan the whole race.
+ */
+function RequiredSheet({
+  line,
+  itemName,
+  unit,
+  onClose,
+  onSave,
+}: {
+  line: PacklistLine;
+  itemName: string;
+  unit: Unit;
+  onClose: () => void;
+  onSave: (qtyRequired: number) => void;
+}) {
+  const [qty, setQty] = useState(line.qtyRequired);
+
+  return (
+    <Sheet
+      title={`How many does this stop need?`}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => onSave(qty)}>
+            Save
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="small">
+          <span className="strong">{itemName}</span>
+        </p>
+        <div className="center">
+          <Stepper label={`required ${itemName}`} value={qty} min={1} onChange={setQty} />
+        </div>
+        {/*
+          Increments rather than bare numbers: "+2" says what it does, where a
+          chip reading "6" next to a stepper showing 4 is a puzzle.
+        */}
+        <div className="chip-row-inline">
+          {[1, 2, 5, 10].map((step) => (
+            <button
+              key={step}
+              type="button"
+              className="chip"
+              onClick={() => setQty((current) => current + step)}
+            >
+              +{step}
+            </button>
+          ))}
+          {qty !== line.qtyRequired ? (
+            <button type="button" className="chip" onClick={() => setQty(line.qtyRequired)}>
+              Back to {line.qtyRequired}
+            </button>
+          ) : null}
+        </div>
+        <p className="tiny muted">
+          Changes this stop only — the template it came from is left alone, so one busy station does
+          not re-plan the rest of the race.
+        </p>
+        {line.qtyPacked > qty ? (
+          <p className="tiny" style={{ color: 'var(--warn)' }}>
+            {formatQty(line.qtyPacked, unit)} already packed, which is more than this. The extra
+            stays in the crate — nothing is taken out.
+          </p>
+        ) : null}
+      </div>
     </Sheet>
   );
 }
