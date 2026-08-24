@@ -574,11 +574,13 @@ export class SupabaseBackend implements SyncBackend {
   }
 
   async revokeInvite(_session: Session, inviteId: string): Promise<void> {
-    const { error } = await this.client
+    const { data, error } = await this.client
       .from('invites')
       .update({ revoked_at: new Date().toISOString() })
-      .eq('id', inviteId);
+      .eq('id', inviteId)
+      .select('id');
     if (error) throw toSyncError(error.message);
+    if (!data?.length) throw new SyncError(noRowTouched('revoke'), 'permission');
   }
 
   /**
@@ -586,9 +588,26 @@ export class SupabaseBackend implements SyncBackend {
    * change: row-level security refuses this for anyone else.
    */
   async deleteInvite(_session: Session, inviteId: string): Promise<void> {
-    const { error } = await this.client.from('invites').delete().eq('id', inviteId);
+    const { data, error } = await this.client
+      .from('invites')
+      .delete()
+      .eq('id', inviteId)
+      .select('id');
     if (error) throw toSyncError(error.message);
+    if (!data?.length) throw new SyncError(noRowTouched('delete'), 'permission');
   }
+}
+
+/**
+ * Why a silent no-op has to be reported.
+ *
+ * Row-level security filters rather than refuses: a statement matching no row
+ * the caller may touch succeeds and reports no error. Without asking for the
+ * affected rows back, a blocked delete is indistinguishable from a done one —
+ * the toast says it worked and the invite is still sitting there.
+ */
+function noRowTouched(action: string): string {
+  return `Could not ${action} that invite. It may already be gone, or your account may no longer be an admin.`;
 }
 
 interface InviteRow {

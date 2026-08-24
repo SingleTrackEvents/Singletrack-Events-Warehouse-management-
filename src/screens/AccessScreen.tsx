@@ -35,10 +35,22 @@ export default function AccessScreen() {
   const [passkeyError, setPasskeyError] = useState<string>();
   const [renaming, setRenaming] = useState(false);
 
+  /*
+   * Invites are fetched from the backend, not read from a table.
+   *
+   * useLiveQuery re-runs when a Dexie table it touched changes, and against the
+   * real server this function touches none — it is a network call. So creating,
+   * revoking or deleting an invite changed nothing the hook could observe and
+   * the list sat there stale, which reads as the action having done nothing.
+   * The demo backend hid it, since its invites live in a Dexie table.
+   */
+  const [inviteVersion, setInviteVersion] = useState(0);
+  const refreshInvites = useCallback(() => setInviteVersion((current) => current + 1), []);
+
   const invites = useLiveQuery(async () => {
     if (!backend || !session || session.role !== 'admin') return [] as Invite[];
     return backend.listInvites(session);
-  }, [backend, session]);
+  }, [backend, session, inviteVersion]);
 
   if (!backend) {
     return (
@@ -232,7 +244,7 @@ export default function AccessScreen() {
           {invites?.length ? (
             <div className="stack">
               {invites.map((invite) => (
-                <InviteCard key={invite.id} invite={invite} />
+                <InviteCard key={invite.id} invite={invite} onChanged={refreshInvites} />
               ))}
             </div>
           ) : (
@@ -251,7 +263,9 @@ export default function AccessScreen() {
         <p className="tiny muted center mb-3">Swipe an invite left to delete it.</p>
       ) : null}
 
-      {inviting ? <InviteSheet onClose={() => setInviting(false)} /> : null}
+      {inviting ? (
+        <InviteSheet onClose={() => setInviting(false)} onCreated={refreshInvites} />
+      ) : null}
 
       {renaming ? <RenameSheet onClose={() => setRenaming(false)} /> : null}
 
@@ -651,7 +665,7 @@ function LinkFailureNotice() {
 }
 
 /** A printable invite: QR, code and what it grants. */
-function InviteCard({ invite }: { invite: Invite }) {
+function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => void }) {
   const { backend, session } = useSession();
   const toast = useToast();
   const [revoking, setRevoking] = useState(false);
@@ -698,10 +712,16 @@ function InviteCard({ invite }: { invite: Invite }) {
           onCancel={() => setRevoking(false)}
           onConfirm={() => {
             if (!backend || !session) return;
-            void backend.revokeInvite(session, invite.id).then(() => {
-              toast('Invite revoked');
-              setRevoking(false);
-            });
+            void backend
+              .revokeInvite(session, invite.id)
+              .then(() => {
+                toast('Invite revoked');
+                onChanged();
+              })
+              .catch((cause: unknown) => {
+                toast(cause instanceof Error ? cause.message : 'Could not revoke that invite.', 'error');
+              })
+              .finally(() => setRevoking(false));
           }}
         />
       ) : null}
@@ -729,10 +749,18 @@ function InviteCard({ invite }: { invite: Invite }) {
           onCancel={() => setDeleting(false)}
           onConfirm={() => {
             if (!backend || !session) return;
-            void backend.deleteInvite(session, invite.id).then(() => {
-              toast('Invite deleted');
-              setDeleting(false);
-            });
+            void backend
+              .deleteInvite(session, invite.id)
+              .then(() => {
+                toast('Invite deleted');
+                onChanged();
+              })
+              .catch((cause: unknown) => {
+                // Better a plain reason than a toast claiming success over an
+                // invite that is visibly still there.
+                toast(cause instanceof Error ? cause.message : 'Could not delete that invite.', 'error');
+              })
+              .finally(() => setDeleting(false));
           }}
         />
       ) : null}
@@ -741,7 +769,7 @@ function InviteCard({ invite }: { invite: Invite }) {
   );
 }
 
-function InviteSheet({ onClose }: { onClose: () => void }) {
+function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { backend, session } = useSession();
   const toast = useToast();
   const events = useEvents();
@@ -769,6 +797,7 @@ function InviteSheet({ onClose }: { onClose: () => void }) {
     try {
       await backend.createInvite(session, { role, scope, label });
       toast('Invite created');
+      onCreated();
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not create the invite.');

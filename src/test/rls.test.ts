@@ -183,6 +183,39 @@ describe('privilege boundaries', () => {
     await db.close();
   });
 
+  it('lets an admin delete an invite', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await db.enforceRls();
+
+    const { rows } = await db.query(
+      `delete from public.invites where token = 'AAAA-BBBB' returning id`,
+    );
+    expect(rows).toHaveLength(1);
+    const left = await db.query('select id from public.invites');
+    expect(left.rows).toHaveLength(0);
+    await db.close();
+  });
+
+  it('deletes nothing for a volunteer, and says nothing about it', async () => {
+    const db = await seeded();
+    await db.enforceRls();
+
+    // The point of the test. Row-level security filters rather than refuses: the
+    // statement succeeds, touches no row and raises nothing. An adapter that
+    // only checks for an error reports a delete that never happened, which is
+    // exactly how a deleted invite stayed on the list.
+    const { rows } = await db.query(
+      `delete from public.invites where token = 'AAAA-BBBB' returning id`,
+    );
+    expect(rows).toHaveLength(0);
+
+    await db.actAs(ADMIN);
+    const survived = await db.query('select id from public.invites');
+    expect(survived.rows).toHaveLength(1);
+    await db.close();
+  });
+
   it('refuses a revoked invite', async () => {
     const db = await seeded();
     await db.actAs(ADMIN);
