@@ -7,6 +7,8 @@ import { useToast } from '../components/toastContext';
 import { db, getSettings } from '../db/db';
 import { update } from '../db/repo';
 import { useSettings } from '../hooks/useDb';
+import { useSession } from '../hooks/sessionContext';
+import { can } from '../sync/permissions';
 import { downloadJson, exportAll, importBackup, isBackup, wipeAll } from '../domain/backup';
 import { seedStarterData } from '../db/seed';
 import { countDuplicates, mergeDuplicates } from '../domain/duplicates';
@@ -25,6 +27,7 @@ import type { Settings } from '../db/types';
  */
 export default function SettingsScreen() {
   const settings = useSettings();
+  const { session } = useSession();
   const toast = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
   const [wiping, setWiping] = useState(false);
@@ -128,25 +131,30 @@ export default function SettingsScreen() {
             </span>
             <span className="row-chevron">›</span>
           </Link>
-          <Link to="/templates" className="row">
-            <span className="row-icon">📋</span>
-            <span className="row-body">
-              <span className="row-title">Packlist templates</span>
-              <span className="row-sub">Standing patterns for each destination type</span>
-            </span>
-            <span className="row-chevron">›</span>
-          </Link>
-          <Link to="/stocktake" className="row">
-            <span className="row-icon">🔢</span>
-            <span className="row-body">
-              <span className="row-title">Stocktakes</span>
-              <span className="row-sub">Open and completed counts</span>
-            </span>
-            <span className="row-chevron">›</span>
-          </Link>
+          {can(session, 'template:manage') ? (
+            <Link to="/templates" className="row">
+              <span className="row-icon">📋</span>
+              <span className="row-body">
+                <span className="row-title">Packlist templates</span>
+                <span className="row-sub">Standing patterns for each destination type</span>
+              </span>
+              <span className="row-chevron">›</span>
+            </Link>
+          ) : null}
+          {can(session, 'stocktake:read') ? (
+            <Link to="/stocktake" className="row">
+              <span className="row-icon">🔢</span>
+              <span className="row-body">
+                <span className="row-title">Stocktakes</span>
+                <span className="row-sub">Open and completed counts</span>
+              </span>
+              <span className="row-chevron">›</span>
+            </Link>
+          ) : null}
         </div>
       </section>
 
+      {can(session, 'data:export') ? (
       <section className="section">
         <div className="section-head">
           <h2>Backup &amp; handover</h2>
@@ -184,6 +192,9 @@ export default function SettingsScreen() {
         </div>
       </section>
 
+      ) : null}
+
+      {can(session, 'data:wipe') ? (
       <section className="section">
         <div className="section-head">
           <h2>Data</h2>
@@ -245,6 +256,8 @@ export default function SettingsScreen() {
           </button>
         </div>
       </section>
+
+      ) : null}
 
       <section className="section">
         <div className="section-head">

@@ -158,6 +158,26 @@ returns boolean language sql immutable as $$
   end
 $$;
 
+-- Which fields a role may change on a table. Null means "the whole row".
+-- Mirrors WRITABLE_FIELDS in the app: an aid station records what turned up,
+-- and must not be able to rewrite what was required or what was packed, or a
+-- short delivery would disappear the moment somebody ticked it off.
+create or replace function public.writable_fields(p_role text, p_table text)
+returns text[] language sql immutable as $$
+  select case
+    when p_role in ('admin', 'crew') then null
+    when p_table = 'packlistLines' and p_role = 'driver'
+      then array['qtyReceived', 'note']
+    when p_table = 'packlistLines' and p_role = 'volunteer'
+      then array['qtyReceived', 'qtyReturned', 'note']
+    when p_table = 'packlists' and p_role = 'driver'
+      then array['status', 'notes']
+    when p_table = 'packlists' and p_role = 'volunteer'
+      then array['notes']
+    else null
+  end
+$$;
+
 -- Which tables a role may read. A volunteer must never receive the
 -- warehouse catalogue — they only need their own packlist.
 create or replace function public.can_read_table(p_role text, p_table text)
@@ -348,6 +368,10 @@ declare
   item jsonb;
   role text := public.my_role();
   existing public.records;
+  fields text[];
+  merged jsonb;
+  fld text;
+  have_existing boolean;
   accepted integer := 0;
   stale integer := 0;
   refused integer := 0;
@@ -367,9 +391,12 @@ begin
 
     select * into existing from public.records
     where table_name = item->>'table_name' and id = item->>'id';
+    have_existing := found;
+
+    fields := public.writable_fields(role, item->>'table_name');
 
     -- Newest revision wins; ties break on updated_at. Same rule as the client.
-    if found and (
+    if have_existing and (
         existing.rev > (item->>'rev')::integer
         or (existing.rev = (item->>'rev')::integer
             and existing.updated_at >= (item->>'updated_at')::timestamptz)
@@ -382,12 +409,30 @@ begin
       continue;
     end if;
 
+    -- Field-level rules. A restricted role may only move the fields it owns;
+    -- everything else keeps the value already on the server. Creating or
+    -- deleting a row is a whole-row write, and such a role has none: it may
+    -- only change its own fields on a row the warehouse already put there.
+    merged := item->'data';
+    if fields is not null then
+      if not have_existing or nullif(item->>'deleted_at', '') is not null then
+        refused := refused + 1;
+        continue;
+      end if;
+      merged := existing.data;
+      foreach fld in array fields || array['rev', 'updatedAt', 'deviceId'] loop
+        if item->'data' ? fld then
+          merged := jsonb_set(merged, array[fld], item->'data'->fld, true);
+        end if;
+      end loop;
+    end if;
+
     insert into public.records
       (table_name, id, data, rev, updated_at, deleted_at, device_id, event_id, destination_id)
     values (
       item->>'table_name',
       item->>'id',
-      item->'data',
+      merged,
       (item->>'rev')::integer,
       (item->>'updated_at')::timestamptz,
       nullif(item->>'deleted_at', '')::timestamptz,

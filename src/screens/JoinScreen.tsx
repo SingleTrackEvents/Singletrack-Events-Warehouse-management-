@@ -48,12 +48,18 @@ export default function JoinScreen() {
     }
   };
 
-  // An invite only exists on the real server, so that is what a scanned QR must
-  // connect to. Sending it to the on-device stand-in — which has no invites —
-  // produced "that invite code was not recognised" for every volunteer.
-  const needsRealBackend = !backend || !backend.isReal;
-
-  if (needsRealBackend) {
+  /*
+   * A phone with no backend at all gets the server, never the stand-in.
+   *
+   * That was the original bug: a scanned QR on a fresh phone connected to the
+   * on-device demo, which has no invites on it, and every volunteer was told
+   * their code was not recognised. But a device already on the demo is there
+   * because somebody chose it — refusing to join at all made the demo useless
+   * for walking the invite flow, which is the one thing it exists for. So the
+   * join uses whatever is connected, and only the absence of a backend sends
+   * anyone to the server.
+   */
+  if (!backend) {
     return (
       <Screen title="Join" back="/">
         <div className="card card-pad">
@@ -68,11 +74,7 @@ export default function JoinScreen() {
           >
             ☁️ Connect
           </button>
-          {backend && !backend.isReal ? (
-            <p className="tiny muted mt-3">
-              This device is currently on the on-device demo server, which has no invites on it.
-            </p>
-          ) : null}
+
         </div>
       </Screen>
     );
@@ -155,7 +157,9 @@ export default function JoinScreen() {
       </form>
 
       <p className="tiny muted center mt-4">
-        Connected to the SingleTrack server.
+        {backend.isReal
+          ? 'Connected to the SingleTrack server.'
+          : 'On the on-device demo server — invites made on this phone only.'}
       </p>
     </Screen>
   );

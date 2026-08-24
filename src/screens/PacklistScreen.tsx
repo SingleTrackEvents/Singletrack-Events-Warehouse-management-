@@ -8,6 +8,8 @@ import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, byId, update } from '../db/repo';
 import { useCrewName, usePacklist, usePacklistLines } from '../hooks/useDb';
+import { useSession } from '../hooks/sessionContext';
+import { can, isStationOnly } from '../sync/permissions';
 import {
   NEXT_STATUS_ACTION,
   PACKLIST_STATUS_LABELS,
@@ -16,6 +18,8 @@ import {
   hasIssued,
   nextStatus,
   progressFor,
+  receiptFor,
+  received,
   removeLine,
   setStatus,
   statusIndex,
@@ -32,6 +36,14 @@ const FILTER_LABELS: Record<Filter, string> = {
   todo: 'To pack',
   all: 'All',
   packed: 'Packed',
+  musthave: 'Must-have',
+};
+
+/** The same four filters, worded for someone checking a delivery in. */
+const CHECK_FILTER_LABELS: Record<Filter, string> = {
+  todo: 'To check',
+  all: 'All',
+  packed: 'Confirmed',
   musthave: 'Must-have',
 };
 
@@ -65,6 +77,21 @@ export default function PacklistScreen() {
     async () => (packlist ? db.destinations.get(packlist.destinationId) : undefined),
     [packlist?.destinationId],
   );
+
+  const { session } = useSession();
+  /*
+   * Two views of one screen.
+   *
+   * The warehouse packs a crate; an aid station checks it in. They are not the
+   * same job and must not write the same numbers — if the person at the station
+   * could edit what was packed, a short delivery would vanish the moment they
+   * ticked it off. So anyone without packing rights gets a confirm-only view,
+   * recording what actually turned up against what the list says.
+   */
+  const canPack = can(session, 'packlist:pack');
+  const canManage = can(session, 'packlist:manage');
+  const canAdvance = canManage || can(session, 'load:deliver');
+  const stationOnly = isStationOnly(session);
 
   const [filter, setFilter] = useState<Filter>('todo');
   const [picking, setPicking] = useState(false);
@@ -109,22 +136,30 @@ export default function PacklistScreen() {
     );
   };
 
+  /** Whichever count this view is keeping: packed by the warehouse, or arrived. */
+  const countOn = (line: PacklistLine) => (canPack ? line.qtyPacked : received(line));
+
   /** Hold the row if this change is what completed the line. */
-  const packTo = (line: PacklistLine, qtyPacked: number) => {
-    void update(db.packlistLines, line.id, { qtyPacked });
-    if (qtyPacked >= line.qtyRequired && line.qtyPacked < line.qtyRequired) linger(line.id);
+  const packTo = (line: PacklistLine, qty: number) => {
+    void update(db.packlistLines, line.id, canPack ? { qtyPacked: qty } : { qtyReceived: qty });
+    if (qty >= line.qtyRequired && countOn(line) < line.qtyRequired) linger(line.id);
   };
 
-  const progress = useMemo(() => progressFor(lines ?? []), [lines]);
-  const returning = packlist ? statusIndex(packlist.status) >= statusIndex('delivered') : false;
+  const progress = useMemo(
+    () => (canPack ? progressFor(lines ?? []) : receiptFor(lines ?? [])),
+    [lines, canPack],
+  );
+  const returning =
+    canPack && packlist ? statusIndex(packlist.status) >= statusIndex('delivered') : false;
 
   const visible = useMemo(() => {
     const all = lines ?? [];
+    const got = (line: PacklistLine) => (canPack ? line.qtyPacked : received(line));
     if (filter === 'all') return all;
-    if (filter === 'packed') return all.filter((line) => line.qtyPacked >= line.qtyRequired);
+    if (filter === 'packed') return all.filter((line) => got(line) >= line.qtyRequired);
     if (filter === 'musthave') return all.filter((line) => line.mandatory);
-    return all.filter((line) => line.qtyPacked < line.qtyRequired || lingering.has(line.id));
-  }, [lines, filter, lingering]);
+    return all.filter((line) => got(line) < line.qtyRequired || lingering.has(line.id));
+  }, [lines, filter, lingering, canPack]);
 
   if (!packlist) {
     return (
@@ -137,11 +172,11 @@ export default function PacklistScreen() {
   const advanceTo = nextStatus(packlist.status);
   const advanceLabel = NEXT_STATUS_ACTION[packlist.status];
 
-  /** Tapping a row is all-or-nothing; the stepper handles partial packs. */
+  /** Tapping a row is all-or-nothing; the stepper handles partial counts. */
   const toggleLine = (line: PacklistLine) => {
-    const packed = line.qtyPacked >= line.qtyRequired;
-    packTo(line, packed ? 0 : line.qtyRequired);
-    if (!packed && navigator.vibrate) navigator.vibrate(15);
+    const full = countOn(line) >= line.qtyRequired;
+    packTo(line, full ? 0 : line.qtyRequired);
+    if (!full && navigator.vibrate) navigator.vibrate(15);
   };
 
   const advance = async (status: PacklistStatus) => {
@@ -160,29 +195,32 @@ export default function PacklistScreen() {
     <Screen
       title={packlist.name}
       subtitle={`${packlist.code} · ${PACKLIST_STATUS_LABELS[packlist.status]}`}
-      back={`/events/${packlist.eventId}`}
+      back={stationOnly ? '/' : `/events/${packlist.eventId}`}
       actions={
-        <button
-          type="button"
-          className="header-btn"
-          aria-label="Labels and printing"
-          onClick={() => navigate(`/packlists/${packlist.id}/labels`)}
-        >
-          🏷
-        </button>
+        canManage ? (
+          <button
+            type="button"
+            className="header-btn"
+            aria-label="Labels and printing"
+            onClick={() => navigate(`/packlists/${packlist.id}/labels`)}
+          >
+            🏷
+          </button>
+        ) : undefined
       }
     >
       <div className="card card-pad mb-3">
         <div className="spread mb-2">
           <span className="strong">
-            {progress.linesDone} / {progress.linesTotal} lines
+            {progress.linesDone} / {progress.linesTotal} {canPack ? 'lines' : 'lines confirmed'}
           </span>
           <Pill tone={STATUS_TONE[packlist.status]}>{PACKLIST_STATUS_LABELS[packlist.status]}</Pill>
         </div>
         <ProgressBar percent={progress.percent} done={progress.percent === 100} />
         {progress.blocking.length ? (
           <p className="tiny mt-2" style={{ color: 'var(--danger)' }}>
-            ⚠ {plural(progress.blocking.length, 'must-have item')} still short
+            ⚠ {plural(progress.blocking.length, 'must-have item')}{' '}
+            {canPack ? 'still short' : 'not confirmed yet'}
           </p>
         ) : null}
         {destination?.accessNotes ? (
@@ -200,7 +238,7 @@ export default function PacklistScreen() {
             aria-pressed={filter === option}
             onClick={() => setFilter(option)}
           >
-            {FILTER_LABELS[option]}
+            {(canPack ? FILTER_LABELS : CHECK_FILTER_LABELS)[option]}
           </button>
         ))}
       </div>
@@ -209,8 +247,9 @@ export default function PacklistScreen() {
         <div className="list">
           {visible.map((line) => {
             const item = items?.get(line.itemId);
-            const packed = line.qtyPacked >= line.qtyRequired;
-            const short = line.qtyPacked > 0 && !packed;
+            const count = countOn(line);
+            const packed = count >= line.qtyRequired;
+            const short = count > 0 && !packed;
             return (
               <div
                 key={line.id}
@@ -239,6 +278,21 @@ export default function PacklistScreen() {
                     {item ? `${item.bin || 'no bin'} · ${item.sku}` : ''}
                     {line.note ? ` · ${line.note}` : ''}
                   </span>
+                  {/* What the station counted, so a short delivery is visible
+                      back at the warehouse rather than only recorded. */}
+                  {canPack && line.qtyReceived !== undefined ? (
+                    <span
+                      className="row-sub"
+                      style={
+                        line.qtyReceived < line.qtyPacked ? { color: 'var(--danger)' } : undefined
+                      }
+                    >
+                      Station confirmed {formatQty(line.qtyReceived, item?.unit ?? 'each')}
+                      {line.qtyReceived < line.qtyPacked
+                        ? ` of ${formatQty(line.qtyPacked, item?.unit ?? 'each')} sent`
+                        : ''}
+                    </span>
+                  ) : null}
                 </span>
                 {returning ? (
                   <span className="row-end">
@@ -254,21 +308,28 @@ export default function PacklistScreen() {
                   </span>
                 ) : (
                   <span className="row-end">
-                    <button
-                      type="button"
-                      className="pack-qty need-btn mb-2"
-                      aria-label={`Change how many ${item?.name ?? 'items'} this stop needs`}
-                      onClick={(event) => {
-                        // The row itself toggles packed; this must not do both.
-                        event.stopPropagation();
-                        setEditingRequired(line);
-                      }}
-                    >
-                      of {formatQty(line.qtyRequired, item?.unit ?? 'each')} <span aria-hidden>✎</span>
-                    </button>
+                    {canManage ? (
+                      <button
+                        type="button"
+                        className="pack-qty need-btn mb-2"
+                        aria-label={`Change how many ${item?.name ?? 'items'} this stop needs`}
+                        onClick={(event) => {
+                          // The row itself toggles packed; this must not do both.
+                          event.stopPropagation();
+                          setEditingRequired(line);
+                        }}
+                      >
+                        of {formatQty(line.qtyRequired, item?.unit ?? 'each')}{' '}
+                        <span aria-hidden>✎</span>
+                      </button>
+                    ) : (
+                      <span className="pack-qty mb-2">
+                        of {formatQty(line.qtyRequired, item?.unit ?? 'each')}
+                      </span>
+                    )}
                     <Stepper
-                      label="packed"
-                      value={line.qtyPacked}
+                      label={canPack ? 'packed' : 'arrived'}
+                      value={count}
                       onChange={(value) => packTo(line, value)}
                     />
                   </span>
@@ -285,24 +346,28 @@ export default function PacklistScreen() {
         </div>
       )}
 
-      <div className="btn-row mt-4 no-print">
-        <button type="button" className="btn btn-outline" onClick={() => setPicking(true)}>
-          + Add items
-        </button>
-        <button type="button" className="btn btn-outline" onClick={() => setApplying(true)}>
-          📋 Apply template
-        </button>
-      </div>
+      {canManage ? (
+        <div className="btn-row mt-4 no-print">
+          <button type="button" className="btn btn-outline" onClick={() => setPicking(true)}>
+            + Add items
+          </button>
+          <button type="button" className="btn btn-outline" onClick={() => setApplying(true)}>
+            📋 Apply template
+          </button>
+        </div>
+      ) : null}
       <div className="btn-row mt-2 no-print">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotesOpen(true)}>
           📝 Notes
         </button>
-        <Link className="btn btn-ghost btn-sm" to={`/packlists/${packlist.id}/labels`}>
-          🏷 Labels &amp; print
-        </Link>
+        {canManage ? (
+          <Link className="btn btn-ghost btn-sm" to={`/packlists/${packlist.id}/labels`}>
+            🏷 Labels &amp; print
+          </Link>
+        ) : null}
       </div>
 
-      {lines?.length ? (
+      {canManage && lines?.length ? (
         <details className="card card-pad mt-4 no-print">
           <summary className="small strong">Remove a line</summary>
           <div className="list mt-3">
@@ -323,7 +388,7 @@ export default function PacklistScreen() {
         </details>
       ) : null}
 
-      {advanceTo && advanceLabel ? (
+      {canAdvance && advanceTo && advanceLabel ? (
         <div className="action-bar no-print">
           <button
             type="button"

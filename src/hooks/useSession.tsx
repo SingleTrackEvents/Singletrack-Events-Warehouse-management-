@@ -12,6 +12,7 @@ import { SessionContext } from './sessionContext';
 import type { SessionContextValue } from './sessionContext';
 import { getLastSync, markAllDirty, pendingCount, resetCursor, runSync } from '../sync/engine';
 import type { SyncPhase } from '../sync/engine';
+import { setCurrentSession } from '../sync/current';
 import type { Session, SyncBackend } from '../sync/types';
 
 /** How often to sync while the app is open and online. */
@@ -35,6 +36,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [lastError, setLastError] = useState<string | null>(null);
   // Guards against overlapping sync runs.
   const syncing = useRef(false);
+
+  // Mirrored outside React so the repository helpers can apply the same
+  // permission rules the screens do; see sync/current.ts.
+  useEffect(() => {
+    setCurrentSession(session);
+  }, [session]);
 
   // Restore the connection and session from the last time the app was open.
   useEffect(() => {

@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { can, canEditField, describeRole, inScope, isExpired, roleAtLeast, writableTables } from './permissions';
+import {
+  can,
+  canEditField,
+  describeRole,
+  inScope,
+  isExpired,
+  isStationOnly,
+  roleAtLeast,
+  scrubChanges,
+  writableTables,
+} from './permissions';
 import type { Role, Session } from './types';
 import { UNSCOPED } from './types';
 
@@ -110,6 +120,22 @@ describe('volunteer', () => {
   it('may only write the two tables its job touches', () => {
     expect(writableTables(scoped)).toEqual(['packlists', 'packlistLines']);
   });
+
+  it('confirms what arrived on its own field, not the warehouse\'s', () => {
+    expect(canEditField(scoped, 'packlistLines', 'qtyReceived')).toBe(true);
+  });
+
+  it('cannot move the packlist through its statuses', () => {
+    // Where the crate is is the warehouse's and the driver's account of it.
+    expect(canEditField(scoped, 'packlists', 'status')).toBe(false);
+    expect(canEditField(scoped, 'packlists', 'notes')).toBe(true);
+  });
+
+  it('drops a forbidden change instead of half-applying it', () => {
+    expect(
+      scrubChanges(scoped, 'packlistLines', { qtyPacked: 9, qtyReceived: 3, note: 'wet' }),
+    ).toEqual({ qtyReceived: 3, note: 'wet' });
+  });
 });
 
 describe('scope matching', () => {
@@ -165,5 +191,62 @@ describe('role descriptions', () => {
     expect(describeRole('admin')).toContain('Invite people and set their access');
     expect(describeRole('volunteer')).toEqual(['Record what arrived on a packlist']);
     expect(describeRole('crew')).not.toContain('Invite people and set their access');
+  });
+});
+
+describe('a volunteer pinned to one aid station', () => {
+  const station = (over: Partial<Session> = {}): Session => ({
+    userId: 'u1', displayName: 'Nigel', email: null, role: 'volunteer',
+    scope: { eventId: 'event-1', destinationId: 'dest-3' },
+    token: 't', expiresAt: null, guest: true,
+    ...over,
+  });
+
+  it('is recognised as having one job', () => {
+    expect(isStationOnly(station())).toBe(true);
+    // An unscoped volunteer is not the same thing: nothing to send them to.
+    expect(isStationOnly(station({ scope: { eventId: 'event-1', destinationId: null } }))).toBe(false);
+    expect(isStationOnly(station({ role: 'crew' }))).toBe(false);
+    expect(isStationOnly(null)).toBe(false);
+  });
+
+  it('reaches their own packlist and nothing beside it', () => {
+    const who = station();
+    expect(can(who, 'packlist:read', { eventId: 'event-1', destinationId: 'dest-3' })).toBe(true);
+    expect(can(who, 'packlist:receive', { eventId: 'event-1', destinationId: 'dest-3' })).toBe(true);
+
+    // The next station along is not theirs.
+    expect(can(who, 'packlist:read', { eventId: 'event-1', destinationId: 'dest-4' })).toBe(false);
+    // Nor is another race.
+    expect(can(who, 'packlist:read', { eventId: 'event-2', destinationId: 'dest-3' })).toBe(false);
+  });
+
+  it('is refused every screen the tabs now hide', () => {
+    const who = station();
+    for (const action of [
+      'item:read', 'item:write', 'stock:adjust',
+      'load:read', 'load:manage', 'load:deliver',
+      'stocktake:read', 'stocktake:manage', 'template:manage',
+      'packlist:manage', 'packlist:pack',
+      'member:manage', 'data:export', 'data:wipe',
+      'event:write', 'event:delete',
+    ] as const) {
+      expect([action, can(who, action)]).toEqual([action, false]);
+    }
+  });
+
+  it('may record what turned up but not rewrite what was sent', () => {
+    const who = station();
+    expect(canEditField(who, 'packlistLines', 'qtyReturned')).toBe(true);
+    expect(canEditField(who, 'packlistLines', 'note')).toBe(true);
+    // Otherwise a short delivery could be made to look complete from the field.
+    expect(canEditField(who, 'packlistLines', 'qtyRequired')).toBe(false);
+    expect(canEditField(who, 'packlistLines', 'qtyPacked')).toBe(false);
+  });
+
+  it('loses everything the moment the invite expires', () => {
+    const done = station({ expiresAt: '2020-01-01T00:00:00.000Z' });
+    expect(can(done, 'packlist:read', { eventId: 'event-1', destinationId: 'dest-3' })).toBe(false);
+    expect(canEditField(done, 'packlistLines', 'qtyReturned')).toBe(false);
   });
 });

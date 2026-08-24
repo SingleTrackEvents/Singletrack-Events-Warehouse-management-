@@ -149,6 +149,104 @@ describe('what a volunteer can write', () => {
   });
 });
 
+describe('what a volunteer can change on a line', () => {
+  /** The warehouse's copy of one packlist line, already on the server. */
+  async function withLine() {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await db.query('select public.push_records($1::jsonb)', [
+      JSON.stringify([wireRow({
+        table_name: 'packlistLines', id: 'line-1',
+        event_id: EVENT, destination_id: MY_STATION,
+        data: { id: 'line-1', qtyRequired: 4, qtyPacked: 4, qtyReceived: 0, note: '' },
+      })]),
+    ]);
+    await db.actAs(VOLUNTEER);
+    return db;
+  }
+
+  const push = (db: Awaited<ReturnType<typeof withLine>>, data: Record<string, unknown>) =>
+    db.query<{ push_records: Record<string, number> }>(
+      'select public.push_records($1::jsonb) as push_records',
+      [JSON.stringify([wireRow({
+        table_name: 'packlistLines', id: 'line-1', rev: 9,
+        updated_at: '2026-05-01T00:00:00.000Z',
+        event_id: EVENT, destination_id: MY_STATION,
+        data,
+      })])],
+    );
+
+  const stored = async (db: Awaited<ReturnType<typeof withLine>>) =>
+    (await db.query<{ data: Record<string, unknown> }>(
+      `select data from public.records where id = 'line-1'`,
+    )).rows[0].data;
+
+  it('records what turned up', async () => {
+    const db = await withLine();
+    await push(db, { id: 'line-1', qtyRequired: 4, qtyPacked: 4, qtyReceived: 3, note: 'one split' });
+    expect(await stored(db)).toMatchObject({ qtyReceived: 3, note: 'one split' });
+    await db.close();
+  });
+
+  it('cannot rewrite what was required or packed', async () => {
+    // The whole point of a receipt: if the field could edit these, a short
+    // delivery would vanish the moment somebody ticked it off.
+    const db = await withLine();
+    await push(db, { id: 'line-1', qtyRequired: 1, qtyPacked: 1, qtyReceived: 1 });
+    expect(await stored(db)).toMatchObject({ qtyRequired: 4, qtyPacked: 4, qtyReceived: 1 });
+    await db.close();
+  });
+
+  it('cannot add a line of its own', async () => {
+    const db = await withLine();
+    const { rows } = await db.query<{ push_records: Record<string, number> }>(
+      'select public.push_records($1::jsonb) as push_records',
+      [JSON.stringify([wireRow({
+        table_name: 'packlistLines', id: 'line-new',
+        event_id: EVENT, destination_id: MY_STATION,
+        data: { id: 'line-new', qtyRequired: 99 },
+      })])],
+    );
+    expect(rows[0].push_records.refused).toBe(1);
+    await db.close();
+  });
+
+  it('cannot delete a line', async () => {
+    const db = await withLine();
+    const { rows } = await db.query<{ push_records: Record<string, number> }>(
+      'select public.push_records($1::jsonb) as push_records',
+      [JSON.stringify([wireRow({
+        table_name: 'packlistLines', id: 'line-1', rev: 9,
+        updated_at: '2026-05-01T00:00:00.000Z',
+        deleted_at: '2026-05-01T00:00:00.000Z',
+        event_id: EVENT, destination_id: MY_STATION,
+        data: { id: 'line-1' },
+      })])],
+    );
+    expect(rows[0].push_records.refused).toBe(1);
+    await db.close();
+  });
+
+  it('cannot march the packlist through its statuses', async () => {
+    const db = await withLine();
+    await db.query<{ push_records: Record<string, number> }>(
+      'select public.push_records($1::jsonb) as push_records',
+      [JSON.stringify([wireRow({
+        table_name: 'packlists', id: 'pl-mine', rev: 9,
+        updated_at: '2026-05-01T00:00:00.000Z',
+        event_id: EVENT, destination_id: MY_STATION,
+        data: { id: 'pl-mine', status: 'reconciled', notes: 'all good' },
+      })])],
+    );
+    const { rows } = await db.query<{ data: Record<string, unknown> }>(
+      `select data from public.records where id = 'pl-mine'`,
+    );
+    expect(rows[0].data.status).toBeUndefined();
+    expect(rows[0].data.notes).toBe('all good');
+    await db.close();
+  });
+});
+
 describe('privilege boundaries', () => {
   it('will not let a volunteer promote themselves', async () => {
     const db = await seeded();

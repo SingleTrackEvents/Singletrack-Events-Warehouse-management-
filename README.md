@@ -113,7 +113,7 @@ actually read and write. Two SQL bugs reached production before this existed,
 because the only way to run the schema was to deploy it.
 
 ```bash
-npm test    # 226 tests, including the Postgres schema and policies
+npm test    # 342 tests, including the Postgres schema and policies
 ```
 
 ## Design notes
@@ -165,10 +165,21 @@ Volunteers are pinned to a single destination for a single event, and may only
 change what *arrived* — never what was supposed to be sent, since that would
 quietly erase the evidence of a short delivery.
 
+Someone holding an aid station invite gets the app cut down to that one job: no
+tabs, no warehouse, no stocktake, no backups. Their packlist opens as a
+confirm-only view — every line shows what the warehouse says is coming, and the
+only number they can move is how many turned up. Typing another screen's address
+sends them back to their station.
+
+The rules are enforced in three places, because two of them are only courtesies:
+the screens hide what a role cannot do, `update()` in `src/db/repo.ts` drops a
+forbidden change before it can reach this device's database, and
+`push_records()` in `supabase/schema.sql` merges an incoming row field by field
+so a restricted role can only move the fields it owns. **The server copy is the
+only real boundary** — the browser holds a publishable key, so anything the
+policies allow is allowed to anyone who cares to try.
+
 `src/sync/permissions.ts` holds the rules as a table you can read top to bottom.
-They run on the client so the UI can hide what someone cannot do; **a real
-backend must mirror them in row-level security.** The client copy is a courtesy,
-not a security boundary.
 
 ### Two ways in
 

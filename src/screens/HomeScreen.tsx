@@ -7,10 +7,12 @@ import { alive } from '../db/repo';
 import { useEvents, useItems, useSettings } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { ROLE_LABELS } from '../sync/types';
+import { isStationOnly } from '../sync/permissions';
 import { lowStockItems } from '../domain/stock';
-import { progressFor } from '../domain/packlists';
+import { progressFor, receiptFor } from '../domain/packlists';
 import { daysUntil, formatDateRange, formatDateTime, plural, relativeDays } from '../domain/format';
 import { LOAD_STATUS_LABELS } from '../domain/transport';
+import type { Destination, Packlist, PacklistLine } from '../db/types';
 
 /**
  * Says plainly who is signed in and whether their work has left the phone.
@@ -71,6 +73,23 @@ function AccountBanner() {
 export default function HomeScreen() {
   const navigate = useNavigate();
   const { session } = useSession();
+  const stationOnly = isStationOnly(session);
+  const station = useLiveQuery(
+    async () => {
+      const destinationId = session?.scope.destinationId;
+      if (!stationOnly || !destinationId) return undefined;
+      const destination = await db.destinations.get(destinationId);
+      const packlist = alive(await db.packlists.toArray()).find(
+        (entry) => entry.destinationId === destinationId,
+      );
+      const lines = packlist
+        ? alive(await db.packlistLines.toArray()).filter((line) => line.packlistId === packlist.id)
+        : [];
+      return { destination, packlist, lines };
+    },
+    [stationOnly, session?.scope.destinationId],
+  );
+
   const settings = useSettings();
   const events = useEvents();
   const items = useItems();
@@ -117,6 +136,11 @@ export default function HomeScreen() {
     async () => alive(await db.stocktakes.toArray()).filter((entry) => entry.status === 'open'),
     [],
   );
+
+  // A volunteer has one packlist and nothing else to do. Sending them through a
+  // dashboard of races they cannot open is a lap of the app for no reason. The
+  // branch sits below every hook so the order never changes between renders.
+  if (stationOnly) return <StationHome station={station} />;
 
   const low = items ? lowStockItems(items) : [];
   // The signed-in account wins over the device's own crew name, which is left
@@ -298,6 +322,76 @@ export default function HomeScreen() {
           </Link>
         </div>
       </section>
+    </Screen>
+  );
+}
+
+/**
+ * The whole app, for someone working one aid station.
+ *
+ * Their packlist and a way back to it. No races to browse, no warehouse, no
+ * backup — everything the scope rules already refuse, taken off the screen so a
+ * phone held in one hand at a station shows the one thing it is for.
+ */
+function StationHome({
+  station,
+}: {
+  station: { destination?: Destination; packlist?: Packlist; lines: PacklistLine[] } | undefined;
+}) {
+  const { session } = useSession();
+
+  if (!station) {
+    return (
+      <Screen title="Your station">
+        <p className="muted">Loading…</p>
+      </Screen>
+    );
+  }
+
+  const name = station.destination?.name ?? 'Your aid station';
+
+  if (!station.packlist) {
+    return (
+      <Screen title={name}>
+        <EmptyState
+          glyph="📦"
+          title="Nothing here yet"
+          body="Your packlist has not reached this phone. It will appear once the warehouse has built it and the phone has signal."
+        />
+        <p className="tiny muted center mt-3">
+          Signed in as {session?.displayName}. <Link to="/access">Account</Link>
+        </p>
+      </Screen>
+    );
+  }
+
+  // What this station has confirmed, not what the warehouse packed: the number
+  // on their home screen should be the one they can change.
+  const progress = receiptFor(station.lines);
+
+  return (
+    <Screen title={name} subtitle={session ? `Signed in as ${session.displayName}` : undefined}>
+      <div className="card card-pad mb-4">
+        <div className="spread mb-2">
+          <span className="strong">
+            {progress.linesDone} / {progress.linesTotal} lines confirmed
+          </span>
+          <Pill tone={progress.percent === 100 ? 'ok' : 'accent'}>{progress.percent}%</Pill>
+        </div>
+        <ProgressBar percent={progress.percent} done={progress.percent === 100} />
+        {station.destination?.accessNotes ? (
+          <p className="tiny muted mt-2">🚙 {station.destination.accessNotes}</p>
+        ) : null}
+      </div>
+
+      <Link className="btn btn-primary btn-lg btn-block" to={`/packlists/${station.packlist.id}`}>
+        Open the packlist
+      </Link>
+
+      <p className="tiny muted center mt-4">
+        Tick off each item as it turns up. What was meant to be sent is set by the warehouse, so a
+        short delivery stays visible. <Link to="/access">Account</Link>
+      </p>
     </Screen>
   );
 }

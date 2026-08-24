@@ -1,5 +1,8 @@
 import type { Table } from 'dexie';
 import { db, nowIso, stampNew, stampUpdate } from './db';
+import type { TableName } from './db';
+import { currentSession } from '../sync/current';
+import { scrubChanges } from '../sync/permissions';
 import type { SyncMeta } from './types';
 
 /**
@@ -38,7 +41,12 @@ export async function update<T extends SyncMeta>(
 ): Promise<T | undefined> {
   const existing = await table.get(id);
   if (!existing) return undefined;
-  const next = stampUpdate({ ...existing, ...changes }) as T;
+  // Anything the signed-in role may not write is dropped here rather than at
+  // push time: once a forbidden value is in the local database it is already
+  // what this device believes, and a later sync would spread it.
+  const permitted = scrubChanges(currentSession(), table.name as TableName, changes);
+  if (!Object.keys(permitted).length) return existing;
+  const next = stampUpdate({ ...existing, ...permitted }) as T;
   await table.put(next);
   return next;
 }

@@ -109,6 +109,20 @@ export function isExpired(session: Session, now = new Date()): boolean {
   return new Date(session.expiresAt).getTime() <= now.getTime();
 }
 
+/**
+ * True for someone whose whole job is one aid station.
+ *
+ * A volunteer pinned to a destination has exactly one packlist to look at and
+ * nothing to do anywhere else in the app. Showing them a warehouse they cannot
+ * reach, a backup they must not take and a stocktake they cannot run is not
+ * security — the scope rules already stop all of it — but it is clutter on a
+ * phone held in one hand at an aid station, and clutter is how people end up
+ * tapping the wrong thing.
+ */
+export function isStationOnly(session: Session | null): boolean {
+  return Boolean(session && session.role === 'volunteer' && session.scope.destinationId);
+}
+
 /** Position in the authority order; lower is more powerful. */
 export function roleRank(role: Role): number {
   return ['admin', 'crew', 'driver', 'volunteer'].indexOf(role);
@@ -120,28 +134,61 @@ export function roleAtLeast(role: Role, minimum: Role): boolean {
 }
 
 /**
- * Fields a role may change on a packlist line.
+ * Fields a role may change, per table.
  *
- * A volunteer at an aid station records what physically turned up; they must not
- * be able to rewrite what was supposed to be sent, because that would quietly
- * erase the evidence of a short delivery.
+ * A volunteer at an aid station records what physically turned up; they must
+ * not be able to rewrite what was required or what was packed, because that
+ * would quietly erase the evidence of a short delivery. Nor may they move the
+ * packlist through its statuses — that is the warehouse's and the driver's
+ * account of where the crate is.
+ *
+ * `all` means the role writes the table unrestricted. A table absent from this
+ * map is governed by the action grants alone.
  */
-const PACKLIST_LINE_FIELDS: Record<Role, string[] | 'all'> = {
-  admin: 'all',
-  crew: 'all',
-  driver: ['note'],
-  volunteer: ['qtyReturned', 'note'],
+const WRITABLE_FIELDS: Partial<Record<TableName, Record<Role, string[] | 'all'>>> = {
+  packlistLines: {
+    admin: 'all',
+    crew: 'all',
+    driver: ['qtyReceived', 'note'],
+    volunteer: ['qtyReceived', 'qtyReturned', 'note'],
+  },
+  packlists: {
+    admin: 'all',
+    crew: 'all',
+    driver: ['status', 'notes'],
+    volunteer: ['notes'],
+  },
 };
 
+/** Which fields this session may write on a table, or 'all'. */
+export function writableFields(session: Session | null, table: TableName): string[] | 'all' {
+  if (!session || isExpired(session)) return session ? [] : 'all';
+  return WRITABLE_FIELDS[table]?.[session.role] ?? 'all';
+}
+
 export function canEditField(session: Session | null, table: TableName, field: string): boolean {
-  if (!session) return true;
-  if (isExpired(session)) return false;
-  if (table !== 'packlistLines') {
-    // Other tables are governed by the action grants alone.
-    return true;
-  }
-  const allowed = PACKLIST_LINE_FIELDS[session.role];
+  const allowed = writableFields(session, table);
   return allowed === 'all' || allowed.includes(field);
+}
+
+/**
+ * Drop everything a session may not write, so a stray change never reaches the
+ * local database. The screens hide these controls; this is the floor under
+ * them, and it is the reason a volunteer's copy of a packlist cannot drift
+ * from the warehouse's.
+ */
+export function scrubChanges<T extends object>(
+  session: Session | null,
+  table: TableName,
+  changes: T,
+): Partial<T> {
+  const allowed = writableFields(session, table);
+  if (allowed === 'all') return changes;
+  const kept: Partial<T> = {};
+  for (const key of Object.keys(changes) as Array<keyof T & string>) {
+    if (allowed.includes(key)) kept[key] = changes[key];
+  }
+  return kept;
 }
 
 /**

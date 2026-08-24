@@ -1,10 +1,19 @@
 import { Suspense, lazy, useEffect } from 'react';
-import { HashRouter, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import type { ReactElement } from 'react';
+import {
+  HashRouter,
+  NavLink,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 import { AccountChip } from './components/AccountChip';
 import { ToastProvider } from './components/ui';
 import { SessionProvider } from './hooks/useSession';
 import { useSession } from './hooks/sessionContext';
-import { can } from './sync/permissions';
+import { can, isStationOnly } from './sync/permissions';
 import type { Action } from './sync/permissions';
 import { useSettings } from './hooks/useDb';
 import './styles/app.css';
@@ -63,6 +72,9 @@ function ThemeSync() {
 
 function BottomNav() {
   const { session } = useSession();
+  // Someone pinned to one aid station has one screen; a row of tabs leading
+  // nowhere they may go is just something to mis-tap.
+  if (isStationOnly(session)) return null;
   const visible = NAV.filter((entry) => !entry.needs || can(session, entry.needs));
   return (
     <nav
@@ -82,6 +94,37 @@ function BottomNav() {
   );
 }
 
+/**
+ * A route nobody without the permission can reach by typing its address.
+ *
+ * The tabs already hide what a role has no business in, but a hidden tab is a
+ * suggestion and a URL is not — a shared phone, a bookmark or a stale link all
+ * get past it. The server refuses the data either way; this stops someone
+ * landing on a screen that can only sit there empty and look broken.
+ */
+function Guard({ needs, children }: { needs: Action; children: ReactElement }) {
+  const { session, ready } = useSession();
+  if (!ready) return <div className="app-main muted">Loading…</div>;
+  return can(session, needs) ? children : <Navigate to="/" replace />;
+}
+
+/**
+ * Everything a station-only volunteer may be on, and nothing else.
+ *
+ * Per-route permissions cannot express this on their own: a volunteer holds
+ * event:read because their packlist screen names the race, and a driver holds
+ * it because they genuinely browse events. One allowlist in one place says what
+ * the tabs already imply — their station, their account, and a scan.
+ */
+const STATION_ROUTES = [/^\/$/, /^\/packlists\/[^/]+$/, /^\/access$/, /^\/scan/, /^\/join\//];
+
+function StationOnlyGate({ children }: { children: ReactElement }) {
+  const { session, ready } = useSession();
+  const { pathname } = useLocation();
+  if (!ready || !isStationOnly(session)) return children;
+  return STATION_ROUTES.some((route) => route.test(pathname)) ? children : <Navigate to="/" replace />;
+}
+
 export default function App() {
   return (
     <HashRouter>
@@ -90,21 +133,22 @@ export default function App() {
           <ThemeSync />
           <div className="app">
           <Suspense fallback={<div className="app-main muted">Loading…</div>}>
+            <StationOnlyGate>
             <Routes>
               <Route path="/" element={<HomeScreen />} />
-              <Route path="/events" element={<EventsScreen />} />
-              <Route path="/events/:eventId" element={<EventDetailScreen />} />
-              <Route path="/events/:eventId/warehouse" element={<WarehouseScreen />} />
+              <Route path="/events" element={<Guard needs="event:read"><EventsScreen /></Guard>} />
+              <Route path="/events/:eventId" element={<Guard needs="event:read"><EventDetailScreen /></Guard>} />
+              <Route path="/events/:eventId/warehouse" element={<Guard needs="packlist:manage"><WarehouseScreen /></Guard>} />
               <Route path="/packlists/:packlistId" element={<PacklistScreen />} />
-              <Route path="/packlists/:packlistId/labels" element={<LabelsScreen />} />
-              <Route path="/stock" element={<StockScreen />} />
-              <Route path="/stock/:itemId" element={<ItemScreen />} />
-              <Route path="/stocktake" element={<StocktakeScreen />} />
-              <Route path="/stocktake/:stocktakeId" element={<StocktakeDetailScreen />} />
-              <Route path="/transport" element={<TransportScreen />} />
-              <Route path="/transport/:loadId" element={<LoadScreen />} />
-              <Route path="/templates" element={<TemplatesScreen />} />
-              <Route path="/templates/:templateId" element={<TemplateDetailScreen />} />
+              <Route path="/packlists/:packlistId/labels" element={<Guard needs="packlist:manage"><LabelsScreen /></Guard>} />
+              <Route path="/stock" element={<Guard needs="item:read"><StockScreen /></Guard>} />
+              <Route path="/stock/:itemId" element={<Guard needs="item:read"><ItemScreen /></Guard>} />
+              <Route path="/stocktake" element={<Guard needs="stocktake:read"><StocktakeScreen /></Guard>} />
+              <Route path="/stocktake/:stocktakeId" element={<Guard needs="stocktake:read"><StocktakeDetailScreen /></Guard>} />
+              <Route path="/transport" element={<Guard needs="load:read"><TransportScreen /></Guard>} />
+              <Route path="/transport/:loadId" element={<Guard needs="load:read"><LoadScreen /></Guard>} />
+              <Route path="/templates" element={<Guard needs="template:manage"><TemplatesScreen /></Guard>} />
+              <Route path="/templates/:templateId" element={<Guard needs="template:manage"><TemplateDetailScreen /></Guard>} />
               <Route path="/more" element={<SettingsScreen />} />
               <Route path="/scan" element={<ScanScreen />} />
               <Route path="/scan/:code" element={<ScanScreen />} />
@@ -112,6 +156,7 @@ export default function App() {
               <Route path="/join/:token" element={<JoinScreen />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </StationOnlyGate>
           </Suspense>
           <BottomNav />
         </div>

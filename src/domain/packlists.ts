@@ -72,20 +72,38 @@ export interface Progress {
   short: PacklistLine[];
 }
 
-/** Summarise how far through packing a list is. */
-export function progressFor(lines: PacklistLine[]): Progress {
+/** How many of this line have been confirmed as arrived. */
+export function received(line: PacklistLine): number {
+  return line.qtyReceived ?? 0;
+}
+
+function summarise(lines: PacklistLine[], got: (line: PacklistLine) => number): Progress {
   const live = lines.filter((line) => !line.deletedAt);
-  const short = live.filter((line) => line.qtyPacked < line.qtyRequired);
-  const done = live.filter((line) => line.qtyPacked >= line.qtyRequired);
+  const short = live.filter((line) => got(line) < line.qtyRequired);
+  const done = live.filter((line) => got(line) >= line.qtyRequired);
   return {
     linesTotal: live.length,
     linesDone: done.length,
     qtyRequired: round2(live.reduce((sum, line) => sum + line.qtyRequired, 0)),
-    qtyPacked: round2(live.reduce((sum, line) => sum + line.qtyPacked, 0)),
+    qtyPacked: round2(live.reduce((sum, line) => sum + got(line), 0)),
     percent: live.length ? Math.round((done.length / live.length) * 100) : 0,
     blocking: short.filter((line) => line.mandatory),
     short,
   };
+}
+
+/** Summarise how far through packing a list is. */
+export function progressFor(lines: PacklistLine[]): Progress {
+  return summarise(lines, (line) => line.qtyPacked);
+}
+
+/**
+ * The same summary from the aid station's side: how much of the list has been
+ * confirmed as having turned up. Kept separate from packing progress so a crate
+ * the warehouse filled but nobody has checked still reads as unconfirmed.
+ */
+export function receiptFor(lines: PacklistLine[]): Progress {
+  return summarise(lines, received);
 }
 
 /** Create an empty packlist for a destination, with its QR short code. */

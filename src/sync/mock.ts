@@ -5,7 +5,7 @@ import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import { shouldReplace } from '../domain/backup';
 import { cleanDisplayName, displayNameFromEmail } from './names';
-import { inScope, writableTables } from './permissions';
+import { inScope, writableFields, writableTables } from './permissions';
 import type {
   ChangeSet,
   CreateInviteInput,
@@ -44,6 +44,26 @@ interface StoredRow {
 
 interface StoredSession extends Session {
   key: string;
+}
+
+/**
+ * Take only the fields this session owns from an incoming row, keeping the
+ * server's value for the rest. Mirrors the same merge in push_records().
+ */
+function mergePermitted(
+  session: Session,
+  table: TableName,
+  stored: SyncMeta,
+  incoming: SyncMeta,
+): SyncMeta {
+  const allowed = writableFields(session, table);
+  if (allowed === 'all') return incoming;
+  const merged = { ...stored } as Record<string, unknown>;
+  const from = incoming as unknown as Record<string, unknown>;
+  for (const field of [...allowed, 'rev', 'updatedAt', 'deviceId', 'syncedAt', 'deletedAt']) {
+    if (field in from) merged[field] = from[field];
+  }
+  return merged as unknown as SyncMeta;
 }
 
 class MockServerDb extends Dexie {
@@ -248,7 +268,12 @@ export class MockBackend implements SyncBackend {
       }
 
       offset += 1;
-      await server.rows.put({ key, table, id: row.id, seq: base + offset, row });
+      // Field rules, not just table rules: a restricted role's push may only
+      // move the fields it owns, and everything else keeps the server's copy.
+      // Without this a volunteer could tick a line "packed" and overwrite what
+      // the warehouse recorded sending.
+      const merged = existing ? mergePermitted(session, table, existing.row, row) : row;
+      await server.rows.put({ key, table, id: row.id, seq: base + offset, row: merged });
       result.accepted += 1;
     }
 

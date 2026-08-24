@@ -209,6 +209,14 @@ export interface PacklistLine extends SyncMeta {
   qtyRequired: number;
   /** How many actually went in the crate. */
   qtyPacked: number;
+  /**
+   * How many the destination confirmed turning up.
+   *
+   * Written by whoever is standing at the aid station, and deliberately kept
+   * apart from `qtyPacked`: if the warehouse packed four and three arrived,
+   * both numbers have to survive or the shortfall disappears.
+   */
+  qtyReceived?: number;
   /** How many came back after the event. */
   qtyReturned: number;
   /** Blocks a packlist from being marked packed while short. */
