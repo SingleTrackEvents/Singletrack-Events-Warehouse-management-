@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { db } from '../db/db';
-import { create } from '../db/repo';
+import { create, liveWhere } from '../db/repo';
 import {
   isLowStock,
   isUncounted,
-  itemsWithMovements,
+  countedItemIds,
   lowStockItems,
   pieces,
   recordMovements,
   setQuantity,
   shortfall,
 } from './stock';
+import { recordCount, startStocktake } from './stocktake';
 import { PACKED_UNITS, UNITS, unitHasPackSize } from '../db/types';
 import type { Item } from '../db/types';
 
@@ -188,11 +189,11 @@ describe('uncounted stock', () => {
       name: 'Water', sku: 'W', categoryId: null, unit: 'each', packSize: 1, bin: '',
       qtyOnHand: 0, minQty: 5, barcode: null, notes: '', consumable: false, archived: false,
     });
-    expect(await itemsWithMovements()).toEqual(new Set());
+    expect(await countedItemIds()).toEqual(new Set());
 
     await recordMovements([{ itemId: stocked.id, qty: 4, reason: 'receipt' }]);
 
-    expect(await itemsWithMovements()).toEqual(new Set([stocked.id]));
+    expect(await countedItemIds()).toEqual(new Set([stocked.id]));
   });
 });
 
@@ -217,5 +218,37 @@ describe('pack size', () => {
     // A unit added later must be classified deliberately, not default to one.
     expect(UNITS.every((unit) => typeof unitHasPackSize(unit) === 'boolean')).toBe(true);
     expect(UNITS.filter(unitHasPackSize)).toEqual(PACKED_UNITS);
+  });
+});
+
+describe('proof that somebody looked', () => {
+  it('counts an empty shelf that a stocktake confirmed', async () => {
+    const empty = await create(db.items, {
+      name: 'Starlink', sku: 'COM-01', categoryId: null, unit: 'each', packSize: 1, bin: 'B2',
+      qtyOnHand: 0, minQty: 2, barcode: null, notes: '', consumable: false, archived: false,
+    });
+    expect(await countedItemIds()).toEqual(new Set());
+
+    // Zero against an expected zero is no discrepancy, so nothing reaches the
+    // ledger — but the shelf was walked, and the count line says so.
+    const stocktake = await startStocktake('First count', { items: [empty] });
+    const [line] = await liveWhere(db.stocktakeCounts, 'stocktakeId', stocktake.id);
+    await recordCount(line.id, 0);
+
+    expect(await db.movements.count()).toBe(0);
+    expect(await countedItemIds()).toEqual(new Set([empty.id]));
+    expect(isUncounted(empty, await countedItemIds())).toBe(false);
+    expect(isLowStock(empty, await countedItemIds())).toBe(true);
+  });
+
+  it('does not count a stocktake line nobody filled in', async () => {
+    const untouched = await create(db.items, {
+      name: 'Gazebo', sku: 'STR-02', categoryId: null, unit: 'each', packSize: 1, bin: 'A3',
+      qtyOnHand: 0, minQty: 4, barcode: null, notes: '', consumable: false, archived: false,
+    });
+    await startStocktake('Opened but not walked', { items: [untouched] });
+
+    // An open stocktake is an intention, not a count.
+    expect(await countedItemIds()).toEqual(new Set());
   });
 });

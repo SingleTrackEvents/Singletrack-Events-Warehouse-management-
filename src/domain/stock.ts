@@ -112,11 +112,23 @@ export function lowStockItems(items: Item[], itemsWithMovements?: ReadonlySet<st
     .sort((a, b) => shortfall(b) - shortfall(a));
 }
 
-/** Ids of every item the ledger has ever touched. */
-export async function itemsWithMovements(): Promise<Set<string>> {
+/**
+ * Ids of every item somebody has actually looked at.
+ *
+ * The ledger is the first source, but not the only one: a movement of zero is
+ * not written, so a shelf counted as empty when the system already said zero
+ * leaves no trace there. That is not a rare case on a catalogue imported from a
+ * packing list, where almost everything starts at zero — the first stocktake
+ * would confirm a dozen empty shelves and every one would still read "not
+ * counted". A stocktake line with a number in it is the other proof.
+ */
+export async function countedItemIds(): Promise<Set<string>> {
   const ids = new Set<string>();
   for (const movement of await db.movements.toArray()) {
     if (!movement.deletedAt) ids.add(movement.itemId);
+  }
+  for (const count of await db.stocktakeCounts.toArray()) {
+    if (!count.deletedAt && count.counted !== null) ids.add(count.itemId);
   }
   return ids;
 }

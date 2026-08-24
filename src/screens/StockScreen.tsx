@@ -8,7 +8,7 @@ import { useSearch } from '../hooks/useSearch';
 import { db } from '../db/db';
 import { create } from '../db/repo';
 import { useCategories, useItems } from '../hooks/useDb';
-import { isLowStock, isUncounted, itemsWithMovements } from '../domain/stock';
+import { isLowStock, isUncounted, countedItemIds } from '../domain/stock';
 import { formatQtyDetail, plural } from '../domain/format';
 import { PackSizeField } from '../components/PackSizeField';
 import { CategoryPicker } from '../components/CategoryPicker';
@@ -54,7 +54,7 @@ export default function StockScreen() {
 
   // Which items the ledger has ever touched, so never-counted stock is not
   // paraded as an emergency on a catalogue nobody has walked yet.
-  const counted = useLiveQuery(() => itemsWithMovements(), [], new Set<string>());
+  const counted = useLiveQuery(() => countedItemIds(), [], new Set<string>());
 
   const base = (items ?? []).filter((item) => {
     if (item.archived) return false;

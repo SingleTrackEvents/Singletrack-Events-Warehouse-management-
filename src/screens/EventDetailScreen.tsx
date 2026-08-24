@@ -112,6 +112,9 @@ export default function EventDetailScreen() {
           <Link className="btn btn-outline btn-sm" to={`/transport?event=${event.id}`}>
             🚚 Transport
           </Link>
+          <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/warehouse`}>
+            📦 Warehouse list
+          </Link>
           <button type="button" className="btn btn-outline btn-sm" onClick={() => void handover()}>
             ⬇ Handover file
           </button>

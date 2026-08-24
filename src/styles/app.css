@@ -880,3 +880,29 @@ button, input, select, textarea {
 }
 
 .need-btn:active { background: var(--surface-sunken); }
+
+/* The warehouse list folds each item's destinations away until asked for: the
+   picking pass wants one line per item, and the breakdown is what you check
+   once the crate is in front of you. */
+.pull-row { border-bottom: 1px solid var(--border); }
+.pull-row:last-child { border-bottom: none; }
+.pull-row .row { border-bottom: none; }
+
+.pull-breakdown {
+  padding: 0 var(--space-4) var(--space-3);
+  background: var(--surface-sunken);
+}
+
+.pull-going {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  padding: var(--space-2) 0;
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.pull-going:last-child { border-bottom: none; }

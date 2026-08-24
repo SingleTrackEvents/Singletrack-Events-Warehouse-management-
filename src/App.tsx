@@ -21,6 +21,7 @@ import './styles/app.css';
 const HomeScreen = lazy(() => import('./screens/HomeScreen'));
 const EventsScreen = lazy(() => import('./screens/EventsScreen'));
 const EventDetailScreen = lazy(() => import('./screens/EventDetailScreen'));
+const WarehouseScreen = lazy(() => import('./screens/WarehouseScreen'));
 const PacklistScreen = lazy(() => import('./screens/PacklistScreen'));
 const LabelsScreen = lazy(() => import('./screens/LabelsScreen'));
 const StockScreen = lazy(() => import('./screens/StockScreen'));
@@ -93,6 +94,7 @@ export default function App() {
               <Route path="/" element={<HomeScreen />} />
               <Route path="/events" element={<EventsScreen />} />
               <Route path="/events/:eventId" element={<EventDetailScreen />} />
+              <Route path="/events/:eventId/warehouse" element={<WarehouseScreen />} />
               <Route path="/packlists/:packlistId" element={<PacklistScreen />} />
               <Route path="/packlists/:packlistId/labels" element={<LabelsScreen />} />
               <Route path="/stock" element={<StockScreen />} />
