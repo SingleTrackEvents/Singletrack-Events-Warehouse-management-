@@ -50,8 +50,8 @@ export interface TestDb {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
   /** Become this user for subsequent statements. */
   actAs(userId: string | null): Promise<void>;
-  /** Insert an auth user and return its id. */
-  addUser(id: string, email: string): Promise<string>;
+  /** Insert an auth user and return its id. Anonymous users have no email. */
+  addUser(id: string, email: string | null): Promise<string>;
   /** Drop superuser privileges so row-level security actually applies. */
   enforceRls(): Promise<void>;
   close(): Promise<void>;

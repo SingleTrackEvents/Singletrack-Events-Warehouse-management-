@@ -183,6 +183,48 @@ describe('privilege boundaries', () => {
     await db.close();
   });
 
+  it('lets a brand new phone redeem an aid station invite under real privileges', async () => {
+    // The volunteer's phone is a fresh anonymous user with no membership, and
+    // it is subject to row-level security like any other client. Every earlier
+    // redeem test ran as a superuser, so this path had never actually been
+    // exercised the way a phone at an aid station exercises it.
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const invite = await db.query<{ token: string }>(
+      `insert into public.invites (token, role, event_id, destination_id, label)
+       values ('CDEF-GHJK', 'volunteer', $1, $2, 'Aid 4') returning token`,
+      [EVENT, OTHER_STATION],
+    );
+
+    const phone = '44444444-4444-4444-8444-444444444444';
+    await db.addUser(phone, null);
+    await db.actAs(phone);
+    await db.enforceRls();
+
+    const { rows } = await db.query<{ role: string; destination_id: string }>(
+      `select role, destination_id from public.redeem_invite($1, 'Nigel')`,
+      [invite.rows[0].token],
+    );
+    expect(rows[0].role).toBe('volunteer');
+    expect(rows[0].destination_id).toBe(OTHER_STATION);
+    await db.close();
+  });
+
+  it('matches an invite code whatever case it arrives in', async () => {
+    const db = await seeded();
+    const phone = '55555555-5555-4555-8555-555555555555';
+    await db.addUser(phone, null);
+    await db.actAs(phone);
+    await db.enforceRls();
+
+    const { rows } = await db.query<{ role: string }>(
+      `select role from public.redeem_invite($1, 'Nigel')`,
+      ['  aaaa-bbbb  '],
+    );
+    expect(rows[0].role).toBe('volunteer');
+    await db.close();
+  });
+
   it('lets an admin delete an invite', async () => {
     const db = await seeded();
     await db.actAs(ADMIN);

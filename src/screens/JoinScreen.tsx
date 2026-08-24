@@ -22,12 +22,23 @@ export default function JoinScreen() {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
+  /*
+   * The code is editable, not just read from the QR.
+   *
+   * A scan that comes through mangled — a damaged label, a camera app that
+   * rewrites the link, a code read out over the radio — otherwise leaves a
+   * volunteer with no way in at all. It also means the code being sent is on
+   * screen next to the one printed on the card, so a mismatch is visible
+   * instead of arriving as "not recognised".
+   */
+  const [code, setCode] = useState(() => (token ? decodeURIComponent(token) : ''));
+
   const join = async () => {
-    if (!backend || !token) return;
+    if (!backend || !code.trim()) return;
     setBusy(true);
     setError(undefined);
     try {
-      const joined = await backend.joinWithInvite(decodeURIComponent(token), name);
+      const joined = await backend.joinWithInvite(code.trim(), name);
       setSession(joined);
       toast(`Welcome, ${joined.displayName}`);
       navigate('/', { replace: true });
@@ -96,9 +107,24 @@ export default function JoinScreen() {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (name.trim()) void join();
+          if (name.trim() && code.trim()) void join();
         }}
       >
+        <Field label="Invite code" hint="From the QR you scanned, or read off the printed card.">
+          {(id) => (
+            <input
+              id={id}
+              className="input mono"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              value={code}
+              placeholder="ABCD-EFGH"
+              onChange={(event) => setCode(event.target.value.toUpperCase())}
+            />
+          )}
+        </Field>
+
         <Field label="Your name" hint="So the crew can see who recorded what.">
           {(id) => (
             <input
@@ -119,12 +145,18 @@ export default function JoinScreen() {
           </p>
         ) : null}
 
-        <button type="submit" className="btn btn-primary btn-lg btn-block mt-4" disabled={!name.trim() || busy}>
+        <button
+          type="submit"
+          className="btn btn-primary btn-lg btn-block mt-4"
+          disabled={!name.trim() || !code.trim() || busy}
+        >
           {busy ? 'Joining…' : "I'm in"}
         </button>
       </form>
 
-      <p className="tiny muted center mt-4 mono">{token}</p>
+      <p className="tiny muted center mt-4">
+        Connected to the SingleTrack server.
+      </p>
     </Screen>
   );
 }

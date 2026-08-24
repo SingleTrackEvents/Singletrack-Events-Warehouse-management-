@@ -168,7 +168,16 @@ export class MockBackend implements SyncBackend {
     const invite = (await server.invites.toArray()).find(
       (entry) => entry.token.toUpperCase() === normalised,
     );
-    if (!invite) throw new SyncError('That invite code was not recognised.', 'auth');
+    if (!invite) {
+      // Named unmistakably: the real server produces almost the same sentence,
+      // and a volunteer stuck on the stand-in could not tell which one had
+      // turned them away.
+      throw new SyncError(
+        'This device is on the on-device demo server, which has no invites on it. ' +
+          'Connect it to the SingleTrack server from More → Accounts & sync.',
+        'auth',
+      );
+    }
     if (invite.revokedAt) throw new SyncError('That invite has been revoked.', 'auth');
     if (invite.expiresAt && new Date(invite.expiresAt) <= new Date()) {
       throw new SyncError('That invite has expired.', 'auth');
