@@ -2,18 +2,31 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
-import { EmptyState, Field, Pill, Sheet } from '../components/ui';
+import { ConfirmSheet, EmptyState, Field, Pill, Sheet } from '../components/ui';
+import { SwipeToDelete } from '../components/SwipeToDelete';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useCategories, useCrewName } from '../hooks/useDb';
 import { startStocktake, summarise } from '../domain/stocktake';
+import { describeStocktakeRemoval, removeStocktake } from '../domain/remove';
+import type { StocktakeRemoval } from '../domain/remove';
+import type { Stocktake } from '../db/types';
 import { formatDateTime, plural } from '../domain/format';
 
 /** Stocktake sessions: what is open, what has been done, and how to start one. */
 export default function StocktakeScreen() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [starting, setStarting] = useState(false);
+  const [removing, setRemoving] = useState<{ stocktake: Stocktake; summary: StocktakeRemoval }>();
+
+  // Read before anything changes, so the confirmation can name what goes.
+  const askToRemove = (stocktake: Stocktake) => {
+    void describeStocktakeRemoval(stocktake.id).then((summary) =>
+      setRemoving({ stocktake, summary }),
+    );
+  };
 
   const stocktakes = useLiveQuery(
     async () =>
@@ -66,7 +79,8 @@ export default function StocktakeScreen() {
             {open.map((stocktake) => {
               const summary = progress?.get(stocktake.id);
               return (
-                <Link key={stocktake.id} to={`/stocktake/${stocktake.id}`} className="row">
+                <SwipeToDelete key={stocktake.id} onDelete={() => askToRemove(stocktake)}>
+                <Link to={`/stocktake/${stocktake.id}`} className="row">
                   <span className="row-icon">🔢</span>
                   <span className="row-body">
                     <span className="row-title">{stocktake.name}</span>
@@ -76,6 +90,7 @@ export default function StocktakeScreen() {
                   </span>
                   <Pill tone="accent">{summary?.percent ?? 0}%</Pill>
                 </Link>
+                </SwipeToDelete>
               );
             })}
           </div>
@@ -91,7 +106,8 @@ export default function StocktakeScreen() {
             {done.map((stocktake) => {
               const summary = progress?.get(stocktake.id);
               return (
-                <Link key={stocktake.id} to={`/stocktake/${stocktake.id}`} className="row">
+                <SwipeToDelete key={stocktake.id} onDelete={() => askToRemove(stocktake)}>
+                <Link to={`/stocktake/${stocktake.id}`} className="row">
                   <span className="row-body">
                     <span className="row-title">{stocktake.name}</span>
                     <span className="row-sub">
@@ -103,10 +119,41 @@ export default function StocktakeScreen() {
                     {stocktake.status === 'completed' ? 'Done' : 'Cancelled'}
                   </Pill>
                 </Link>
+                </SwipeToDelete>
               );
             })}
           </div>
         </section>
+      ) : null}
+
+      {open.length || done.length ? (
+        <p className="tiny muted center mt-3">Swipe a count left to delete it.</p>
+      ) : null}
+
+      {removing ? (
+        <ConfirmSheet
+          title={`Delete ${removing.stocktake.name}?`}
+          body={
+            <>
+              {plural(removing.summary.counts, 'count line')} go with it.
+              {removing.summary.corrections ? (
+                <div className="mt-2">
+                  The {plural(removing.summary.corrections, 'correction')} it already applied stay on
+                  the stock ledger — that is the record of what was on the shelf, and tidying old
+                  counts away is no reason to rewrite it.
+                </div>
+              ) : null}
+            </>
+          }
+          confirmLabel="Delete"
+          tone="danger"
+          onCancel={() => setRemoving(undefined)}
+          onConfirm={() => {
+            const target = removing.stocktake;
+            setRemoving(undefined);
+            void removeStocktake(target.id).then(() => toast(`${target.name} deleted`));
+          }}
+        />
       ) : null}
 
       {starting ? (

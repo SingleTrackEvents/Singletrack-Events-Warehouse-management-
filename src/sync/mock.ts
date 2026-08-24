@@ -299,6 +299,14 @@ export class MockBackend implements SyncBackend {
     if (invite) await server.invites.put({ ...invite, revokedAt: nowIso() });
   }
 
+  async deleteInvite(session: Session, inviteId: string): Promise<void> {
+    this.assertLive(session);
+    if (session.role !== 'admin') {
+      throw new SyncError('Only an admin can delete an invite.', 'permission');
+    }
+    await server.invites.delete(inviteId);
+  }
+
   /* --------------------------------------------------------------- guards -- */
 
   private assertLive(session: Session): void {

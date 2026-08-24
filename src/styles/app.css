@@ -906,3 +906,10 @@ button, input, select, textarea {
 }
 
 .pull-going:last-child { border-bottom: none; }
+
+/* An invite is a card in its own right rather than a row inside a list, so the
+   panel revealed behind it needs the card's corners — square ones read as a
+   stray red block rather than part of the row. */
+.swipe-row:has(> .swipe-row-content > .card) .swipe-row-actions {
+  border-radius: var(--radius-lg);
+}

@@ -59,3 +59,33 @@ export async function removeLoad(loadId: string): Promise<void> {
   await softDeleteChildren(db.loadStops, 'loadId', loadId);
   await softDelete(db.loads, loadId);
 }
+
+/** What removing a stocktake takes with it. */
+export interface StocktakeRemoval {
+  counts: number;
+  /** Corrections this count already wrote to the ledger, which are kept. */
+  corrections: number;
+}
+
+export async function describeStocktakeRemoval(stocktakeId: string): Promise<StocktakeRemoval> {
+  const counts = alive(await db.stocktakeCounts.where('stocktakeId').equals(stocktakeId).toArray());
+  const corrections = alive(await db.movements.toArray()).filter(
+    (movement) => movement.refType === 'stocktake' && movement.refId === stocktakeId,
+  );
+  return { counts: counts.length, corrections: corrections.length };
+}
+
+/**
+ * Remove a stocktake and the count lines under it.
+ *
+ * The corrections it already applied stay on the ledger, for the same reason
+ * deleting a race does not rewrite the stock movements: the ledger records what
+ * was actually on the shelf and what changed, and a tidy-up of old counts is
+ * not grounds for rewriting that history.
+ */
+export async function removeStocktake(stocktakeId: string): Promise<StocktakeRemoval> {
+  const summary = await describeStocktakeRemoval(stocktakeId);
+  await softDeleteChildren(db.stocktakeCounts, 'stocktakeId', stocktakeId);
+  await softDelete(db.stocktakes, stocktakeId);
+  return summary;
+}

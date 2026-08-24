@@ -341,6 +341,46 @@ describe('invites and volunteer access', () => {
     await expect(backend.joinWithInvite(invite.token, 'Tom')).rejects.toThrow(/revoked/i);
   });
 
+  it('takes a deleted invite off the list and out of use', async () => {
+    const admin = await adminSession();
+    const invite = await backend.createInvite(admin, {
+      role: 'volunteer', scope: UNSCOPED, label: 'Aid 1',
+    });
+    expect(await backend.listInvites(admin)).toHaveLength(1);
+
+    await backend.deleteInvite(admin, invite.id);
+
+    // Revoking leaves an invite on the list; a season of spent aid-station QRs
+    // buries the ones that still matter, so deleting takes it away entirely.
+    expect(await backend.listInvites(admin)).toHaveLength(0);
+    await expect(backend.joinWithInvite(invite.token, 'Tom')).rejects.toThrow();
+  });
+
+  it('will not let a volunteer delete an invite', async () => {
+    const admin = await adminSession();
+    const invite = await backend.createInvite(admin, {
+      role: 'volunteer', scope: UNSCOPED, label: 'Anyone',
+    });
+    const volunteer = await backend.joinWithInvite(invite.token, 'Tom');
+
+    await expect(backend.deleteInvite(volunteer, invite.id)).rejects.toThrow(/admin/i);
+    expect(await backend.listInvites(admin)).toHaveLength(1);
+  });
+
+  it('leaves people who already joined working after a delete', async () => {
+    const admin = await adminSession();
+    const invite = await backend.createInvite(admin, {
+      role: 'volunteer', scope: UNSCOPED, label: 'Aid 1',
+    });
+    const volunteer = await backend.joinWithInvite(invite.token, 'Tom');
+
+    await backend.deleteInvite(admin, invite.id);
+
+    // Their session runs to its own expiry, exactly as with a revoke — a tidy-up
+    // of the list must not turn somebody's phone off mid-shift.
+    expect(await backend.pull(volunteer, null)).toBeDefined();
+  });
+
   it('stops an expired invite from being used', async () => {
     const admin = await adminSession();
     const invite = await backend.createInvite(admin, {

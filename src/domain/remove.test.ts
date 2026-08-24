@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { db } from '../db/db';
-import { alive, create } from '../db/repo';
-import { describeEventRemoval, removeEvent, removeLoad } from './remove';
+import { alive, create, liveWhere } from '../db/repo';
+import {
+  describeEventRemoval,
+  describeStocktakeRemoval,
+  removeEvent,
+  removeLoad,
+  removeStocktake,
+} from './remove';
+import { completeStocktake, recordCount, startStocktake } from './stocktake';
 
 async function fullEvent() {
   const event = await create(db.events, {
@@ -115,5 +122,62 @@ describe('removing a transport run', () => {
 
     expect((await db.packlists.get(packlist.id))!.deletedAt).toBeNull();
     expect((await db.destinations.get(destination.id))!.deletedAt).toBeNull();
+  });
+});
+
+describe('removing a stocktake', () => {
+  async function countedStocktake() {
+    const item = await create(db.items, {
+      name: 'Water cube', sku: 'WAT-01', categoryId: null, unit: 'each', packSize: 1, bin: 'A1',
+      qtyOnHand: 20, minQty: 4, barcode: null, notes: '', consumable: false, archived: false,
+    });
+    const stocktake = await startStocktake('August count', { items: [item] });
+    const [line] = await liveWhere(db.stocktakeCounts, 'stocktakeId', stocktake.id);
+    await recordCount(line.id, 14);
+    await completeStocktake(stocktake);
+    return { stocktake, item };
+  }
+
+  it('names what goes before it goes', async () => {
+    const { stocktake } = await countedStocktake();
+
+    const summary = await describeStocktakeRemoval(stocktake.id);
+    expect(summary.counts).toBe(1);
+    expect(summary.corrections).toBe(1);
+  });
+
+  it('takes its count lines with it', async () => {
+    const { stocktake } = await countedStocktake();
+
+    await removeStocktake(stocktake.id);
+
+    expect((await db.stocktakes.get(stocktake.id))!.deletedAt).not.toBeNull();
+    expect(alive(await liveWhere(db.stocktakeCounts, 'stocktakeId', stocktake.id))).toHaveLength(0);
+  });
+
+  it('keeps the corrections it already applied', async () => {
+    const { stocktake, item } = await countedStocktake();
+    const before = (await db.items.get(item.id))!.qtyOnHand;
+    expect(before).toBe(14);
+
+    await removeStocktake(stocktake.id);
+
+    // The ledger records what was on the shelf. Tidying old counts away is no
+    // reason to rewrite that, or to put five cubes back that are not there.
+    expect((await db.items.get(item.id))!.qtyOnHand).toBe(14);
+    const movements = alive(await db.movements.toArray()).filter(
+      (movement) => movement.refType === 'stocktake',
+    );
+    expect(movements).toHaveLength(1);
+    expect(movements[0].qty).toBe(-6);
+  });
+
+  it('leaves other counts alone', async () => {
+    const { stocktake } = await countedStocktake();
+    const other = await startStocktake('September count', { items: [] });
+
+    await removeStocktake(stocktake.id);
+
+    expect((await db.stocktakes.get(other.id))!.deletedAt).toBeNull();
   });
 });

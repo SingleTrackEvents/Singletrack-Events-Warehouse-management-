@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Screen } from '../App';
 import { QrCode } from '../components/QrCode';
 import { ConfirmSheet, Field, Pill, Sheet } from '../components/ui';
+import { SwipeToDelete } from '../components/SwipeToDelete';
 import { useToast } from '../components/toastContext';
 import { useSession } from '../hooks/sessionContext';
 import { SUPABASE_CONFIGURED } from '../sync';
@@ -245,6 +246,10 @@ export default function AccessScreen() {
       <button type="button" className="btn btn-ghost btn-block mt-4" onClick={() => setSigningOut(true)}>
         Sign out
       </button>
+
+      {invites?.length ? (
+        <p className="tiny muted center mb-3">Swipe an invite left to delete it.</p>
+      ) : null}
 
       {inviting ? <InviteSheet onClose={() => setInviting(false)} /> : null}
 
@@ -650,11 +655,13 @@ function InviteCard({ invite }: { invite: Invite }) {
   const { backend, session } = useSession();
   const toast = useToast();
   const [revoking, setRevoking] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const url = joinUrl(invite.token);
   const expired = Boolean(invite.expiresAt && new Date(invite.expiresAt) <= new Date());
   const dead = expired || Boolean(invite.revokedAt);
 
   return (
+    <SwipeToDelete onDelete={() => setDeleting(true)}>
     <div className="card card-pad">
       <div className="row-flex" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
         <div style={{ opacity: dead ? 0.35 : 1 }}>
@@ -698,7 +705,39 @@ function InviteCard({ invite }: { invite: Invite }) {
           }}
         />
       ) : null}
+
+      {deleting ? (
+        <ConfirmSheet
+          title={`Delete ${invite.label}?`}
+          body={
+            <>
+              The invite goes off this list. Printed copies of its QR stop working, and{' '}
+              {invite.usedCount
+                ? `the ${plural(invite.usedCount, 'person', 'people')} who joined with it keep working until their access expires`
+                : 'nobody has joined with it'}
+              .
+              {!dead ? (
+                <div className="mt-2" style={{ color: 'var(--warn)' }}>
+                  This one is still live. Revoke it instead if a printed copy is out at a station
+                  and you want the QR to say so rather than simply stop.
+                </div>
+              ) : null}
+            </>
+          }
+          confirmLabel="Delete"
+          tone="danger"
+          onCancel={() => setDeleting(false)}
+          onConfirm={() => {
+            if (!backend || !session) return;
+            void backend.deleteInvite(session, invite.id).then(() => {
+              toast('Invite deleted');
+              setDeleting(false);
+            });
+          }}
+        />
+      ) : null}
     </div>
+    </SwipeToDelete>
   );
 }
 

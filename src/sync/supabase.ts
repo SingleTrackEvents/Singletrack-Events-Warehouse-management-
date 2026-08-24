@@ -580,6 +580,15 @@ export class SupabaseBackend implements SyncBackend {
       .eq('id', inviteId);
     if (error) throw toSyncError(error.message);
   }
+
+  /**
+   * The invites policy is `for all` to admins, so deleting needs no schema
+   * change: row-level security refuses this for anyone else.
+   */
+  async deleteInvite(_session: Session, inviteId: string): Promise<void> {
+    const { error } = await this.client.from('invites').delete().eq('id', inviteId);
+    if (error) throw toSyncError(error.message);
+  }
 }
 
 interface InviteRow {

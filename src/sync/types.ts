@@ -216,6 +216,15 @@ export interface SyncBackend {
   createInvite(session: Session, input: CreateInviteInput): Promise<Invite>;
   listInvites(session: Session): Promise<Invite[]>;
   revokeInvite(session: Session, inviteId: string): Promise<void>;
+  /**
+   * Remove an invite outright.
+   *
+   * Revoking stops an invite working but leaves it on the list, and a season's
+   * worth of spent aid-station QRs buries the ones that still matter. Deleting
+   * is for tidying those away; anyone who already joined keeps their session
+   * until it expires, exactly as with a revoke.
+   */
+  deleteInvite(session: Session, inviteId: string): Promise<void>;
 }
 
 export type SyncErrorKind = 'auth' | 'permission' | 'network' | 'conflict' | 'invalid';
