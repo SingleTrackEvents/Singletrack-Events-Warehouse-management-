@@ -11,6 +11,7 @@ import {
   setQuantity,
   shortfall,
 } from './stock';
+import { PACKED_UNITS, UNITS, unitHasPackSize } from '../db/types';
 import type { Item } from '../db/types';
 
 async function makeItem(overrides: Partial<Item> = {}) {
@@ -192,5 +193,29 @@ describe('uncounted stock', () => {
     await recordMovements([{ itemId: stocked.id, qty: 4, reason: 'receipt' }]);
 
     expect(await itemsWithMovements()).toEqual(new Set([stocked.id]));
+  });
+});
+
+describe('pack size', () => {
+  it('only applies to units that hold pieces', () => {
+    // A box of gels contains 24. A kids tee does not contain anything, and a
+    // number typed against "each" multiplies the whole count: 130 tees at a
+    // pack size of 130 reads as 16,900.
+    expect(unitHasPackSize('box')).toBe(true);
+    expect(unitHasPackSize('carton')).toBe(true);
+    expect(unitHasPackSize('pack')).toBe(true);
+    expect(unitHasPackSize('bag')).toBe(true);
+    expect(unitHasPackSize('roll')).toBe(true);
+    expect(unitHasPackSize('pallet')).toBe(true);
+
+    expect(unitHasPackSize('each')).toBe(false);
+    expect(unitHasPackSize('kg')).toBe(false);
+    expect(unitHasPackSize('litre')).toBe(false);
+  });
+
+  it('covers every unit the app offers', () => {
+    // A unit added later must be classified deliberately, not default to one.
+    expect(UNITS.every((unit) => typeof unitHasPackSize(unit) === 'boolean')).toBe(true);
+    expect(UNITS.filter(unitHasPackSize)).toEqual(PACKED_UNITS);
   });
 });

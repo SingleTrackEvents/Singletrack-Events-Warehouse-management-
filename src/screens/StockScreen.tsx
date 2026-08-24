@@ -10,8 +10,10 @@ import { create } from '../db/repo';
 import { useCategories, useItems } from '../hooks/useDb';
 import { isLowStock, isUncounted, itemsWithMovements } from '../domain/stock';
 import { formatQtyDetail, plural } from '../domain/format';
+import { PackSizeField } from '../components/PackSizeField';
+import { CategoryPicker } from '../components/CategoryPicker';
 import type { Unit } from '../db/types';
-import { UNITS } from '../db/types';
+import { UNITS, unitHasPackSize } from '../db/types';
 
 /**
  * The warehouse catalogue.
@@ -201,7 +203,6 @@ export default function StockScreen() {
 }
 
 function NewItemSheet({ onClose }: { onClose: () => void }) {
-  const categories = useCategories();
   const toast = useToast();
   const [name, setName] = useState('');
   const [sku, setSku] = useState('');
@@ -299,23 +300,7 @@ function NewItemSheet({ onClose }: { onClose: () => void }) {
             )}
           </Field>
         </div>
-        <Field label="Category">
-          {(id) => (
-            <select
-              id={id}
-              className="select"
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
-            >
-              <option value="">Uncategorised</option>
-              {(categories ?? []).map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </Field>
+        <CategoryPicker value={categoryId} onChange={setCategoryId} />
         <div className="field-row">
           <Field label="Counted in">
             {(id) => (
@@ -323,7 +308,11 @@ function NewItemSheet({ onClose }: { onClose: () => void }) {
                 id={id}
                 className="select"
                 value={unit}
-                onChange={(event) => setUnit(event.target.value as Unit)}
+                onChange={(event) => {
+                  const next = event.target.value as Unit;
+                  setUnit(next);
+                  if (!unitHasPackSize(next)) setPackSize('1');
+                }}
               >
                 {UNITS.map((option) => (
                   <option key={option} value={option}>
@@ -333,17 +322,7 @@ function NewItemSheet({ onClose }: { onClose: () => void }) {
               </select>
             )}
           </Field>
-          <Field label="Pack size" hint="Pieces per unit.">
-            {(id) => (
-              <input
-                id={id}
-                className="input"
-                inputMode="numeric"
-                value={packSize}
-                onChange={(event) => setPackSize(event.target.value)}
-              />
-            )}
-          </Field>
+          <PackSizeField unit={unit} value={packSize} qty={qty} onChange={setPackSize} />
         </div>
         <div className="field-row">
           <Field label="On hand now">

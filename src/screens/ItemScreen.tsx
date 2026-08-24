@@ -17,7 +17,9 @@ import {
 } from '../domain/stock';
 import { formatDateTime, formatQty, formatQtyDetail } from '../domain/format';
 import type { MovementReason, Unit } from '../db/types';
-import { UNITS } from '../db/types';
+import { UNITS, unitHasPackSize } from '../db/types';
+import { PackSizeField } from '../components/PackSizeField';
+import { CategoryPicker } from '../components/CategoryPicker';
 
 /** Reasons offered when adjusting by hand, in the order they actually come up. */
 const ADJUST_REASONS: MovementReason[] = ['receipt', 'adjustment', 'damaged', 'consumed'];
@@ -369,7 +371,6 @@ function CountSheet({
 
 function EditItemSheet({ itemId, onClose }: { itemId: string; onClose: () => void }) {
   const item = useItem(itemId);
-  const categories = useCategories();
   const toast = useToast();
   const [draft, setDraft] = useState<Record<string, string>>({});
 
@@ -442,23 +443,10 @@ function EditItemSheet({ itemId, onClose }: { itemId: string; onClose: () => voi
             )}
           </Field>
         </div>
-        <Field label="Category">
-          {(id) => (
-            <select
-              id={id}
-              className="select"
-              value={draft.categoryId ?? item.categoryId ?? ''}
-              onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))}
-            >
-              <option value="">Uncategorised</option>
-              {(categories ?? []).map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </Field>
+        <CategoryPicker
+          value={draft.categoryId ?? item.categoryId ?? ''}
+          onChange={(categoryId) => setDraft((current) => ({ ...current, categoryId }))}
+        />
         <div className="field-row">
           <Field label="Counted in">
             {(id) => (
@@ -466,7 +454,16 @@ function EditItemSheet({ itemId, onClose }: { itemId: string; onClose: () => voi
                 id={id}
                 className="select"
                 value={value('unit')}
-                onChange={(event) => setDraft((current) => ({ ...current, unit: event.target.value }))}
+                onChange={(event) => {
+                  const next = event.target.value as Unit;
+                  setDraft((current) => ({
+                    ...current,
+                    unit: next,
+                    // A unit that holds nothing cannot carry a pack size, and a
+                    // stale one left out of sight would multiply the count.
+                    packSize: unitHasPackSize(next) ? current.packSize : '1',
+                  }));
+                }}
               >
                 {UNITS.map((option) => (
                   <option key={option} value={option}>
@@ -476,17 +473,12 @@ function EditItemSheet({ itemId, onClose }: { itemId: string; onClose: () => voi
               </select>
             )}
           </Field>
-          <Field label="Pack size">
-            {(id) => (
-              <input
-                id={id}
-                className="input"
-                inputMode="numeric"
-                value={value('packSize')}
-                onChange={(event) => setDraft((current) => ({ ...current, packSize: event.target.value }))}
-              />
-            )}
-          </Field>
+          <PackSizeField
+            unit={(draft.unit as Unit | undefined) ?? item.unit}
+            value={value('packSize')}
+            qty={String(item.qtyOnHand)}
+            onChange={(next) => setDraft((current) => ({ ...current, packSize: next }))}
+          />
           <Field label="Reorder at">
             {(id) => (
               <input

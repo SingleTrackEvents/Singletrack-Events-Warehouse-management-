@@ -32,6 +32,20 @@ export type Unit = 'each' | 'box' | 'carton' | 'pallet' | 'roll' | 'pack' | 'lit
 
 export const UNITS: Unit[] = ['each', 'box', 'carton', 'pallet', 'roll', 'pack', 'litre', 'kg', 'bag'];
 
+/**
+ * Units that hold a countable number of pieces, so a pack size means something.
+ *
+ * A box of gels contains 24; a kids tee does not contain anything. Asking for
+ * pieces per unit against "each" invites a number that then multiplies the
+ * whole count — 130 tees at a pack size of 130 reads as 16,900 — so the
+ * question is only put where it has an answer.
+ */
+export const PACKED_UNITS: Unit[] = ['box', 'carton', 'pallet', 'roll', 'pack', 'bag'];
+
+export function unitHasPackSize(unit: Unit): boolean {
+  return PACKED_UNITS.includes(unit);
+}
+
 export interface Category extends SyncMeta {
   name: string;
   /** Display order in pick lists and the stock screen. */
