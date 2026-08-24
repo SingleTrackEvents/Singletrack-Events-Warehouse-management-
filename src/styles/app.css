@@ -376,9 +376,25 @@ button, input, select, textarea {
 .account-chip-busy .account-chip-dot { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
 .account-chip-error .account-chip-dot { background: var(--danger); }
 .account-chip-out .account-chip-dot { background: var(--border-strong); }
+/* Never connected to anything. Quieter than "signed out", which implies an
+   account exists somewhere. */
+.account-chip-off { opacity: 0.75; }
+.account-chip-off .account-chip-dot { background: var(--border-strong); }
 
 @keyframes pulse {
   50% { opacity: 0.35; }
+}
+
+/* The first-run nudge toward signing in. Given the accent edge so it reads as
+   an offer rather than a warning — nothing is wrong with working offline. */
+.sign-in-prompt {
+  border-color: var(--accent);
+  border-left-width: 4px;
+}
+
+.sign-in-prompt-title {
+  font-size: var(--text-base);
+  font-weight: 700;
 }
 
 /* ---------------------------------------------------------------- badges -- */

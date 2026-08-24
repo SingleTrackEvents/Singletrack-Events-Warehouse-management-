@@ -7,6 +7,7 @@ import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { create } from '../db/repo';
 import { useEvents } from '../hooks/useDb';
+import { useSession } from '../hooks/sessionContext';
 import { EVENT_STATUS_LABELS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
 import { describeEventRemoval, removeEvent } from '../domain/remove';
 import type { RemovalSummary } from '../domain/remove';
@@ -23,6 +24,7 @@ const STATUS_TONE: Record<EventStatus, 'default' | 'ok' | 'warn' | 'danger' | 'i
 };
 
 export default function EventsScreen() {
+  const { session } = useSession();
   const events = useEvents();
   const toast = useToast();
   const [adding, setAdding] = useState(false);
@@ -52,9 +54,19 @@ export default function EventsScreen() {
           title="No events yet"
           body="An event holds the aid stations, packlists and transport runs for one race."
           action={
-            <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
-              Add your first event
-            </button>
+            <>
+              <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
+                Add your first event
+              </button>
+              {/* An empty list is the moment someone is most likely to be
+                  looking at the wrong device rather than an empty warehouse. */}
+              {session ? null : (
+                <p className="small muted mt-3">
+                  Already set up by your crew?{' '}
+                  <Link to="/access">Sign in</Link> and their events will appear here.
+                </p>
+              )}
+            </>
           }
         />
       ) : null}

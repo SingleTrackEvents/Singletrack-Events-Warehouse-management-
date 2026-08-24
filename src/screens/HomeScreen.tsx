@@ -6,9 +6,10 @@ import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useEvents, useItems, useSettings } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
+import { SignInPrompt } from '../components/SignInPrompt';
 import { ROLE_LABELS } from '../sync/types';
 import { isStationOnly } from '../sync/permissions';
-import { lowStockItems } from '../domain/stock';
+import { countedItemIds, isUncounted, lowStockItems } from '../domain/stock';
 import { progressFor, receiptFor } from '../domain/packlists';
 import { daysUntil, formatDateRange, formatDateTime, plural, relativeDays } from '../domain/format';
 import { LOAD_STATUS_LABELS } from '../domain/transport';
@@ -23,7 +24,9 @@ import type { Destination, Packlist, PacklistLine } from '../db/types';
  */
 function AccountBanner() {
   const { backend, session, pending, phase, lastSyncAt } = useSession();
-  if (!backend) return null;
+  // Nothing truthful to say about an account that does not exist yet; the
+  // first-run prompt covers that case instead.
+  if (!backend) return <SignInPrompt />;
 
   if (!session) {
     return (
@@ -93,6 +96,7 @@ export default function HomeScreen() {
   const settings = useSettings();
   const events = useEvents();
   const items = useItems();
+  const counted = useLiveQuery(() => countedItemIds(), [], new Set<string>());
 
   // The event to lead with: the next one that has not finished yet, otherwise
   // the most recent. Anything "live" jumps the queue.
@@ -142,7 +146,12 @@ export default function HomeScreen() {
   // branch sits below every hook so the order never changes between renders.
   if (stationOnly) return <StationHome station={station} />;
 
-  const low = items ? lowStockItems(items) : [];
+  // Without the counted set every shelf nobody has looked at yet reads as
+  // "below reorder point" — 166 red alarms on a fresh catalogue, which is how
+  // you teach someone to ignore the number. The stock screen already knew
+  // this; the home screen did not.
+  const low = items ? lowStockItems(items, counted) : [];
+  const uncounted = items ? items.filter((item) => isUncounted(item, counted)).length : 0;
   // The signed-in account wins over the device's own crew name, which is left
   // over from offline-only mode and would otherwise greet you as someone else.
   const who = session?.displayName || settings?.crewName;
@@ -270,6 +279,15 @@ export default function HomeScreen() {
             <div className="label">Items in catalogue</div>
           </div>
         </div>
+
+        {/* Said out loud rather than folded into the low count: a shelf nobody
+            has counted is not the same problem as a shelf that has run out. */}
+        {uncounted ? (
+          <p className="tiny muted mb-3">
+            {uncounted} of them have never been counted, so the warehouse cannot vouch for what is
+            on the shelf. <Link to="/stocktake">Run a stocktake</Link>
+          </p>
+        ) : null}
 
         {low.length ? (
           <div className="list">
