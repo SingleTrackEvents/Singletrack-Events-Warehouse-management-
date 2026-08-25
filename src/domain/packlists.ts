@@ -77,6 +77,11 @@ export function received(line: PacklistLine): number {
   return line.qtyReceived ?? 0;
 }
 
+/** True once somebody at the destination has put a number against this line. */
+export function isConfirmed(line: PacklistLine): boolean {
+  return line.qtyReceived !== undefined && line.qtyReceived !== null;
+}
+
 function summarise(lines: PacklistLine[], got: (line: PacklistLine) => number): Progress {
   const live = lines.filter((line) => !line.deletedAt);
   const short = live.filter((line) => got(line) < line.qtyRequired);
@@ -210,6 +215,33 @@ export async function addLine(
 
 export async function removeLine(lineId: string): Promise<void> {
   await softDelete(db.packlistLines, lineId);
+}
+
+/**
+ * Wipe what the aid station confirmed, leaving what was required and packed.
+ *
+ * For the packlist that got confirmed against the wrong station, or the dry run
+ * somebody ticked through before the crates were real. Set to null rather than
+ * zero: a cleared line has to read as "nobody has said", not as "nothing
+ * arrived", or the warehouse would see a phantom short delivery.
+ */
+export async function clearConfirmations(packlistId: string): Promise<number> {
+  const lines = await liveWhere(db.packlistLines, 'packlistId', packlistId);
+  const confirmed = lines.filter(isConfirmed);
+  for (const line of confirmed) await update(db.packlistLines, line.id, { qtyReceived: null });
+  return confirmed.length;
+}
+
+/** Everything anyone has written on this list in words. */
+export async function clearNotes(packlistId: string): Promise<{ list: boolean; lines: number }> {
+  const packlist = await db.packlists.get(packlistId);
+  const list = Boolean(packlist?.notes);
+  if (list) await update(db.packlists, packlistId, { notes: '' });
+
+  const lines = await liveWhere(db.packlistLines, 'packlistId', packlistId);
+  const noted = lines.filter((line) => line.note);
+  for (const line of noted) await update(db.packlistLines, line.id, { note: '' });
+  return { list, lines: noted.length };
 }
 
 /**

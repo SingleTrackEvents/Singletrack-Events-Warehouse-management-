@@ -4,6 +4,9 @@ import { create, createMany, liveWhere, update } from '../db/repo';
 import {
   addLine,
   applyTemplate,
+  clearConfirmations,
+  clearNotes,
+  isConfirmed,
   hasIssued,
   nextStatus,
   outstanding,
@@ -351,5 +354,60 @@ describe('changing what a stop needs', () => {
     expect(progress.qtyRequired).toBe(7);
     expect(progress.qtyPacked).toBe(5);
     expect(progress.percent).toBe(50);
+  });
+});
+
+describe('starting a list again', () => {
+  async function withConfirmations() {
+    const { packlist } = await makePacklist();
+    const item = await makeItem('WAT-01');
+    const other = await makeItem('CUP-01');
+    const a = await addLine(packlist.id, item.id, 4);
+    const b = await addLine(packlist.id, other.id, 10);
+    await update(db.packlistLines, a.id, { qtyPacked: 4, qtyReceived: 2, note: 'one split' });
+    await update(db.packlistLines, b.id, { qtyPacked: 10 });
+    await update(db.packlists, packlist.id, { notes: 'gate code 1234' });
+    return { packlist, a, b };
+  }
+
+  it('sends confirmed lines back to unconfirmed without touching what was packed', async () => {
+    const { packlist, a } = await withConfirmations();
+    expect(await clearConfirmations(packlist.id)).toBe(1);
+
+    const line = await db.packlistLines.get(a.id);
+    expect(isConfirmed(line as PacklistLine)).toBe(false);
+    // Not zero: a cleared line must not read as "nothing arrived", or the
+    // warehouse sees a short delivery nobody reported.
+    expect(line?.qtyReceived).toBeNull();
+    expect(line?.qtyPacked).toBe(4);
+    expect(line?.qtyRequired).toBe(4);
+  });
+
+  it('reports nothing to clear on a list nobody has confirmed', async () => {
+    const { packlist } = await makePacklist();
+    expect(await clearConfirmations(packlist.id)).toBe(0);
+  });
+
+  it('clears the list note and every line note together', async () => {
+    const { packlist, a } = await withConfirmations();
+    expect(await clearNotes(packlist.id)).toEqual({ list: true, lines: 1 });
+    expect((await db.packlists.get(packlist.id))?.notes).toBe('');
+    expect((await db.packlistLines.get(a.id))?.note).toBe('');
+    // Clearing words leaves the counts alone.
+    expect((await db.packlistLines.get(a.id))?.qtyReceived).toBe(2);
+  });
+
+  it('leaves another list alone', async () => {
+    const { packlist } = await withConfirmations();
+    const second = await makePacklist();
+    const item = await makeItem('TENT-01');
+    const line = await addLine(second.packlist.id, item.id, 1);
+    await update(db.packlistLines, line.id, { qtyReceived: 1, note: 'keep me' });
+
+    await clearConfirmations(packlist.id);
+    await clearNotes(packlist.id);
+    const kept = await db.packlistLines.get(line.id);
+    expect(kept?.qtyReceived).toBe(1);
+    expect(kept?.note).toBe('keep me');
   });
 });

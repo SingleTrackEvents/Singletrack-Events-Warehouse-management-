@@ -215,8 +215,14 @@ export interface PacklistLine extends SyncMeta {
    * Written by whoever is standing at the aid station, and deliberately kept
    * apart from `qtyPacked`: if the warehouse packed four and three arrived,
    * both numbers have to survive or the shortfall disappears.
+   *
+   * Absent means nobody has confirmed this line yet — `undefined` on a line
+   * written before confirmations existed, `null` on one an admin has cleared.
+   * Both read as unconfirmed; the two exist because `undefined` does not
+   * survive JSON, so a clear has to send something to overwrite the old count
+   * or the server would keep it.
    */
-  qtyReceived?: number;
+  qtyReceived?: number | null;
   /** How many came back after the event. */
   qtyReturned: number;
   /** Blocks a packlist from being marked packed while short. */

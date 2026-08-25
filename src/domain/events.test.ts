@@ -141,6 +141,7 @@ describe('copyEvent', () => {
       itemId: item.id,
       qtyRequired: 4,
       qtyPacked: 4,
+      qtyReceived: 3,
       qtyReturned: 3,
       mandatory: true,
       containerId: 'crate-1',
@@ -188,7 +189,7 @@ describe('copyEvent', () => {
     expect(alive(await db.packlists.where('eventId').equals(event.id).toArray())).toHaveLength(1);
   });
 
-  it('carries required quantities but not what was packed or returned', async () => {
+  it('carries required quantities but not what was packed, confirmed or returned', async () => {
     const copy = await copyEvent(event.id, nextYearDefaults(event));
     if (!copy) throw new Error('no copy');
 
@@ -209,6 +210,9 @@ describe('copyEvent', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].qtyRequired).toBe(4);
     expect(lines[0].qtyPacked).toBe(0);
+    // Last year's aid station confirmed last year's crate. Carrying that
+    // forward would open the new list already ticked off.
+    expect(lines[0].qtyReceived).toBeNull();
     expect(lines[0].qtyReturned).toBe(0);
     expect(lines[0].containerId).toBeNull();
     expect(lines[0].mandatory).toBe(true);

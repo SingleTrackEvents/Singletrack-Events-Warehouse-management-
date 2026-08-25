@@ -15,7 +15,10 @@ import {
   PACKLIST_STATUS_LABELS,
   addLine,
   applyTemplate,
+  clearConfirmations,
+  clearNotes,
   hasIssued,
+  isConfirmed,
   nextStatus,
   progressFor,
   receiptFor,
@@ -100,6 +103,7 @@ export default function PacklistScreen() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [removingLine, setRemovingLine] = useState<PacklistLine>();
   const [editingRequired, setEditingRequired] = useState<PacklistLine>();
+  const [clearing, setClearing] = useState<'confirmations' | 'notes'>();
 
   /*
    * A line that has just been completed stays on the "To pack" list for a beat.
@@ -151,6 +155,11 @@ export default function PacklistScreen() {
   );
   const returning =
     canPack && packlist ? statusIndex(packlist.status) >= statusIndex('delivered') : false;
+
+  // What each reset would actually touch, so the offer can be honest about it
+  // — and so a list with nothing to clear says so rather than pretending.
+  const confirmedLines = (lines ?? []).filter(isConfirmed).length;
+  const notedLines = (lines ?? []).filter((line) => line.note).length;
 
   const visible = useMemo(() => {
     const all = lines ?? [];
@@ -280,15 +289,15 @@ export default function PacklistScreen() {
                   </span>
                   {/* What the station counted, so a short delivery is visible
                       back at the warehouse rather than only recorded. */}
-                  {canPack && line.qtyReceived !== undefined ? (
+                  {canPack && isConfirmed(line) ? (
                     <span
                       className="row-sub"
                       style={
-                        line.qtyReceived < line.qtyPacked ? { color: 'var(--danger)' } : undefined
+                        received(line) < line.qtyPacked ? { color: 'var(--danger)' } : undefined
                       }
                     >
-                      Station confirmed {formatQty(line.qtyReceived, item?.unit ?? 'each')}
-                      {line.qtyReceived < line.qtyPacked
+                      Station confirmed {formatQty(received(line), item?.unit ?? 'each')}
+                      {received(line) < line.qtyPacked
                         ? ` of ${formatQty(line.qtyPacked, item?.unit ?? 'each')} sent`
                         : ''}
                     </span>
@@ -388,6 +397,34 @@ export default function PacklistScreen() {
         </details>
       ) : null}
 
+      {canManage ? (
+        <details className="card card-pad mt-3 no-print">
+          <summary className="small strong">Start this list again</summary>
+          <p className="tiny muted mt-2">
+            For a list confirmed against the wrong station, or a dry run somebody ticked through
+            before the crates were real. What was required and what was packed are left alone.
+          </p>
+          <div className="btn-row mt-3">
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              disabled={!confirmedLines}
+              onClick={() => setClearing('confirmations')}
+            >
+              Clear confirmations{confirmedLines ? ` (${confirmedLines})` : ''}
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              disabled={!notedLines && !packlist.notes}
+              onClick={() => setClearing('notes')}
+            >
+              Clear notes{notedLines ? ` (${notedLines})` : ''}
+            </button>
+          </div>
+        </details>
+      ) : null}
+
       {canAdvance && advanceTo && advanceLabel ? (
         <div className="action-bar no-print">
           <button
@@ -472,6 +509,47 @@ export default function PacklistScreen() {
             void removeLine(removingLine.id);
             setRemovingLine(undefined);
             toast('Line removed');
+          }}
+        />
+      ) : null}
+
+      {clearing ? (
+        <ConfirmSheet
+          title={clearing === 'confirmations' ? 'Clear station confirmations?' : 'Clear notes?'}
+          body={
+            clearing === 'confirmations' ? (
+              <>
+                {plural(confirmedLines, 'line')} will go back to unconfirmed, so the aid station can
+                count them again from scratch. What the warehouse packed is untouched.
+              </>
+            ) : (
+              <>
+                {packlist.notes && notedLines
+                  ? `The note on this list and ${plural(notedLines, 'line note')}`
+                  : packlist.notes
+                    ? 'The note on this list'
+                    : plural(notedLines, 'line note')}{' '}
+                will be deleted. There is no undo.
+              </>
+            )
+          }
+          confirmLabel="Clear"
+          tone="danger"
+          onCancel={() => setClearing(undefined)}
+          onConfirm={() => {
+            const which = clearing;
+            setClearing(undefined);
+            void (async () => {
+              if (which === 'confirmations') {
+                const cleared = await clearConfirmations(packlist.id);
+                toast(`${plural(cleared, 'confirmation')} cleared`);
+              } else {
+                const { list, lines: count } = await clearNotes(packlist.id);
+                toast(`Cleared ${list ? 'the list note' : ''}${list && count ? ' and ' : ''}${
+                  count ? plural(count, 'line note') : ''
+                }`);
+              }
+            })();
           }}
         />
       ) : null}

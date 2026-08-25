@@ -178,9 +178,11 @@ export async function copyEvent(
           .map((line) => ({
             ...stripMeta(line),
             packlistId: copy.id,
-            // What was required is knowledge worth keeping. What was packed and
-            // returned describes last year's crates and does not carry over.
+            // What was required is knowledge worth keeping. What was packed,
+            // confirmed and returned describes last year's crates and does not
+            // carry over.
             qtyPacked: 0,
+            qtyReceived: null,
             qtyReturned: 0,
             containerId: null,
           })),
