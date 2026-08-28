@@ -6,6 +6,8 @@ import { ItemPicker } from '../components/ItemPicker';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { byId, create, nextSort, softDelete, update } from '../db/repo';
+import { FOOD_CATEGORY } from '../db/foodCatalogue';
+import { seedId } from '../db/seed';
 import {
   useConsumptionLines,
   useDestinations,
@@ -354,6 +356,7 @@ export default function FoodScreen() {
       {addingItems ? (
         <ItemPicker
           title={`Add to ${addingItems.name}`}
+          categoryId={seedId('cat', FOOD_CATEGORY.name)}
           exclude={(lines ?? [])
             .filter((line) => line.destinationId === addingItems.id)
             .map((line) => line.itemId)}
