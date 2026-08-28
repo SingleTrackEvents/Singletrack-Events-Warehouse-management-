@@ -25,6 +25,18 @@ is a full-width tap target per line so a list can be worked one-handed, with a
 stepper for partial packs. Must-have items are flagged and warned about before a
 list is marked packed.
 
+**Food plan** — race projections in, shopping list and aid station quantities
+out. Each event carries its races and their projected fields; each aid station
+names the races passing through it (twice, where the course doubles back) and a
+per-runner ratio per item — 0.2 cans of coke, 0.022 packs of electrolyte — plus
+flat amounts for the salt shaker and the tea box. Quantities are derived, never
+typed: bump the 50k field by fifty and every station feeding it moves, along
+with the totals-to-order list, which nets demand off warehouse stock and
+exports as a CSV for the supplier run. One tap sends the computed quantities
+onto each station's packlist, and it's safe to tap again whenever projections
+change — planned items are set to today's numbers, hand-added lines are never
+touched.
+
 **QR codes** — every packlist and crate gets a short code (`AS3-7K2M`,
 `AS3-7K2M/02`) and a printable QR label. Scanning opens the right list; the code
 can also be typed or read out over the radio when the camera won't cooperate.
@@ -113,7 +125,7 @@ actually read and write. Two SQL bugs reached production before this existed,
 because the only way to run the schema was to deploy it.
 
 ```bash
-npm test    # 342 tests, including the Postgres schema and policies
+npm test    # 363 tests, including the Postgres schema and policies
 ```
 
 ## Design notes

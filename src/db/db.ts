@@ -2,6 +2,7 @@ import Dexie from 'dexie';
 import type { Table } from 'dexie';
 import type {
   Category,
+  ConsumptionLine,
   Container,
   Destination,
   Item,
@@ -10,6 +11,7 @@ import type {
   Movement,
   Packlist,
   PacklistLine,
+  Race,
   RaceEvent,
   Settings,
   Stocktake,
@@ -86,6 +88,8 @@ export class WarehouseDb extends Dexie {
   stocktakeCounts!: Table<StocktakeCount, string>;
   loads!: Table<Load, string>;
   loadStops!: Table<LoadStop, string>;
+  races!: Table<Race, string>;
+  consumptionLines!: Table<ConsumptionLine, string>;
   settings!: Table<Settings, string>;
 
   constructor(name = 'singletrack-warehouse') {
@@ -109,6 +113,12 @@ export class WarehouseDb extends Dexie {
       loadStops: 'id, loadId, destinationId, sort, deletedAt, updatedAt',
       settings: 'id, updatedAt',
     });
+    // Version 2 adds food consumption planning: races with projected runner
+    // numbers, and per-station per-item consumption rules.
+    this.version(2).stores({
+      races: 'id, eventId, sort, deletedAt, updatedAt',
+      consumptionLines: 'id, eventId, destinationId, itemId, sort, deletedAt, updatedAt',
+    });
   }
 }
 
@@ -130,6 +140,8 @@ export const ALL_TABLES = [
   'stocktakeCounts',
   'loads',
   'loadStops',
+  'races',
+  'consumptionLines',
   'settings',
 ] as const;
 

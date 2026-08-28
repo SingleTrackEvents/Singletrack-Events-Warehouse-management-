@@ -145,6 +145,17 @@ export type AccessType = '2wd' | '4wd' | 'atv' | 'foot' | 'helicopter';
 
 export const ACCESS_TYPES: AccessType[] = ['2wd', '4wd', 'atv', 'foot', 'helicopter'];
 
+/**
+ * One race passing through a destination, for food planning.
+ *
+ * `passes` is how many times its runners come through — an out-and-back course
+ * sends the 50k field past the same carpark twice, and each pass eats.
+ */
+export interface RaceVisit {
+  raceId: string;
+  passes: number;
+}
+
 export interface Destination extends SyncMeta {
   eventId: string;
   name: string;
@@ -162,6 +173,46 @@ export interface Destination extends SyncMeta {
   openTime: string;
   closeTime: string;
   notes: string;
+  sort: number;
+  /**
+   * Which races come through here, for the food plan. Absent on destinations
+   * written before food planning existed; both read as "none linked yet".
+   */
+  raceVisits?: RaceVisit[];
+}
+
+/* ------------------------------------------------------------------- food -- */
+
+/**
+ * One race distance within an event — "50k", "Kids" — and how many runners are
+ * expected to start it. Projections drive the food plan: an aid station's
+ * demand is the sum of the fields passing through it.
+ */
+export interface Race extends SyncMeta {
+  eventId: string;
+  name: string;
+  /** Expected starters. A projection, not entries — set it before entries close. */
+  projection: number;
+  sort: number;
+}
+
+/**
+ * How much of one item one aid station needs, as a rule rather than a number.
+ *
+ * `qty = ceil(perRunner × runners through the station) + flatQty`, so the plan
+ * survives the projections changing — bump the 50k field by fifty and every
+ * station feeding them updates itself. `flatQty` carries the things that don't
+ * scale: one salt shaker per station however many run past it.
+ */
+export interface ConsumptionLine extends SyncMeta {
+  eventId: string;
+  destinationId: string;
+  itemId: string;
+  /** Units of the item per runner passing through, e.g. 0.2 cans of coke. */
+  perRunner: number;
+  /** Units supplied regardless of runner numbers. */
+  flatQty: number;
+  note: string;
   sort: number;
 }
 

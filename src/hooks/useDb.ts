@@ -4,10 +4,12 @@ import { db, getSettings } from '../db/db';
 import { alive, sortBySort } from '../db/repo';
 import type {
   Category,
+  ConsumptionLine,
   Destination,
   Item,
   Packlist,
   PacklistLine,
+  Race,
   RaceEvent,
   Settings,
   SyncMeta,
@@ -93,6 +95,26 @@ export function usePacklistLines(packlistId: string | undefined): PacklistLine[]
         ? db.packlistLines.where('packlistId').equals(packlistId).toArray()
         : Promise.resolve<PacklistLine[]>([]),
     [packlistId],
+  );
+  return useMemo(() => (rows ? sortBySort(alive(rows)) : undefined), [rows]);
+}
+
+export function useRaces(eventId: string | undefined): Race[] | undefined {
+  const rows = useLiveQuery(
+    () =>
+      eventId ? db.races.where('eventId').equals(eventId).toArray() : Promise.resolve<Race[]>([]),
+    [eventId],
+  );
+  return useMemo(() => (rows ? sortBySort(alive(rows)) : undefined), [rows]);
+}
+
+export function useConsumptionLines(eventId: string | undefined): ConsumptionLine[] | undefined {
+  const rows = useLiveQuery(
+    () =>
+      eventId
+        ? db.consumptionLines.where('eventId').equals(eventId).toArray()
+        : Promise.resolve<ConsumptionLine[]>([]),
+    [eventId],
   );
   return useMemo(() => (rows ? sortBySort(alive(rows)) : undefined), [rows]);
 }
