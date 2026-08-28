@@ -125,7 +125,7 @@ actually read and write. Two SQL bugs reached production before this existed,
 because the only way to run the schema was to deploy it.
 
 ```bash
-npm test    # 363 tests, including the Postgres schema and policies
+npm test    # 368 tests, including the Postgres schema and policies
 ```
 
 ## Design notes
