@@ -3,6 +3,7 @@ import { db, getSettings } from './db';
 import { alive, softDelete, update } from './repo';
 import { ensureSeeded, seedStarterData } from './seed';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
+import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { STATION_TEMPLATES } from './stationTemplates';
 import type { AccessType, DestinationType, SyncMeta, Template } from './types';
 
@@ -11,8 +12,9 @@ describe('the starting catalogue', () => {
     await seedStarterData();
 
     const items = alive(await db.items.toArray());
-    const expected = CATALOGUE.reduce((sum, group) => sum + group.items.length, 0);
-    expect(await db.categories.count()).toBe(CATALOGUE.length);
+    const expected =
+      CATALOGUE.reduce((sum, group) => sum + group.items.length, 0) + FOOD_CATALOGUE.length;
+    expect(await db.categories.count()).toBe(CATALOGUE.length + 1);
     expect(items).toHaveLength(expected);
     expect(items.some((item) => item.name === 'IBC Water Container (1000L)')).toBe(true);
     expect(items.some((item) => item.name === 'Starlink')).toBe(true);
@@ -160,6 +162,80 @@ describe('the starting catalogue', () => {
     expect(theirs.qtyOnHand).toBe(1);
     expect(theirs.rev).toBe(1);
     expect(await db.items.count()).toBeGreaterThan(1);
+  });
+});
+
+describe('the aid station food list', () => {
+  it('lands in its own category with every item from the consumption sheet', async () => {
+    await seedStarterData();
+
+    const categories = alive(await db.categories.toArray());
+    const food = categories.find((category) => category.name === FOOD_CATEGORY.name);
+    expect(food).toBeDefined();
+
+    const items = alive(await db.items.toArray()).filter(
+      (item) => item.categoryId === food!.id,
+    );
+    expect(items).toHaveLength(FOOD_CATALOGUE.length);
+    for (const name of ['Water', 'Gels', 'Coke', 'Bananas', 'Noodles (GF)', 'Donuts']) {
+      expect(items.some((item) => item.name === name)).toBe(true);
+    }
+    // All of it gets eaten; none of it comes back on the truck.
+    expect(items.every((item) => item.consumable)).toBe(true);
+  });
+
+  it('keeps the sheet’s measures as units and pack sizes', async () => {
+    await seedStarterData();
+
+    const items = alive(await db.items.toArray());
+    const chips = items.find((item) => item.name === 'Chips (SV + Plain)')!;
+    expect(chips.unit).toBe('pack');
+    expect(chips.packSize).toBe(6);
+    const tea = items.find((item) => item.name === 'Tea (English Breakfast)')!;
+    expect(tea.unit).toBe('box');
+    expect(tea.packSize).toBe(100);
+    const water = items.find((item) => item.sku === 'FD-01')!;
+    expect(water.unit).toBe('litre');
+  });
+
+  it('sets the low-stock level from the sheet’s event totals, with nothing on hand', async () => {
+    await seedStarterData();
+
+    const items = alive(await db.items.toArray());
+    const water = items.find((item) => item.sku === 'FD-01')!;
+    const coke = items.find((item) => item.name === 'Coke')!;
+    expect(water.minQty).toBe(1815);
+    expect(coke.minQty).toBe(501);
+    // The sheet's stock column was a snapshot of one race week, not a count;
+    // like everything else seeded, on-hand starts at zero until a stocktake.
+    expect(water.qtyOnHand).toBe(0);
+  });
+
+  it('never reuses a code the generated catalogue owns', () => {
+    const equipment = new Set(CATALOGUE.flatMap((group) => group.items.map((item) => item.sku)));
+    expect(FOOD_CATALOGUE.every((item) => !equipment.has(item.sku))).toBe(true);
+    expect(new Set(FOOD_CATALOGUE.map((item) => item.sku)).size).toBe(FOOD_CATALOGUE.length);
+  });
+
+  it('reaches a device that seeded before food existed', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    // Strip the food back out, as a device seeded by an earlier build would be.
+    const categories = alive(await db.categories.toArray());
+    const food = categories.find((category) => category.name === FOOD_CATEGORY.name)!;
+    await db.items.where('categoryId').equals(food.id).delete();
+    await db.categories.delete(food.id);
+
+    await ensureSeeded();
+
+    const items = alive(await db.items.toArray());
+    expect(items.some((item) => item.sku === 'FD-01')).toBe(true);
+    expect(
+      alive(await db.categories.toArray()).some(
+        (category) => category.name === FOOD_CATEGORY.name,
+      ),
+    ).toBe(true);
   });
 });
 
