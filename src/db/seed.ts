@@ -1,6 +1,7 @@
 import { db, getSettings, SYNCED_TABLES } from './db';
 import { create, createMany, update } from './repo';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
+import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { STATION_TEMPLATES } from './stationTemplates';
 import type { Item, SyncMeta, Unit } from './types';
 
@@ -132,6 +133,38 @@ export async function seedStarterData(
     );
 
   }
+
+  // Aid station food and drink, from the consumption planner rather than the
+  // inventory sheet the generated catalogue comes from. Same rules: measures
+  // become units and pack sizes, the largest event's totals become the
+  // low-stock level, and nothing pretends to be a count.
+  const foodCategoryId = seedId('cat', FOOD_CATEGORY.name);
+  if (isNew(foodCategoryId)) {
+    await create(db.categories, {
+      id: foodCategoryId,
+      name: FOOD_CATEGORY.name,
+      sort: (CATALOGUE.length + 1) * 10,
+      icon: FOOD_CATEGORY.icon,
+    });
+  }
+  await createMany(
+    db.items,
+    FOOD_CATALOGUE.filter((item) => isNew(seedId('item', item.sku))).map((item) => ({
+      id: seedId('item', item.sku),
+      name: item.name,
+      sku: item.sku,
+      categoryId: foodCategoryId,
+      unit: item.unit,
+      packSize: item.packSize,
+      bin: '',
+      qtyOnHand: 0,
+      minQty: item.hold,
+      barcode: null,
+      notes: item.note,
+      consumable: true,
+      archived: false,
+    })),
+  );
 
   // Built from the database rather than from what this run happened to write,
   // so a template line still finds its item when the item was already present.
