@@ -136,10 +136,30 @@ export async function copyEvent(
     notes: source.notes,
   });
 
+  // Races come first so the copied destinations can point at the new ids.
+  const races = alive(await db.races.where('eventId').equals(eventId).toArray());
+  const copiedRaces = await createMany(
+    db.races,
+    races.map((race) => ({ ...stripMeta(race), eventId: event.id })),
+  );
+  const raceMap = new Map<string, string>();
+  races.forEach((race, index) => {
+    const copy = copiedRaces[index];
+    if (copy) raceMap.set(race.id, copy.id);
+  });
+
   const destinations = alive(await db.destinations.where('eventId').equals(eventId).toArray());
   const copied = await createMany(
     db.destinations,
-    destinations.map((destination) => ({ ...stripMeta(destination), eventId: event.id })),
+    destinations.map((destination) => ({
+      ...stripMeta(destination),
+      eventId: event.id,
+      // Race links follow their copies; one pointing at a deleted race is
+      // dropped rather than carried forward as a dead reference.
+      raceVisits: (destination.raceVisits ?? [])
+        .filter((visit) => raceMap.has(visit.raceId))
+        .map((visit) => ({ ...visit, raceId: raceMap.get(visit.raceId)! })),
+    })),
   );
 
   // Old destination id → its copy, so each packlist lands at the right station.
@@ -148,6 +168,19 @@ export async function copyEvent(
     const copy = copied[index];
     if (copy) destinationMap.set(destination.id, copy);
   });
+
+  // The food plan is ratios, not history — it carries over whole.
+  const consumptionLines = alive(await db.consumptionLines.where('eventId').equals(eventId).toArray());
+  await createMany(
+    db.consumptionLines,
+    consumptionLines
+      .filter((line) => destinationMap.has(line.destinationId))
+      .map((line) => ({
+        ...stripMeta(line),
+        eventId: event.id,
+        destinationId: destinationMap.get(line.destinationId)!.id,
+      })),
+  );
 
   if (options.withPacklists) {
     const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray());

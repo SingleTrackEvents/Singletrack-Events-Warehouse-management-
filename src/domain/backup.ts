@@ -40,15 +40,18 @@ export async function exportAll(label = 'Full backup'): Promise<Backup> {
  * lead who only needs their own race.
  */
 export async function exportEvent(eventId: string, label = 'Event handover'): Promise<Backup> {
-  const [event, destinations, packlists, loads, items, categories, containers] = await Promise.all([
-    db.events.get(eventId),
-    db.destinations.where('eventId').equals(eventId).toArray(),
-    db.packlists.where('eventId').equals(eventId).toArray(),
-    db.loads.where('eventId').equals(eventId).toArray(),
-    db.items.toArray(),
-    db.categories.toArray(),
-    db.containers.toArray(),
-  ]);
+  const [event, destinations, packlists, loads, items, categories, containers, races, consumptionLines] =
+    await Promise.all([
+      db.events.get(eventId),
+      db.destinations.where('eventId').equals(eventId).toArray(),
+      db.packlists.where('eventId').equals(eventId).toArray(),
+      db.loads.where('eventId').equals(eventId).toArray(),
+      db.items.toArray(),
+      db.categories.toArray(),
+      db.containers.toArray(),
+      db.races.where('eventId').equals(eventId).toArray(),
+      db.consumptionLines.where('eventId').equals(eventId).toArray(),
+    ]);
 
   const packlistIds = new Set(packlists.map((packlist) => packlist.id));
   const loadIds = new Set(loads.map((load) => load.id));
@@ -71,6 +74,8 @@ export async function exportEvent(eventId: string, label = 'Event handover'): Pr
       containers: containers.filter((container) => packlistIds.has(container.packlistId)),
       loads,
       loadStops: allStops.filter((stop) => loadIds.has(stop.loadId)),
+      races,
+      consumptionLines,
       items,
       categories,
     },
