@@ -22,22 +22,35 @@ export interface ItemPick {
 export function ItemPicker({
   title = 'Add items',
   exclude = [],
+  categoryId,
   onClose,
   onPick,
 }: {
   title?: string;
   exclude?: string[];
+  /**
+   * Open showing only this category, with a switch to widen to everything.
+   * The food plan passes the food category so a station's list is picked from
+   * two dozen snacks rather than two hundred pieces of event hardware.
+   */
+  categoryId?: string;
   onClose: () => void;
   onPick: (picks: ItemPick[]) => void;
 }) {
   const items = useItems();
   const categories = useCategories();
   const [query, setQuery] = useState('');
+  const [onlyCategory, setOnlyCategory] = useState(Boolean(categoryId));
   // The quantity doubles as the selection: absent or zero means not picked.
   const [quantities, setQuantities] = useState<Record<string, number>>({});
 
   const excluded = new Set(exclude);
-  const available = (items ?? []).filter((item) => !item.archived && !excluded.has(item.id));
+  const available = (items ?? []).filter(
+    (item) =>
+      !item.archived &&
+      !excluded.has(item.id) &&
+      (!onlyCategory || !categoryId || item.categoryId === categoryId),
+  );
   const matches = useSearch(available, query, (item) => [item.name, item.sku, item.bin]);
 
   const picks: ItemPick[] = (items ?? [])
@@ -83,6 +96,22 @@ export function ItemPicker({
         autoFocus
         onChange={(event) => setQuery(event.target.value)}
       />
+
+      {categoryId ? (
+        <label className="checkbox mb-3">
+          <input
+            type="checkbox"
+            checked={onlyCategory}
+            onChange={(event) => setOnlyCategory(event.target.checked)}
+          />
+          <span>
+            Only {categoryName(categoryId)}
+            <span className="small muted" style={{ display: 'block' }}>
+              Untick to pick from the whole catalogue.
+            </span>
+          </span>
+        </label>
+      ) : null}
 
       {picks.length ? (
         <p className="tiny muted mb-2">
