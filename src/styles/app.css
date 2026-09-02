@@ -929,3 +929,23 @@ button, input, select, textarea {
 .swipe-row:has(> .swipe-row-content > .card) .swipe-row-actions {
   border-radius: var(--radius-lg);
 }
+
+/* ------------------------------------------------------------------ brand -- */
+
+/* SingleTrack logo strip on the home screen. The artwork is white-only, so it
+   always sits on the brand teal regardless of theme. */
+.brand-banner {
+  background: #27a0b5;
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: center;
+}
+.brand-banner img {
+  display: block;
+  height: 40px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}

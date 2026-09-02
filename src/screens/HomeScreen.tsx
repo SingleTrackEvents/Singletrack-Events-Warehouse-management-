@@ -14,6 +14,7 @@ import { progressFor, receiptFor } from '../domain/packlists';
 import { daysUntil, formatDateRange, formatDateTime, plural, relativeDays } from '../domain/format';
 import { LOAD_STATUS_LABELS } from '../domain/transport';
 import type { Destination, Packlist, PacklistLine } from '../db/types';
+import logo from '../assets/logo-white.png';
 
 /**
  * Says plainly who is signed in and whether their work has left the phone.
@@ -159,6 +160,10 @@ export default function HomeScreen() {
 
   return (
     <Screen title="SingleTrack Warehouse" subtitle={greeting}>
+      {/* The logo artwork is white-on-transparent, so it sits on brand teal. */}
+      <div className="brand-banner">
+        <img src={logo} alt="SingleTrack Events" />
+      </div>
       <AccountBanner />
 
       {/* Scanning is the fastest way in, so it gets the biggest button. */}
