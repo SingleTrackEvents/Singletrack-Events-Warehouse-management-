@@ -3,7 +3,9 @@ import { create, createMany, update } from './repo';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { EVENT_SEED } from './eventSeed';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
+import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
+import { makeCode } from '../domain/codes';
 import type { Item, RaceVisit, SyncMeta, Unit } from './types';
 
 /**
@@ -300,6 +302,74 @@ export async function seedStarterData(
         ...(raceVisits.length ? { raceVisits } : {}),
       });
     }
+  }
+
+  // Hounslow 2026 starts further along than the rest of the season: last
+  // year's run sheets become each station's draft packlist, and the
+  // consumption planner becomes its food plan. Both are starting points the
+  // crew corrects — nothing here is ever marked packed and no stock moves.
+  const byName = new Map<string, Item>();
+  for (const item of (await db.items.toArray()) as Item[]) {
+    if (!item.deletedAt) byName.set(item.name, item);
+  }
+  const hounslowId = seedId('event', 'hc26');
+
+  for (const list of HOUNSLOW_PACKLISTS) {
+    const packlistId = seedId('plist', `hc26-${list.station}`);
+    if (isNew(packlistId)) {
+      await create(db.packlists, {
+        id: packlistId,
+        eventId: hounslowId,
+        destinationId: seedId('dest', `hc26-${list.station}`),
+        name: list.station,
+        code: makeCode(list.station),
+        status: 'draft',
+        packedBy: '',
+        packedAt: null,
+        deliveredAt: null,
+        receivedBy: '',
+        notes: 'Starting quantities from the 2025 aid station run sheets.',
+      });
+    }
+    let sort = 10;
+    for (const line of list.lines) {
+      const lineId = seedId('pline', `hc26-${list.station}-${line.item}`);
+      const item = byName.get(line.item);
+      if (item && isNew(lineId)) {
+        await create(db.packlistLines, {
+          id: lineId,
+          packlistId,
+          itemId: item.id,
+          qtyRequired: line.qty,
+          qtyPacked: 0,
+          qtyReturned: 0,
+          mandatory: false,
+          containerId: null,
+          note: line.note ?? '',
+          sort,
+        });
+      }
+      sort += 10;
+    }
+  }
+
+  let consumptionSort = 10;
+  for (const line of HOUNSLOW_CONSUMPTION) {
+    const lineId = seedId('cline', `hc26-${line.station}-${line.sku}`);
+    const item = bySku.get(line.sku);
+    if (item && isNew(lineId)) {
+      await create(db.consumptionLines, {
+        id: lineId,
+        eventId: hounslowId,
+        destinationId: seedId('dest', `hc26-${line.station}`),
+        itemId: item.id,
+        perRunner: line.perRunner,
+        flatQty: line.flatQty,
+        note: '',
+        sort: consumptionSort,
+      });
+    }
+    consumptionSort += 10;
   }
 
   if (!options.onlyMissing) await liftSeedRevisions(previous);

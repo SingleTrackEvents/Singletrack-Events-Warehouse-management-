@@ -89,6 +89,11 @@ export const EVENT_SEED: SeedEvent[] = [
         notes: 'Marathon turnaround. Hot food and drop bags.',
         visits: [['Marathon', 1]],
       },
+      {
+        name: 'Recovery Zone',
+        type: 'finish',
+        notes: 'Finish-line recovery area at Allview Escape — its own load-out in the run sheets.',
+      },
     ],
   },
   {

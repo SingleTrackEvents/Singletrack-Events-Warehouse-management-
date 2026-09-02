@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { db, getSettings } from './db';
 import { alive, softDelete, update } from './repo';
 import { ensureSeeded, seedStarterData } from './seed';
+import { lineQty, stationRunners } from '../domain/consumption';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { EVENT_SEED } from './eventSeed';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
+import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import type { AccessType, DestinationType, SyncMeta, Template } from './types';
 
@@ -98,11 +100,16 @@ describe('the starting catalogue', () => {
     expect(lines.every((line) => ids.has(line.itemId))).toBe(true);
   });
 
-  it('seeds the season’s events but never a packlist — packing is real work', async () => {
+  it('seeds the season’s events, and packlists only where a run sheet exists', async () => {
     await seedStarterData();
 
     expect(alive(await db.events.toArray())).toHaveLength(EVENT_SEED.length);
-    expect(await db.packlists.count()).toBe(0);
+    // Hounslow's five stations arrive with last year's run sheets as drafts;
+    // nothing is marked packed and no stock has moved.
+    const packlists = alive(await db.packlists.toArray());
+    expect(packlists).toHaveLength(HOUNSLOW_PACKLISTS.length);
+    expect(packlists.every((packlist) => packlist.status === 'draft')).toBe(true);
+    expect(await db.movements.count()).toBe(0);
   });
 
   it('seeding twice collapses rather than doubling', async () => {
@@ -236,6 +243,94 @@ describe('the seeded season', () => {
     await ensureSeeded();
 
     expect(alive(await db.events.toArray())).toHaveLength(EVENT_SEED.length);
+  });
+});
+
+describe('the Hounslow starting packlists and food plan', () => {
+  it('names only items the catalogue actually has', () => {
+    const known = new Set([
+      ...CATALOGUE.flatMap((group) => group.items.map((item) => item.name)),
+      ...FOOD_CATALOGUE.map((item) => item.name),
+    ]);
+    const missing = HOUNSLOW_PACKLISTS.flatMap((list) =>
+      list.lines.map((line) => line.item).filter((name) => !known.has(name)),
+    );
+    expect(missing).toEqual([]);
+
+    const skus = new Set(FOOD_CATALOGUE.map((item) => item.sku));
+    expect(HOUNSLOW_CONSUMPTION.every((line) => skus.has(line.sku))).toBe(true);
+  });
+
+  it('builds one draft packlist per run-sheet station, every line resolved', async () => {
+    await seedStarterData();
+
+    const packlists = alive(await db.packlists.toArray());
+    const lines = alive(await db.packlistLines.toArray());
+    const itemIds = new Set(alive(await db.items.toArray()).map((item) => item.id));
+    for (const spec of HOUNSLOW_PACKLISTS) {
+      const packlist = packlists.find((entry) => entry.name === spec.station);
+      expect(packlist, spec.station).toBeDefined();
+      const own = lines.filter((line) => line.packlistId === packlist!.id);
+      expect(own, spec.station).toHaveLength(spec.lines.length);
+      expect(own.every((line) => itemIds.has(line.itemId))).toBe(true);
+      expect(own.every((line) => line.qtyPacked === 0)).toBe(true);
+    }
+  });
+
+  it('carries the run-sheet quantities', async () => {
+    await seedStarterData();
+
+    const packlists = alive(await db.packlists.toArray());
+    const village = packlists.find((entry) => entry.name === 'Allview Escape')!;
+    const items = alive(await db.items.toArray());
+    const trestles = items.find((item) => item.name === 'Trestle Tables')!;
+    const line = alive(await db.packlistLines.toArray()).find(
+      (entry) => entry.packlistId === village.id && entry.itemId === trestles.id,
+    );
+    expect(line?.qtyRequired).toBe(17);
+  });
+
+  it('reproduces the consumption sheet totals at its projections', async () => {
+    await seedStarterData();
+
+    const events = alive(await db.events.toArray());
+    const hounslow = events.find((event) => event.name.startsWith('Hounslow'))!;
+    const destinations = alive(await db.destinations.toArray()).filter(
+      (destination) => destination.eventId === hounslow.id,
+    );
+    const races = alive(await db.races.toArray()).filter((race) => race.eventId === hounslow.id);
+    const lines = alive(await db.consumptionLines.toArray());
+    const bySku = new Map(alive(await db.items.toArray()).map((item) => [item.id, item.sku]));
+
+    const expect_ = (station: string, sku: string, total: number) => {
+      const destination = destinations.find((entry) => entry.name === station)!;
+      const runners = stationRunners(destination, races);
+      const line = lines.find(
+        (entry) => entry.destinationId === destination.id && bySku.get(entry.itemId) === sku,
+      )!;
+      expect(lineQty(line, runners), `${station} ${sku}`).toBe(total);
+    };
+
+    // Spot checks straight off the sheet's per-station totals (Sat + Sun).
+    expect_('Perrys Lookdown', 'FD-01', 2250); // water
+    expect_('Grand Canyon Carpark', 'FD-01', 1095);
+    expect_('Grand Canyon Carpark', 'FD-04', 850); // gels
+    expect_('Allview Escape', 'FD-23', 682); // ginger beer
+    expect_('The Pinnacles Car Park', 'FD-14', 225); // noodles
+    expect_('The Pinnacles Car Park', 'FD-24', 102); // boiled potatoes
+    expect_('Blue Gum Forest', 'FD-01', 338);
+    expect_('Perrys Lookdown', 'FD-09', 2); // salt shakers, flat
+  });
+
+  it('lands the food on the food plan, not pre-packed onto the lists', async () => {
+    await seedStarterData();
+
+    const lines = alive(await db.consumptionLines.toArray());
+    expect(lines).toHaveLength(HOUNSLOW_CONSUMPTION.length);
+    // Blue Gum has a food plan but no run-sheet packlist — the walk-in station
+    // gets its list when quantities are sent from the food plan.
+    const packlists = alive(await db.packlists.toArray());
+    expect(packlists.some((entry) => entry.name === 'Blue Gum Forest')).toBe(false);
   });
 });
 

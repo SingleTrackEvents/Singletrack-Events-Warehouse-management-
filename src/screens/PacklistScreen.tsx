@@ -7,7 +7,7 @@ import { ConfirmSheet, Field, Pill, ProgressBar, Sheet, Stepper } from '../compo
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, byId, update } from '../db/repo';
-import { useCrewName, usePacklist, usePacklistLines } from '../hooks/useDb';
+import { useCategories, useCrewName, usePacklist, usePacklistLines } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can, isStationOnly } from '../sync/permissions';
 import {
@@ -76,6 +76,7 @@ export default function PacklistScreen() {
   const packlist = usePacklist(packlistId);
   const lines = usePacklistLines(packlistId);
   const items = useLiveQuery(async () => byId(alive(await db.items.toArray())), []);
+  const categories = useCategories();
   const destination = useLiveQuery(
     async () => (packlist ? db.destinations.get(packlist.destinationId) : undefined),
     [packlist?.destinationId],
@@ -170,6 +171,26 @@ export default function PacklistScreen() {
     return all.filter((line) => got(line) < line.qtyRequired || lingering.has(line.id));
   }, [lines, filter, lingering, canPack]);
 
+  /*
+   * Lines grouped under their item's category, in catalogue order, so a
+   * 60-line load-out reads as Structure, then Power, then Food & Drink —
+   * everything for the same corner of the truck in one place — rather than
+   * whatever order the lines were added in.
+   */
+  const grouped = useMemo(() => {
+    const order = new Map((categories ?? []).map((category, index) => [category.id, index]));
+    const buckets = new Map<string | null, PacklistLine[]>();
+    for (const line of visible) {
+      const key = items?.get(line.itemId)?.categoryId ?? null;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(line);
+      else buckets.set(key, [line]);
+    }
+    const rank = (key: string | null) =>
+      key === null ? Number.MAX_SAFE_INTEGER : (order.get(key) ?? Number.MAX_SAFE_INTEGER - 1);
+    return [...buckets.entries()].sort(([a], [b]) => rank(a) - rank(b));
+  }, [visible, items, categories]);
+
   if (!packlist) {
     return (
       <Screen title="Packlist" back="-1">
@@ -253,8 +274,21 @@ export default function PacklistScreen() {
       </div>
 
       {visible.length ? (
-        <div className="list">
-          {visible.map((line) => {
+        <div>
+          {grouped.map(([categoryId, groupLines]) => {
+            const category = categoryId
+              ? categories?.find((entry) => entry.id === categoryId)
+              : undefined;
+            return (
+              <section key={categoryId ?? 'uncategorised'} className="pack-group">
+                {grouped.length > 1 ? (
+                  <div className="pack-group-head">
+                    {category ? `${category.icon} ${category.name}` : '📦 Uncategorised'}
+                    <span className="muted"> · {groupLines.length}</span>
+                  </div>
+                ) : null}
+                <div className="list">
+                  {groupLines.map((line) => {
             const item = items?.get(line.itemId);
             const count = countOn(line);
             const packed = count >= line.qtyRequired;
@@ -344,6 +378,10 @@ export default function PacklistScreen() {
                   </span>
                 )}
               </div>
+            );
+          })}
+                </div>
+              </section>
             );
           })}
         </div>
