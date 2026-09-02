@@ -1,9 +1,10 @@
 import { db, getSettings, SYNCED_TABLES } from './db';
 import { create, createMany, update } from './repo';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
+import { EVENT_SEED } from './eventSeed';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { STATION_TEMPLATES } from './stationTemplates';
-import type { Item, SyncMeta, Unit } from './types';
+import type { Item, RaceVisit, SyncMeta, Unit } from './types';
 
 /**
  * The starting data: SingleTrack's real warehouse catalogue.
@@ -17,12 +18,12 @@ import type { Item, SyncMeta, Unit } from './types';
  * per kind of destination — standard station, remote station, village, water
  * drop — which is the shape you want when building a packlist for Aid 3.
  *
- * Two things it deliberately does not do.
+ * It also seeds the season's events with their aid stations — dates, locations
+ * and station lists compiled from the public race pages and the crew's own
+ * operations documents (see eventSeed.ts). Like everything seeded they carry
+ * stable ids, so edits stick and a deleted event stays deleted.
  *
- * It creates no events. Those are the crew's to enter, and an event carries
- * dates and destinations that no import can know.
- *
- * It records no quantities on hand. The spreadsheet is a picture of what the
+ * One thing it deliberately does not do: it records no quantities on hand. The spreadsheet is a picture of what the
  * packing lists say, not a physical count — its own notes say so. Inventing a
  * figure here would put a number in front of someone that looks like a stocktake
  * and is not one. Every item starts at zero on hand with its low-stock level set
@@ -239,6 +240,66 @@ export async function seedStarterData(
           sort: (order + 1) * 10,
         })),
     );
+  }
+
+  // The season's events, each with its aid stations and races. Status defaults
+  // to planning; dates and stations are the crew's to correct as the season
+  // firms up, which is why nothing here ever overwrites an existing row.
+  for (const spec of EVENT_SEED) {
+    const eventId = seedId('event', spec.code);
+    if (isNew(eventId)) {
+      await create(db.events, {
+        id: eventId,
+        name: spec.name,
+        location: spec.location,
+        startDate: spec.startDate,
+        endDate: spec.endDate,
+        status: spec.status ?? 'planning',
+        notes: spec.notes ?? '',
+      });
+    }
+
+    // Race name → seeded id, so station links can be spelled by name above.
+    const raceIds = new Map<string, string>();
+    for (const [index, race] of (spec.races ?? []).entries()) {
+      const raceId = seedId('race', `${spec.code}-${race.name}`);
+      raceIds.set(race.name, raceId);
+      if (isNew(raceId)) {
+        await create(db.races, {
+          id: raceId,
+          eventId,
+          name: race.name,
+          projection: race.projection,
+          sort: (index + 1) * 10,
+        });
+      }
+    }
+
+    for (const [index, destination] of spec.destinations.entries()) {
+      const destinationId = seedId('dest', `${spec.code}-${destination.name}`);
+      if (!isNew(destinationId)) continue;
+      const raceVisits: RaceVisit[] = (destination.visits ?? [])
+        .filter(([race]) => raceIds.has(race))
+        .map(([race, passes]) => ({ raceId: raceIds.get(race)!, passes }));
+      await create(db.destinations, {
+        id: destinationId,
+        eventId,
+        name: destination.name,
+        type: destination.type,
+        courseKm: destination.courseKm ?? null,
+        access: destination.access ?? '2wd',
+        accessNotes: destination.accessNotes ?? '',
+        lat: null,
+        lng: null,
+        crewLead: '',
+        phone: '',
+        openTime: '06:00',
+        closeTime: '16:00',
+        notes: destination.notes ?? '',
+        sort: (index + 1) * 10,
+        ...(raceVisits.length ? { raceVisits } : {}),
+      });
+    }
   }
 
   if (!options.onlyMissing) await liftSeedRevisions(previous);

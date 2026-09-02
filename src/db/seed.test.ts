@@ -3,6 +3,7 @@ import { db, getSettings } from './db';
 import { alive, softDelete, update } from './repo';
 import { ensureSeeded, seedStarterData } from './seed';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
+import { EVENT_SEED } from './eventSeed';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { STATION_TEMPLATES } from './stationTemplates';
 import type { AccessType, DestinationType, SyncMeta, Template } from './types';
@@ -97,11 +98,10 @@ describe('the starting catalogue', () => {
     expect(lines.every((line) => ids.has(line.itemId))).toBe(true);
   });
 
-  it('creates no events — those are the crew’s to enter', async () => {
+  it('seeds the season’s events but never a packlist — packing is real work', async () => {
     await seedStarterData();
 
-    expect(await db.events.count()).toBe(0);
-    expect(await db.destinations.count()).toBe(0);
+    expect(alive(await db.events.toArray())).toHaveLength(EVENT_SEED.length);
     expect(await db.packlists.count()).toBe(0);
   });
 
@@ -162,6 +162,80 @@ describe('the starting catalogue', () => {
     expect(theirs.qtyOnHand).toBe(1);
     expect(theirs.rev).toBe(1);
     expect(await db.items.count()).toBeGreaterThan(1);
+  });
+});
+
+describe('the seeded season', () => {
+  it('carries every event with its dates, location and aid stations', async () => {
+    await seedStarterData();
+
+    const events = alive(await db.events.toArray());
+    const destinations = alive(await db.destinations.toArray());
+    for (const spec of EVENT_SEED) {
+      const event = events.find((entry) => entry.name === spec.name);
+      expect(event, spec.name).toBeDefined();
+      expect(event!.startDate).toBe(spec.startDate);
+      expect(event!.location).toBe(spec.location);
+      const own = destinations.filter((destination) => destination.eventId === event!.id);
+      expect(own, spec.name).toHaveLength(spec.destinations.length);
+    }
+  });
+
+  it('places the GPT100 stations at their published kilometres', async () => {
+    await seedStarterData();
+
+    const events = alive(await db.events.toArray());
+    const gpt = events.find((event) => event.name.startsWith('GPT100'))!;
+    const destinations = alive(await db.destinations.toArray()).filter(
+      (destination) => destination.eventId === gpt.id,
+    );
+    const rosea = destinations.find((destination) => destination.name === 'Rosea Carpark');
+    expect(rosea?.courseKm).toBe(59);
+    expect(destinations).toHaveLength(13);
+  });
+
+  it('links Hounslow’s stations to its races, double passes included', async () => {
+    await seedStarterData();
+
+    const events = alive(await db.events.toArray());
+    const hounslow = events.find((event) => event.name.startsWith('Hounslow'))!;
+    const races = alive(await db.races.toArray()).filter((race) => race.eventId === hounslow.id);
+    expect(races.map((race) => race.name).sort()).toEqual(['17k', 'Kids', 'Marathon']);
+    expect(races.find((race) => race.name === 'Marathon')?.projection).toBe(450);
+
+    const marathon = races.find((race) => race.name === 'Marathon')!;
+    const perrys = alive(await db.destinations.toArray()).find(
+      (destination) => destination.name === 'Perrys Lookdown',
+    )!;
+    expect(perrys.raceVisits).toContainEqual({ raceId: marathon.id, passes: 2 });
+  });
+
+  it('does not resurrect an event the crew deleted', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    const events = alive(await db.events.toArray());
+    const razorback = events.find((event) => event.name.startsWith('Razorback'))!;
+    await softDelete(db.events, razorback.id);
+
+    await ensureSeeded();
+
+    expect(
+      alive(await db.events.toArray()).some((event) => event.name.startsWith('Razorback')),
+    ).toBe(false);
+  });
+
+  it('reaches a device that seeded before events existed', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    await db.races.clear();
+    await db.destinations.clear();
+    await db.events.clear();
+
+    await ensureSeeded();
+
+    expect(alive(await db.events.toArray())).toHaveLength(EVENT_SEED.length);
   });
 });
 
