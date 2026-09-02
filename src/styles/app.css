@@ -949,3 +949,14 @@ button, input, select, textarea {
   max-width: 100%;
   object-fit: contain;
 }
+
+/* Category headings inside a packlist, so a long load-out reads in sections. */
+.pack-group { margin-bottom: 14px; }
+.pack-group-head {
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 2px 4px 6px;
+}

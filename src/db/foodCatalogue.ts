@@ -73,4 +73,13 @@ export const FOOD_CATALOGUE: FoodCatalogueItem[] = [
   { name: 'Cow Milk', sku: 'FD-20', unit: 'each', packSize: 1, hold: 2, note: '1 L carton' },
   { name: 'Soy Milk', sku: 'FD-21', unit: 'each', packSize: 1, hold: 2, note: '1 L carton' },
   { name: 'Donuts', sku: 'FD-22', unit: 'pack', packSize: 9, hold: 7, note: '9-pack' },
+  { name: 'Ginger Beer', sku: 'FD-23', unit: 'each', packSize: 1, hold: 1406, note: '200 ml can' },
+  {
+    name: 'Boiled Potatoes',
+    sku: 'FD-24',
+    unit: 'each',
+    packSize: 1,
+    hold: 290,
+    note: 'Medium potato, about 7 per kg',
+  },
 ];
