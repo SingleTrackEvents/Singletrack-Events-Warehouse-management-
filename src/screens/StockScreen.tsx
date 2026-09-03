@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
@@ -10,6 +10,7 @@ import { create } from '../db/repo';
 import { useCategories, useItems } from '../hooks/useDb';
 import { isLowStock, isUncounted, countedItemIds } from '../domain/stock';
 import { formatQtyDetail, plural } from '../domain/format';
+import { suggestSku } from '../domain/skus';
 import { PackSizeField } from '../components/PackSizeField';
 import { CategoryPicker } from '../components/CategoryPicker';
 import type { Unit } from '../db/types';
@@ -204,9 +205,34 @@ export default function StockScreen() {
 
 function NewItemSheet({ onClose }: { onClose: () => void }) {
   const toast = useToast();
+  const allItems = useItems();
+  const categories = useCategories();
   const [name, setName] = useState('');
   const [sku, setSku] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  /*
+   * The SKU the category implies, offered rather than imposed.
+   *
+   * Codes run PREFIX-NN per category, so typing one by hand means going and
+   * looking up the last number — which is how two items end up sharing a code
+   * that a label and a scan both need to be unique. Picking the category fills
+   * it in; anything typed is left alone from then on, because a crew with their
+   * own scheme for a shelf must not have it overwritten.
+   */
+  const [skuTouched, setSkuTouched] = useState(false);
+  const suggestion = useMemo(
+    () => suggestSku(categoryId || null, categories ?? [], allItems ?? []),
+    [categoryId, categories, allItems],
+  );
+  const effectiveSku = skuTouched ? sku : suggestion;
+  const taken = useMemo(
+    () =>
+      Boolean(effectiveSku.trim()) &&
+      (allItems ?? []).some(
+        (item) => item.sku.toUpperCase() === effectiveSku.trim().toUpperCase(),
+      ),
+    [effectiveSku, allItems],
+  );
   const [unit, setUnit] = useState<Unit>('each');
   const [packSize, setPackSize] = useState('1');
   const [bin, setBin] = useState('');
@@ -219,7 +245,7 @@ function NewItemSheet({ onClose }: { onClose: () => void }) {
     const opening = Number(qty) || 0;
     const item = await create(db.items, {
       name: name.trim(),
-      sku: sku.trim().toUpperCase(),
+      sku: effectiveSku.trim().toUpperCase(),
       categoryId: categoryId || null,
       unit,
       packSize: Math.max(1, Number(packSize) || 1),
@@ -277,14 +303,26 @@ function NewItemSheet({ onClose }: { onClose: () => void }) {
           )}
         </Field>
         <div className="field-row">
-          <Field label="SKU">
+          <Field
+            label="SKU"
+            hint={
+              taken
+                ? '⚠ Another item already uses this code'
+                : !skuTouched && suggestion
+                  ? 'Suggested from the category — type over it to change'
+                  : undefined
+            }
+          >
             {(id) => (
               <input
                 id={id}
                 className="input mono"
-                value={sku}
-                placeholder="HYD-CUBE20"
-                onChange={(event) => setSku(event.target.value)}
+                value={effectiveSku}
+                placeholder={categoryId ? suggestion : 'Pick a category'}
+                onChange={(event) => {
+                  setSkuTouched(true);
+                  setSku(event.target.value);
+                }}
               />
             )}
           </Field>
