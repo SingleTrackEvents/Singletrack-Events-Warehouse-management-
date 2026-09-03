@@ -5,6 +5,7 @@ import { ensureSeeded, seedStarterData } from './seed';
 import { lineQty, stationRunners } from '../domain/consumption';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { EVENT_SEED } from './eventSeed';
+import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
@@ -16,7 +17,9 @@ describe('the starting catalogue', () => {
 
     const items = alive(await db.items.toArray());
     const expected =
-      CATALOGUE.reduce((sum, group) => sum + group.items.length, 0) + FOOD_CATALOGUE.length;
+      CATALOGUE.reduce((sum, group) => sum + group.items.length, 0) +
+      FOOD_CATALOGUE.length +
+      EXTRA_ITEMS.length;
     expect(await db.categories.count()).toBe(CATALOGUE.length + 1);
     expect(items).toHaveLength(expected);
     expect(items.some((item) => item.name === 'IBC Water Container (1000L)')).toBe(true);
@@ -246,11 +249,33 @@ describe('the seeded season', () => {
   });
 });
 
+describe('the extra items the inventory sheet missed', () => {
+  it('files each into its existing category, with no SKU collisions', async () => {
+    const taken = new Set([
+      ...CATALOGUE.flatMap((group) => group.items.map((item) => item.sku)),
+      ...FOOD_CATALOGUE.map((item) => item.sku),
+    ]);
+    expect(EXTRA_ITEMS.every((item) => !taken.has(item.sku))).toBe(true);
+    expect(new Set(EXTRA_ITEMS.map((item) => item.sku)).size).toBe(EXTRA_ITEMS.length);
+
+    await seedStarterData();
+    const categories = alive(await db.categories.toArray());
+    const items = alive(await db.items.toArray());
+    for (const extra of EXTRA_ITEMS) {
+      const item = items.find((entry) => entry.sku === extra.sku);
+      expect(item, extra.name).toBeDefined();
+      const category = categories.find((entry) => entry.id === item!.categoryId);
+      expect(category?.name, extra.name).toBe(extra.category);
+    }
+  });
+});
+
 describe('the Hounslow starting packlists and food plan', () => {
   it('names only items the catalogue actually has', () => {
     const known = new Set([
       ...CATALOGUE.flatMap((group) => group.items.map((item) => item.name)),
       ...FOOD_CATALOGUE.map((item) => item.name),
+      ...EXTRA_ITEMS.map((item) => item.name),
     ]);
     const missing = HOUNSLOW_PACKLISTS.flatMap((list) =>
       list.lines.map((line) => line.item).filter((name) => !known.has(name)),
