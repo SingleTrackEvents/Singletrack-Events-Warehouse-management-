@@ -28,6 +28,7 @@ import {
   statusIndex,
 } from '../domain/packlists';
 import { formatQty, plural } from '../domain/format';
+import { categoryLabel, groupByCategory } from '../domain/grouping';
 import type { PacklistLine, PacklistStatus, Unit } from '../db/types';
 
 type Filter = 'todo' | 'all' | 'packed' | 'musthave';
@@ -177,19 +178,15 @@ export default function PacklistScreen() {
    * everything for the same corner of the truck in one place — rather than
    * whatever order the lines were added in.
    */
-  const grouped = useMemo(() => {
-    const order = new Map((categories ?? []).map((category, index) => [category.id, index]));
-    const buckets = new Map<string | null, PacklistLine[]>();
-    for (const line of visible) {
-      const key = items?.get(line.itemId)?.categoryId ?? null;
-      const bucket = buckets.get(key);
-      if (bucket) bucket.push(line);
-      else buckets.set(key, [line]);
-    }
-    const rank = (key: string | null) =>
-      key === null ? Number.MAX_SAFE_INTEGER : (order.get(key) ?? Number.MAX_SAFE_INTEGER - 1);
-    return [...buckets.entries()].sort(([a], [b]) => rank(a) - rank(b));
-  }, [visible, items, categories]);
+  const grouped = useMemo(
+    () =>
+      groupByCategory(
+        visible,
+        (line) => items?.get(line.itemId)?.categoryId ?? null,
+        categories ?? [],
+      ),
+    [visible, items, categories],
+  );
 
   if (!packlist) {
     return (
@@ -276,14 +273,11 @@ export default function PacklistScreen() {
       {visible.length ? (
         <div>
           {grouped.map(([categoryId, groupLines]) => {
-            const category = categoryId
-              ? categories?.find((entry) => entry.id === categoryId)
-              : undefined;
             return (
               <section key={categoryId ?? 'uncategorised'} className="pack-group">
                 {grouped.length > 1 ? (
                   <div className="pack-group-head">
-                    {category ? `${category.icon} ${category.name}` : '📦 Uncategorised'}
+                    {categoryLabel(categoryId, categories ?? [])}
                     <span className="muted"> · {groupLines.length}</span>
                   </div>
                 ) : null}
