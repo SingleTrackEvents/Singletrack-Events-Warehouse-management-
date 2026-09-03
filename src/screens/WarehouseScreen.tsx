@@ -5,10 +5,11 @@ import { Screen } from '../App';
 import { EmptyState, Pill, ProgressBar } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { useSearch } from '../hooks/useSearch';
-import { useEvent } from '../hooks/useDb';
+import { useCategories, useEvent } from '../hooks/useDb';
 import { byVehicle, pullListCsv, pullListFor } from '../domain/warehouse';
 import { downloadCsv, slugify } from '../domain/backup';
 import { formatQty, plural } from '../domain/format';
+import { categoryLabel, groupByCategory } from '../domain/grouping';
 import type { PullLine } from '../domain/warehouse';
 
 type Filter = 'all' | 'short' | 'noRun';
@@ -34,6 +35,7 @@ export default function WarehouseScreen() {
   const event = useEvent(eventId);
   const toast = useToast();
   const list = useLiveQuery(async () => (eventId ? pullListFor(eventId) : undefined), [eventId]);
+  const categories = useCategories();
 
   const [grouping, setGrouping] = useState<'item' | 'vehicle'>('item');
   const [filter, setFilter] = useState<Filter>('all');
@@ -63,6 +65,16 @@ export default function WarehouseScreen() {
   ]);
 
   const vehicles = useMemo(() => (list ? byVehicle(list) : []), [list]);
+
+  /*
+   * Sections by category, keeping bin order inside each one. The picking pass
+   * walks the shed a corner at a time, so all the water gear wants to be in
+   * one place — alphabetical order scatters it across the whole list.
+   */
+  const grouped = useMemo(
+    () => groupByCategory(searched, (line) => line.item?.categoryId ?? null, categories ?? []),
+    [searched, categories],
+  );
 
   if (!event || !list) {
     return (
@@ -180,14 +192,26 @@ export default function WarehouseScreen() {
           </div>
 
           {searched.length ? (
-            <div className="list">
-              {searched.map((line) => (
-                <PullRow
-                  key={line.itemId}
-                  line={line}
-                  open={open.has(line.itemId)}
-                  onToggle={() => toggle(line.itemId)}
-                />
+            <div>
+              {grouped.map(([categoryId, lines]) => (
+                <section key={categoryId ?? 'uncategorised'} className="pack-group">
+                  {grouped.length > 1 ? (
+                    <div className="pack-group-head">
+                      {categoryLabel(categoryId, categories ?? [])}
+                      <span className="muted"> · {lines.length}</span>
+                    </div>
+                  ) : null}
+                  <div className="list">
+                    {lines.map((line) => (
+                      <PullRow
+                        key={line.itemId}
+                        line={line}
+                        open={open.has(line.itemId)}
+                        onToggle={() => toggle(line.itemId)}
+                      />
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           ) : (
