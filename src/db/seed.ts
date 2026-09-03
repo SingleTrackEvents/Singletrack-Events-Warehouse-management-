@@ -2,6 +2,7 @@ import { db, getSettings, SYNCED_TABLES } from './db';
 import { create, createMany, update } from './repo';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { EVENT_SEED } from './eventSeed';
+import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
@@ -165,6 +166,26 @@ export async function seedStarterData(
       barcode: null,
       notes: item.note,
       consumable: true,
+      archived: false,
+    })),
+  );
+
+  // Gear the generated inventory missed, filed into its existing categories.
+  await createMany(
+    db.items,
+    EXTRA_ITEMS.filter((item) => isNew(seedId('item', item.sku))).map((item) => ({
+      id: seedId('item', item.sku),
+      name: item.name,
+      sku: item.sku,
+      categoryId: seedId('cat', item.category),
+      unit: item.unit,
+      packSize: item.packSize,
+      bin: '',
+      qtyOnHand: 0,
+      minQty: item.hold,
+      barcode: null,
+      notes: item.note,
+      consumable: item.consumable,
       archived: false,
     })),
   );

@@ -36,6 +36,8 @@ const SPEAKER = { item: 'Bluetooth Speaker', qty: 1, note: 'Aid Station Team Lea
 /** The black-box kit every staffed station carried in 2025. */
 const STATION_KIT: HounslowPackLine[] = [
   { item: 'Aluminium Foil', qty: 2 },
+  { item: 'Bowls (eating)', qty: 2 },
+  { item: 'Forks (box)', qty: 1 },
   { item: 'Cable Ties', qty: 2 },
   { item: 'Chopping / Cutting Board', qty: 2 },
   { item: 'Emergency Ponchos', qty: 1 },
@@ -148,6 +150,7 @@ export const HOUNSLOW_PACKLISTS: HounslowPacklist[] = [
       { item: 'Stand Light', qty: 1 },
       { item: 'Starlink', qty: 1 },
       { item: 'Strip Light', qty: 1 },
+      { item: 'Wet Weather Electrical Covers', qty: 1 },
       ...HOT_FOOD_KIT,
       SPEAKER,
       { item: 'Serving Jugs (2L, marked)', qty: 4 },
@@ -181,6 +184,7 @@ export const HOUNSLOW_PACKLISTS: HounslowPacklist[] = [
       { item: 'Jerry Can (Fuel)', qty: 1 },
       { item: 'Power Board', qty: 1 },
       { item: 'Starlink', qty: 1 },
+      { item: 'Wet Weather Electrical Covers', qty: 1 },
       ...HOT_FOOD_KIT,
       SPEAKER,
       { item: 'Serving Jugs (2L, marked)', qty: 4 },
@@ -213,6 +217,7 @@ export const HOUNSLOW_PACKLISTS: HounslowPacklist[] = [
       { item: 'Power Board', qty: 6 },
       { item: 'Starlink', qty: 4 },
       { item: 'Strip Light', qty: 10 },
+      { item: 'Wet Weather Electrical Covers', qty: 6 },
       { item: 'Coffee (Large Instant)', qty: 5 },
       { item: 'Tea (English Breakfast)', qty: 5 },
       { item: 'Gas Bottle', qty: 2 },
@@ -256,6 +261,10 @@ export const HOUNSLOW_PACKLISTS: HounslowPacklist[] = [
       { item: 'Registration Lists / Distance Signs', qty: 2 },
       { item: 'Safety Pins', qty: 36, note: '3,600 pins — packs of 100' },
       { item: 'Merch - iPad & Square Reader', qty: 2 },
+      { item: 'ASICS Marquee (3x3)', qty: 1 },
+      { item: 'Merch Racking (complete set)', qty: 1, note: 'Bring everything' },
+      { item: 'Plastic Table & Chairs Set', qty: 20 },
+      { item: 'Kids Table + Chair Set', qty: 1, note: 'Colin to provide' },
     ],
   },
 ];
