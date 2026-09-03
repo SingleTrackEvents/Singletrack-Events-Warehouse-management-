@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { ItemPicker } from '../components/ItemPicker';
+import { SwipeToDelete } from '../components/SwipeToDelete';
 import { ConfirmSheet, Field, Pill, ProgressBar, Sheet, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
@@ -29,6 +30,7 @@ import {
 } from '../domain/packlists';
 import { formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
+import { isKit, kitLines } from '../domain/kits';
 import type { PacklistLine, PacklistStatus, Unit } from '../db/types';
 
 type Filter = 'todo' | 'all' | 'packed' | 'musthave';
@@ -106,6 +108,16 @@ export default function PacklistScreen() {
   const [removingLine, setRemovingLine] = useState<PacklistLine>();
   const [editingRequired, setEditingRequired] = useState<PacklistLine>();
   const [clearing, setClearing] = useState<'confirmations' | 'notes'>();
+  // Kits whose contents are unfolded. A kit packs as one line; this is the
+  // laminated list inside the lid, for whoever is filling the tubs.
+  const [kitsOpen, setKitsOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggleKit = (id: string) =>
+    setKitsOpen((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   /*
    * A line that has just been completed stays on the "To pack" list for a beat.
@@ -270,6 +282,17 @@ export default function PacklistScreen() {
         ))}
       </div>
 
+      {canManage ? (
+        <div className="btn-row mb-3 no-print">
+          <button type="button" className="btn btn-outline" onClick={() => setPicking(true)}>
+            + Add items
+          </button>
+          <button type="button" className="btn btn-outline" onClick={() => setApplying(true)}>
+            📋 Apply template
+          </button>
+        </div>
+      ) : null}
+
       {visible.length ? (
         <div>
           {grouped.map(([categoryId, groupLines]) => {
@@ -287,9 +310,10 @@ export default function PacklistScreen() {
             const count = countOn(line);
             const packed = count >= line.qtyRequired;
             const short = count > 0 && !packed;
-            return (
+            const kit = isKit(item);
+            const row = (
+              <>
               <div
-                key={line.id}
                 className={`pack-row${packed ? ' done' : short ? ' short' : ''}`}
                 role="button"
                 tabIndex={0}
@@ -315,6 +339,20 @@ export default function PacklistScreen() {
                     {item ? `${item.bin || 'no bin'} · ${item.sku}` : ''}
                     {line.note ? ` · ${line.note}` : ''}
                   </span>
+                  {kit ? (
+                    <button
+                      type="button"
+                      className="kit-toggle"
+                      aria-expanded={kitsOpen.has(line.id)}
+                      onClick={(event) => {
+                        // The row itself toggles packed; this only unfolds the list.
+                        event.stopPropagation();
+                        toggleKit(line.id);
+                      }}
+                    >
+                      📦 {kitsOpen.has(line.id) ? 'Hide' : 'What’s inside'} · {item?.contents?.length}
+                    </button>
+                  ) : null}
                   {/* What the station counted, so a short delivery is visible
                       back at the warehouse rather than only recorded. */}
                   {canPack && isConfirmed(line) ? (
@@ -372,6 +410,30 @@ export default function PacklistScreen() {
                   </span>
                 )}
               </div>
+              {kit && kitsOpen.has(line.id) ? (
+                <div className="kit-contents">
+                  <div className="kit-contents-note">
+                    Packing this line packs everything below
+                    {line.qtyRequired > 1 ? ` — quantities are for ${line.qtyRequired} kits` : ''}.
+                  </div>
+                  {kitLines(item, items ?? new Map(), line.qtyRequired).map((inside) => (
+                    <div key={inside.itemId} className="kit-line">
+                      <span className="truncate">{inside.item?.name ?? 'Unknown item'}</span>
+                      <span className="muted">× {inside.qty}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              </>
+            );
+            // Swiping a line off the list is the crew's job; a driver checking a
+            // delivery in gets the plain row.
+            return canManage && !returning ? (
+              <SwipeToDelete key={line.id} label="Remove" onDelete={() => setRemovingLine(line)}>
+                {row}
+              </SwipeToDelete>
+            ) : (
+              <div key={line.id}>{row}</div>
             );
           })}
                 </div>
@@ -387,17 +449,7 @@ export default function PacklistScreen() {
         </div>
       )}
 
-      {canManage ? (
-        <div className="btn-row mt-4 no-print">
-          <button type="button" className="btn btn-outline" onClick={() => setPicking(true)}>
-            + Add items
-          </button>
-          <button type="button" className="btn btn-outline" onClick={() => setApplying(true)}>
-            📋 Apply template
-          </button>
-        </div>
-      ) : null}
-      <div className="btn-row mt-2 no-print">
+      <div className="btn-row mt-4 no-print">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotesOpen(true)}>
           📝 Notes
         </button>
@@ -407,27 +459,6 @@ export default function PacklistScreen() {
           </Link>
         ) : null}
       </div>
-
-      {canManage && lines?.length ? (
-        <details className="card card-pad mt-4 no-print">
-          <summary className="small strong">Remove a line</summary>
-          <div className="list mt-3">
-            {lines.map((line) => (
-              <div key={line.id} className="row row-static">
-                <span className="row-body truncate">{items?.get(line.itemId)?.name ?? 'Unknown'}</span>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  aria-label="Remove line"
-                  onClick={() => setRemovingLine(line)}
-                >
-                  🗑
-                </button>
-              </div>
-            ))}
-          </div>
-        </details>
-      ) : null}
 
       {canManage ? (
         <details className="card card-pad mt-3 no-print">

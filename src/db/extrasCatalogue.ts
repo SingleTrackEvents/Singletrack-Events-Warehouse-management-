@@ -85,6 +85,16 @@ export const EXTRA_ITEMS: ExtraItem[] = [
     note: '',
   },
   {
+    name: 'Zip Lock Bags (box)',
+    sku: 'HYG-90',
+    category: 'Hygiene & Consumables',
+    unit: 'box',
+    packSize: 1,
+    hold: 7,
+    consumable: true,
+    note: 'One box per aid station kit',
+  },
+  {
     name: 'Kids Table + Chair Set',
     sku: 'FRN-91',
     category: 'Furniture & Site Equipment',
