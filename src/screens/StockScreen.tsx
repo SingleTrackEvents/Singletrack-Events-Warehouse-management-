@@ -2,18 +2,19 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
-import { EmptyState, Field, Pill, Sheet } from '../components/ui';
+import { ConfirmSheet, EmptyState, Field, Pill, Sheet } from '../components/ui';
+import { SwipeToDelete } from '../components/SwipeToDelete';
 import { useToast } from '../components/toastContext';
 import { useSearch } from '../hooks/useSearch';
 import { db } from '../db/db';
-import { create } from '../db/repo';
+import { create, update } from '../db/repo';
 import { useCategories, useItems } from '../hooks/useDb';
 import { isLowStock, isUncounted, countedItemIds } from '../domain/stock';
 import { formatQtyDetail, plural } from '../domain/format';
 import { suggestSku } from '../domain/skus';
 import { PackSizeField } from '../components/PackSizeField';
 import { CategoryPicker } from '../components/CategoryPicker';
-import type { Unit } from '../db/types';
+import type { Item, Unit } from '../db/types';
 import { UNITS, unitHasPackSize } from '../db/types';
 
 /**
@@ -25,11 +26,13 @@ import { UNITS, unitHasPackSize } from '../db/types';
  */
 export default function StockScreen() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [params, setParams] = useSearchParams();
   const items = useItems();
   const categories = useCategories();
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState(false);
+  const [archiving, setArchiving] = useState<Item>();
 
   const categoryFilter = params.get('category') ?? '';
   const lowOnly = params.get('filter') === 'low';
@@ -141,7 +144,8 @@ export default function StockScreen() {
       {matches.length ? (
         <div className="list">
           {matches.map((item) => (
-            <Link key={item.id} to={`/stock/${item.id}`} className="row">
+            <SwipeToDelete key={item.id} label="Archive" onDelete={() => setArchiving(item)}>
+            <Link to={`/stock/${item.id}`} className="row">
               <span className="row-body">
                 <span className="row-title truncate">{item.name}</span>
                 <span className="row-sub">
@@ -161,6 +165,7 @@ export default function StockScreen() {
                 )}
               </span>
             </Link>
+            </SwipeToDelete>
           ))}
         </div>
       ) : (
@@ -199,6 +204,21 @@ export default function StockScreen() {
       </div>
 
       {adding ? <NewItemSheet onClose={() => setAdding(false)} /> : null}
+
+      {archiving ? (
+        <ConfirmSheet
+          title={`Archive ${archiving.name}?`}
+          body="It disappears from search and pickers but stays on past packlists and the ledger. It can be brought back from its page."
+          confirmLabel="Archive"
+          tone="danger"
+          onCancel={() => setArchiving(undefined)}
+          onConfirm={() => {
+            const target = archiving;
+            setArchiving(undefined);
+            void update(db.items, target.id, { archived: true }).then(() => toast('Item archived'));
+          }}
+        />
+      ) : null}
     </Screen>
   );
 }

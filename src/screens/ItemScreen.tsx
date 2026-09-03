@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
+import { ItemPicker } from '../components/ItemPicker';
 import { Scanner } from '../components/Scanner';
+import { SwipeToDelete } from '../components/SwipeToDelete';
 import { ConfirmSheet, Field, Pill, Sheet, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { update } from '../db/repo';
-import { useCategories, useCrewName, useItem } from '../hooks/useDb';
+import { byId, update } from '../db/repo';
+import { useCategories, useCrewName, useItem, useItems } from '../hooks/useDb';
+import { addKitContent, isKit, kitLines, removeKitContent, setKitContentQty } from '../domain/kits';
 import {
   MOVEMENT_LABELS,
   isLowStock,
@@ -41,6 +44,9 @@ export default function ItemScreen() {
   const [editing, setEditing] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [addingContents, setAddingContents] = useState(false);
+  const allItems = useItems();
+  const itemsById = useMemo(() => byId(allItems ?? []), [allItems]);
 
   if (!item) {
     return (
@@ -106,10 +112,53 @@ export default function ItemScreen() {
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setScanning(true)}>
           {item.barcode ? '⛶ Change barcode' : '⛶ Link a barcode'}
         </button>
+        {!isKit(item) ? (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingContents(true)}>
+            📦 List what’s inside
+          </button>
+        ) : null}
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setArchiving(true)}>
           🗄 Archive
         </button>
       </div>
+
+      {isKit(item) ? (
+        <section className="section">
+          <div className="section-head">
+            <h2>What’s in this kit</h2>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingContents(true)}>
+              + Add
+            </button>
+          </div>
+          <p className="tiny muted mb-2">
+            Packing this kit on a packlist packs everything below. Swipe a line to take it out.
+          </p>
+          <div className="list">
+            {kitLines(item, itemsById).map((line) => (
+              <SwipeToDelete
+                key={line.itemId}
+                label="Remove"
+                onDelete={() => void removeKitContent(item.id, line.itemId)}
+              >
+                <div className="row row-static">
+                  <span className="row-body">
+                    <span className="row-title truncate">{line.item?.name ?? 'Unknown item'}</span>
+                    <span className="row-sub">{line.item?.sku ?? ''}</span>
+                  </span>
+                  <span className="row-end">
+                    <Stepper
+                      label={`${line.item?.name ?? 'item'} in kit`}
+                      value={line.qty}
+                      min={0}
+                      onChange={(next) => void setKitContentQty(item.id, line.itemId, next)}
+                    />
+                  </span>
+                </div>
+              </SwipeToDelete>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {item.barcode ? (
         <p className="tiny muted mb-4">
@@ -198,6 +247,30 @@ export default function ItemScreen() {
             }}
           />
         </Sheet>
+      ) : null}
+
+      {addingContents ? (
+        <ItemPicker
+          title={`Inside ${item.name}`}
+          exclude={[item.id, ...(item.contents ?? []).map((content) => content.itemId)]}
+          onClose={() => setAddingContents(false)}
+          onPick={(picks) => {
+            void (async () => {
+              let added = 0;
+              for (const pick of picks) {
+                if (await addKitContent(item.id, pick.item.id, pick.qty)) added += 1;
+              }
+              const refused = picks.length - added;
+              toast(
+                refused
+                  ? `${added} added — a kit cannot hold another kit`
+                  : `${added} added to the kit`,
+                refused ? 'warn' : 'ok',
+              );
+              setAddingContents(false);
+            })();
+          }}
+        />
       ) : null}
 
       {archiving ? (

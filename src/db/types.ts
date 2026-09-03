@@ -54,6 +54,19 @@ export interface Category extends SyncMeta {
   icon: string;
 }
 
+/**
+ * One thing inside a kit, and how many of it.
+ *
+ * A kit is an item that is itself a box of other items — the Primary Aid
+ * Station Kit is three black tubs holding chopping boards, jugs, sunscreen and
+ * thirty other things. The kit travels and is packed as one line; its contents
+ * are what somebody checks when filling the tubs.
+ */
+export interface KitContent {
+  itemId: string;
+  qty: number;
+}
+
 export interface Item extends SyncMeta {
   name: string;
   /** Short human code used on labels, e.g. "AS-WTR-CUBE". */
@@ -74,6 +87,12 @@ export interface Item extends SyncMeta {
   /** Consumables are used up at events; assets (gazebos, radios) come back. */
   consumable: boolean;
   archived: boolean;
+  /**
+   * What is inside, when this item is a kit. Absent on plain items and on
+   * items written before kits existed; an empty list is a kit somebody has
+   * deliberately emptied, and is left alone by the seed.
+   */
+  contents?: KitContent[];
 }
 
 /** Why stock moved. The ledger is the audit trail behind `Item.qtyOnHand`. */

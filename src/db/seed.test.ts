@@ -8,6 +8,7 @@ import { EVENT_SEED } from './eventSeed';
 import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
+import { KIT_CONTENTS } from './kitContents';
 import { STATION_TEMPLATES } from './stationTemplates';
 import type { AccessType, DestinationType, SyncMeta, Template } from './types';
 
@@ -267,6 +268,59 @@ describe('the extra items the inventory sheet missed', () => {
       const category = categories.find((entry) => entry.id === item!.categoryId);
       expect(category?.name, extra.name).toBe(extra.category);
     }
+  });
+});
+
+describe('what goes in the kits', () => {
+  it('fills the aid station kit from its laminated list, every line resolved', async () => {
+    await seedStarterData();
+
+    const items = alive(await db.items.toArray());
+    const kit = items.find((item) => item.sku === 'KIT-01')!;
+    const spec = KIT_CONTENTS.find((entry) => entry.sku === 'KIT-01')!;
+    expect(kit.contents).toHaveLength(spec.contents.length);
+    const ids = new Set(items.map((item) => item.id));
+    expect(kit.contents!.every((content) => ids.has(content.itemId))).toBe(true);
+
+    const jugs = items.find((item) => item.name === 'Serving Jugs (2L, marked)')!;
+    expect(kit.contents!.find((content) => content.itemId === jugs.id)?.qty).toBe(4);
+  });
+
+  it('names only items the catalogue has, so nothing inside a kit is a ghost', () => {
+    const known = new Set([
+      ...CATALOGUE.flatMap((group) => group.items.map((item) => item.name)),
+      ...FOOD_CATALOGUE.map((item) => item.name),
+      ...EXTRA_ITEMS.map((item) => item.name),
+    ]);
+    const missing = KIT_CONTENTS.flatMap((spec) =>
+      spec.contents.map(([name]) => name).filter((name) => !known.has(name)),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('reaches a device that had the kit before contents existed, once', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    const kit = alive(await db.items.toArray()).find((item) => item.sku === 'KIT-01')!;
+    // A device from before kits: the item is there, the field is not.
+    const { contents: _contents, ...withoutContents } = kit;
+    await db.items.put(withoutContents as typeof kit);
+
+    await ensureSeeded();
+    expect((await db.items.get(kit.id))?.contents?.length).toBeGreaterThan(0);
+  });
+
+  it('leaves a kit the crew emptied alone', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    const kit = alive(await db.items.toArray()).find((item) => item.sku === 'KIT-01')!;
+    await update(db.items, kit.id, { contents: [] });
+
+    await ensureSeeded();
+    // An empty list is a decision; only "never set" is filled in.
+    expect((await db.items.get(kit.id))?.contents).toEqual([]);
   });
 });
 

@@ -5,6 +5,7 @@ import { EVENT_SEED } from './eventSeed';
 import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
+import { KIT_CONTENTS } from './kitContents';
 import { STATION_TEMPLATES } from './stationTemplates';
 import { makeCode } from '../domain/codes';
 import type { Item, RaceVisit, SyncMeta, Unit } from './types';
@@ -101,6 +102,21 @@ export async function seedStarterData(
   const known = options.onlyMissing ? new Set(previous.keys()) : new Set<string>();
   const isNew = (id: string) => !known.has(id);
 
+  // Kit contents resolve by catalogue name to seeded ids, so a kit can be
+  // written complete in one go and start at revision 1 like everything else.
+  const skuByName = new Map<string, string>();
+  for (const group of CATALOGUE) for (const item of group.items) skuByName.set(item.name, item.sku);
+  for (const item of FOOD_CATALOGUE) skuByName.set(item.name, item.sku);
+  for (const item of EXTRA_ITEMS) skuByName.set(item.name, item.sku);
+  const kitContentsFor = (sku: string) => {
+    const spec = KIT_CONTENTS.find((entry) => entry.sku === sku);
+    if (!spec) return undefined;
+    return spec.contents.flatMap(([name, qty]) => {
+      const inside = skuByName.get(name);
+      return inside ? [{ itemId: seedId('item', inside), qty }] : [];
+    });
+  };
+
   for (const [index, group] of CATALOGUE.entries()) {
     const categoryId = seedId('cat', group.category);
     if (isNew(categoryId)) {
@@ -116,24 +132,29 @@ export async function seedStarterData(
       db.items,
       group.items
         .filter((item) => isNew(seedId('item', item.sku)))
-        .map((item) => ({
-        id: seedId('item', item.sku),
-        name: item.name,
-        sku: item.sku,
-        categoryId,
-        unit: item.unit as Unit,
-        packSize: 1,
-        // Where each item lives is warehouse knowledge the spreadsheet does not
-        // carry. Left blank rather than guessed, since counting walks the racks
-        // in bin order and a wrong bin sends someone to the wrong shelf.
-        bin: '',
-        qtyOnHand: 0,
-        minQty: item.hold,
-        barcode: null,
-        notes: item.note,
-        consumable: item.consumable,
-        archived: false,
-      })),
+        .map((item) => {
+          const contents = kitContentsFor(item.sku);
+          return {
+            id: seedId('item', item.sku),
+            name: item.name,
+            sku: item.sku,
+            categoryId,
+            unit: item.unit as Unit,
+            packSize: 1,
+            // Where each item lives is warehouse knowledge the spreadsheet does
+            // not carry. Left blank rather than guessed, since counting walks
+            // the racks in bin order and a wrong bin sends someone to the wrong
+            // shelf.
+            bin: '',
+            qtyOnHand: 0,
+            minQty: item.hold,
+            barcode: null,
+            notes: item.note,
+            consumable: item.consumable,
+            archived: false,
+            ...(contents ? { contents } : {}),
+          };
+        }),
     );
 
   }
@@ -334,6 +355,18 @@ export async function seedStarterData(
     if (!item.deletedAt) byName.set(item.name, item);
   }
   const hounslowId = seedId('event', 'hc26');
+
+  // A kit seeded before contents existed is topped up here, once: `contents`
+  // absent is "never set", while an empty list is the crew's decision. A fresh
+  // seed already wrote the kit complete above, so this leaves it alone.
+  for (const spec of KIT_CONTENTS) {
+    const kit = bySku.get(spec.sku);
+    if (!kit || kit.contents !== undefined) continue;
+    const contents = spec.contents
+      .map(([name, qty]) => ({ itemId: byName.get(name)?.id, qty }))
+      .filter((content): content is { itemId: string; qty: number } => Boolean(content.itemId));
+    await update(db.items, kit.id, { contents });
+  }
 
   for (const list of HOUNSLOW_PACKLISTS) {
     const packlistId = seedId('plist', `hc26-${list.station}`);

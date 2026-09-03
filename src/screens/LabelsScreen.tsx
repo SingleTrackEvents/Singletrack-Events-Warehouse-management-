@@ -12,6 +12,7 @@ import { makeContainerCode, scanUrl } from '../domain/codes';
 import { PACKLIST_STATUS_LABELS } from '../domain/packlists';
 import { downloadCsv, slugify } from '../domain/backup';
 import { formatDate, formatQty } from '../domain/format';
+import { isKit, kitLines } from '../domain/kits';
 import type { Container } from '../db/types';
 
 /**
@@ -170,6 +171,7 @@ export default function LabelsScreen() {
             {(lines ?? []).map((line) => {
               const item = items?.get(line.itemId);
               return (
+                <>
                 <tr key={line.id}>
                   <td>☐</td>
                   <td>
@@ -181,6 +183,18 @@ export default function LabelsScreen() {
                   <td>{line.qtyPacked || ''}</td>
                   <td />
                 </tr>
+                {isKit(item) ? (
+                  <tr key={`${line.id}-kit`}>
+                    <td />
+                    <td colSpan={5} style={{ fontSize: 11, color: '#444' }}>
+                      Inside:{' '}
+                      {kitLines(item, items ?? new Map(), line.qtyRequired)
+                        .map((inside) => `${inside.qty} × ${inside.item?.name ?? 'unknown'}`)
+                        .join(' · ')}
+                    </td>
+                  </tr>
+                ) : null}
+                </>
               );
             })}
           </tbody>
