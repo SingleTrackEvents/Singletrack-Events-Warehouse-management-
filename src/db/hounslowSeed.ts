@@ -8,12 +8,10 @@
  * catalogue by item name. Quantities are last year's plan, seeded as required
  * amounts on draft packlists for this year's stations to be corrected from.
  *
- * `HOUNSLOW_CONSUMPTION` is the HC 2026 consumption planner. The sheet keys
- * ratios per race per station; the app keys one rule per station, so each
- * per-runner figure here is derived as (the sheet's combined Sat+Sun total for
- * that station) ÷ (runners through it at the sheet's projections: Marathon 450,
- * 17k 612, Kids 80). At those projections every computed quantity reproduces
- * the sheet's total exactly; move a projection and the plan scales with it.
+ * `HOUNSLOW_CONSUMPTION` is the HC 2026 consumption planner, one rule per
+ * station per race exactly as the sheet keys them: a marathon runner and a
+ * 17k runner eat differently at the same table. With the marathon on the
+ * Saturday and the 17k and kids on the Sunday, the plan falls out by day.
  */
 
 export interface HounslowPackLine {
@@ -271,6 +269,8 @@ export const HOUNSLOW_PACKLISTS: HounslowPacklist[] = [
 
 export interface HounslowFoodLine {
   station: string;
+  /** Race name from the hc26 entry in eventSeed.ts. */
+  race: string;
   /** Food catalogue SKU. */
   sku: string;
   perRunner: number;
@@ -278,89 +278,125 @@ export interface HounslowFoodLine {
 }
 
 /*
- * Derived from the sheet's per-station totals. Runners through each station at
- * the sheet's projections: Grand Canyon 1062, Allview 1592, Perrys 900,
- * Blue Gum 450, Pinnacles 450. Ratios are rounded up at the sixth decimal so
- * the computed quantity never falls below the sheet's figure.
+ * Straight off the sheet, one rule per station per race. Where the marathon
+ * passes a station twice with different ratios on each pass, the two are
+ * averaged and applied to both passes' runners, which gives the sheet's
+ * total exactly. Flat amounts are summed across passes.
  */
 export const HOUNSLOW_CONSUMPTION: HounslowFoodLine[] = [
-  { station: 'Grand Canyon Carpark', sku: 'FD-01', perRunner: 1.031074, flatQty: 0 }, // 1095
-  { station: 'Grand Canyon Carpark', sku: 'FD-02', perRunner: 0.020716, flatQty: 0 }, // 22
-  { station: 'Grand Canyon Carpark', sku: 'FD-03', perRunner: 0.012242, flatQty: 0 }, // 13
-  { station: 'Grand Canyon Carpark', sku: 'FD-04', perRunner: 0.800377, flatQty: 0 }, // 850
-  { station: 'Grand Canyon Carpark', sku: 'FD-05', perRunner: 0.232581, flatQty: 0 }, // 247
-  { station: 'Grand Canyon Carpark', sku: 'FD-23', perRunner: 0.215631, flatQty: 0 }, // 229
-  { station: 'Grand Canyon Carpark', sku: 'FD-06', perRunner: 0.118645, flatQty: 0 }, // 126
-  { station: 'Grand Canyon Carpark', sku: 'FD-07', perRunner: 0.059323, flatQty: 0 }, // 63
-  { station: 'Grand Canyon Carpark', sku: 'FD-08', perRunner: 0.007533, flatQty: 0 }, // 8
-  { station: 'Grand Canyon Carpark', sku: 'FD-11', perRunner: 0.032016, flatQty: 0 }, // 34
-  { station: 'Grand Canyon Carpark', sku: 'FD-12', perRunner: 0.010358, flatQty: 0 }, // 11
-  { station: 'Grand Canyon Carpark', sku: 'FD-13', perRunner: 0.006592, flatQty: 0 }, // 7
-  { station: 'Grand Canyon Carpark', sku: 'FD-24', perRunner: 0.021658, flatQty: 0 }, // 23
-  { station: 'Grand Canyon Carpark', sku: 'FD-09', perRunner: 0, flatQty: 1 },
-  { station: 'Grand Canyon Carpark', sku: 'FD-10', perRunner: 0, flatQty: 1 },
-  { station: 'Allview Escape', sku: 'FD-01', perRunner: 1.949749, flatQty: 0 }, // 3104
-  { station: 'Allview Escape', sku: 'FD-02', perRunner: 0.078518, flatQty: 0 }, // 125
-  { station: 'Allview Escape', sku: 'FD-03', perRunner: 0.014448, flatQty: 0 }, // 23
-  { station: 'Allview Escape', sku: 'FD-04', perRunner: 0.226131, flatQty: 0 }, // 360
-  { station: 'Allview Escape', sku: 'FD-05', perRunner: 0.444096, flatQty: 0 }, // 707
-  { station: 'Allview Escape', sku: 'FD-23', perRunner: 0.428392, flatQty: 0 }, // 682
-  { station: 'Allview Escape', sku: 'FD-06', perRunner: 0.162061, flatQty: 0 }, // 258
-  { station: 'Allview Escape', sku: 'FD-07', perRunner: 0.081031, flatQty: 0 }, // 129
-  { station: 'Allview Escape', sku: 'FD-08', perRunner: 0.011307, flatQty: 0 }, // 18
-  { station: 'Allview Escape', sku: 'FD-11', perRunner: 0.046483, flatQty: 0 }, // 74
-  { station: 'Allview Escape', sku: 'FD-12', perRunner: 0.014448, flatQty: 0 }, // 23
-  { station: 'Allview Escape', sku: 'FD-13', perRunner: 0.008794, flatQty: 0 }, // 14
-  { station: 'Allview Escape', sku: 'FD-24', perRunner: 0.028267, flatQty: 0 }, // 45
-  { station: 'Allview Escape', sku: 'FD-09', perRunner: 0, flatQty: 2 },
-  { station: 'Allview Escape', sku: 'FD-10', perRunner: 0, flatQty: 2 },
-  { station: 'Perrys Lookdown', sku: 'FD-01', perRunner: 2.5, flatQty: 0 }, // 2250
-  { station: 'Perrys Lookdown', sku: 'FD-02', perRunner: 0.1, flatQty: 0 }, // 90
-  { station: 'Perrys Lookdown', sku: 'FD-03', perRunner: 0.013334, flatQty: 0 }, // 12
-  { station: 'Perrys Lookdown', sku: 'FD-04', perRunner: 0.8, flatQty: 0 }, // 720
-  { station: 'Perrys Lookdown', sku: 'FD-05', perRunner: 0.331112, flatQty: 0 }, // 298
-  { station: 'Perrys Lookdown', sku: 'FD-23', perRunner: 0.3, flatQty: 0 }, // 270
-  { station: 'Perrys Lookdown', sku: 'FD-06', perRunner: 0.151112, flatQty: 0 }, // 136
-  { station: 'Perrys Lookdown', sku: 'FD-07', perRunner: 0.075556, flatQty: 0 }, // 68
-  { station: 'Perrys Lookdown', sku: 'FD-08', perRunner: 0.01, flatQty: 0 }, // 9
-  { station: 'Perrys Lookdown', sku: 'FD-11', perRunner: 0.042223, flatQty: 0 }, // 38
-  { station: 'Perrys Lookdown', sku: 'FD-12', perRunner: 0.013334, flatQty: 0 }, // 12
-  { station: 'Perrys Lookdown', sku: 'FD-13', perRunner: 0.008889, flatQty: 0 }, // 8
-  { station: 'Perrys Lookdown', sku: 'FD-24', perRunner: 0.133334, flatQty: 0 }, // 120
-  { station: 'Perrys Lookdown', sku: 'FD-14', perRunner: 0.125556, flatQty: 0 }, // 113
-  { station: 'Perrys Lookdown', sku: 'FD-16', perRunner: 0.006667, flatQty: 0 }, // 6
-  { station: 'Perrys Lookdown', sku: 'FD-09', perRunner: 0, flatQty: 2 },
-  { station: 'Perrys Lookdown', sku: 'FD-10', perRunner: 0, flatQty: 2 },
-  { station: 'Perrys Lookdown', sku: 'FD-17', perRunner: 0, flatQty: 1 },
-  { station: 'Perrys Lookdown', sku: 'FD-18', perRunner: 0, flatQty: 1 },
-  { station: 'Perrys Lookdown', sku: 'FD-19', perRunner: 0, flatQty: 1 },
-  { station: 'Perrys Lookdown', sku: 'FD-20', perRunner: 0, flatQty: 1 },
-  { station: 'Perrys Lookdown', sku: 'FD-21', perRunner: 0, flatQty: 1 },
-  { station: 'Blue Gum Forest', sku: 'FD-01', perRunner: 0.751112, flatQty: 0 }, // 338
-  { station: 'Blue Gum Forest', sku: 'FD-03', perRunner: 0.013334, flatQty: 0 }, // 6
-  { station: 'Blue Gum Forest', sku: 'FD-13', perRunner: 0.008889, flatQty: 0 }, // 4
-  { station: 'Blue Gum Forest', sku: 'FD-09', perRunner: 0, flatQty: 1 },
-  { station: 'Blue Gum Forest', sku: 'FD-10', perRunner: 0, flatQty: 1 },
-  { station: 'The Pinnacles Car Park', sku: 'FD-01', perRunner: 3, flatQty: 0 }, // 1350
-  { station: 'The Pinnacles Car Park', sku: 'FD-02', perRunner: 0.151112, flatQty: 0 }, // 68
-  { station: 'The Pinnacles Car Park', sku: 'FD-03', perRunner: 0.013334, flatQty: 0 }, // 6
-  { station: 'The Pinnacles Car Park', sku: 'FD-04', perRunner: 0.8, flatQty: 0 }, // 360
-  { station: 'The Pinnacles Car Park', sku: 'FD-05', perRunner: 0.5, flatQty: 0 }, // 225
-  { station: 'The Pinnacles Car Park', sku: 'FD-23', perRunner: 0.5, flatQty: 0 }, // 225
-  { station: 'The Pinnacles Car Park', sku: 'FD-06', perRunner: 0.2, flatQty: 0 }, // 90
-  { station: 'The Pinnacles Car Park', sku: 'FD-07', perRunner: 0.1, flatQty: 0 }, // 45
-  { station: 'The Pinnacles Car Park', sku: 'FD-08', perRunner: 0.013334, flatQty: 0 }, // 6
-  { station: 'The Pinnacles Car Park', sku: 'FD-11', perRunner: 0.055556, flatQty: 0 }, // 25
-  { station: 'The Pinnacles Car Park', sku: 'FD-12', perRunner: 0.017778, flatQty: 0 }, // 8
-  { station: 'The Pinnacles Car Park', sku: 'FD-13', perRunner: 0.008889, flatQty: 0 }, // 4
-  { station: 'The Pinnacles Car Park', sku: 'FD-24', perRunner: 0.226667, flatQty: 0 }, // 102
-  { station: 'The Pinnacles Car Park', sku: 'FD-14', perRunner: 0.5, flatQty: 0 }, // 225
-  { station: 'The Pinnacles Car Park', sku: 'FD-16', perRunner: 0.017778, flatQty: 0 }, // 8
-  { station: 'The Pinnacles Car Park', sku: 'FD-09', perRunner: 0, flatQty: 1 },
-  { station: 'The Pinnacles Car Park', sku: 'FD-10', perRunner: 0, flatQty: 1 },
-  { station: 'The Pinnacles Car Park', sku: 'FD-17', perRunner: 0, flatQty: 1 },
-  { station: 'The Pinnacles Car Park', sku: 'FD-18', perRunner: 0, flatQty: 1 },
-  { station: 'The Pinnacles Car Park', sku: 'FD-19', perRunner: 0, flatQty: 1 },
-  { station: 'The Pinnacles Car Park', sku: 'FD-20', perRunner: 0, flatQty: 1 },
-  { station: 'The Pinnacles Car Park', sku: 'FD-21', perRunner: 0, flatQty: 1 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-01', perRunner: 0.8, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-02', perRunner: 0.02, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-03', perRunner: 0.011236, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-04', perRunner: 0.8, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-05', perRunner: 0.1, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-23', perRunner: 0.1, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-06', perRunner: 0.075, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-07', perRunner: 0.0375, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-08', perRunner: 0.006, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-09', perRunner: 0, flatQty: 1 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-10', perRunner: 0, flatQty: 1 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-11', perRunner: 0.016667, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-12', perRunner: 0.005, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-13', perRunner: 0.004, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: 'Marathon', sku: 'FD-24', perRunner: 0.05, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-01', perRunner: 1.2, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-02', perRunner: 0.02, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-03', perRunner: 0.011236, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-04', perRunner: 0.8, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-05', perRunner: 0.33, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-23', perRunner: 0.3, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-06', perRunner: 0.15, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-07', perRunner: 0.075, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-08', perRunner: 0.0075, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-11', perRunner: 0.041667, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-12', perRunner: 0.0125, flatQty: 0 },
+  { station: 'Grand Canyon Carpark', race: '17k', sku: 'FD-13', perRunner: 0.007, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-01', perRunner: 2, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-02', perRunner: 0.108, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-03', perRunner: 0.012641, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-04', perRunner: 0.4, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-05', perRunner: 0.415001, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-23', perRunner: 0.4, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-06', perRunner: 0.175, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-07', perRunner: 0.0875, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-08', perRunner: 0.0105, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-09', perRunner: 0, flatQty: 2 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-10', perRunner: 0, flatQty: 2 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-11', perRunner: 0.048334, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-12', perRunner: 0.0145, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-13', perRunner: 0.0075, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Marathon', sku: 'FD-24', perRunner: 0.05, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-01', perRunner: 2, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-02', perRunner: 0.04, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-03', perRunner: 0.014045, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-05', perRunner: 0.5, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-23', perRunner: 0.5, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-06', perRunner: 0.15, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-07', perRunner: 0.075, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-08', perRunner: 0.012, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-11', perRunner: 0.041667, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-12', perRunner: 0.0125, flatQty: 0 },
+  { station: 'Allview Escape', race: '17k', sku: 'FD-13', perRunner: 0.007, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-01', perRunner: 1, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-02', perRunner: 0.02, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-03', perRunner: 0.011236, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-05', perRunner: 0.33, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-23', perRunner: 0.2, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-06', perRunner: 0.1, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-07', perRunner: 0.05, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-08', perRunner: 0.006, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-09', perRunner: 0, flatQty: 1 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-10', perRunner: 0, flatQty: 1 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-11', perRunner: 0.041667, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-12', perRunner: 0.0125, flatQty: 0 },
+  { station: 'Allview Escape', race: 'Kids', sku: 'FD-13', perRunner: 0.007, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-01', perRunner: 2.5, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-02', perRunner: 0.1, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-03', perRunner: 0.011236, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-04', perRunner: 0.8, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-05', perRunner: 0.33, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-23', perRunner: 0.3, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-06', perRunner: 0.15, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-07', perRunner: 0.075, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-08', perRunner: 0.009, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-09', perRunner: 0, flatQty: 2 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-10', perRunner: 0, flatQty: 2 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-11', perRunner: 0.041667, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-12', perRunner: 0.0125, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-13', perRunner: 0.007, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-24', perRunner: 0.1325, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-14', perRunner: 0.125, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-16', perRunner: 0.00625, flatQty: 0 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-17', perRunner: 0, flatQty: 1 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-18', perRunner: 0, flatQty: 1 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-19', perRunner: 0, flatQty: 1 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-20', perRunner: 0, flatQty: 1 },
+  { station: 'Perrys Lookdown', race: 'Marathon', sku: 'FD-21', perRunner: 0, flatQty: 1 },
+  { station: 'Blue Gum Forest', race: 'Marathon', sku: 'FD-01', perRunner: 0.75, flatQty: 0 },
+  { station: 'Blue Gum Forest', race: 'Marathon', sku: 'FD-03', perRunner: 0.011236, flatQty: 0 },
+  { station: 'Blue Gum Forest', race: 'Marathon', sku: 'FD-09', perRunner: 0, flatQty: 1 },
+  { station: 'Blue Gum Forest', race: 'Marathon', sku: 'FD-10', perRunner: 0, flatQty: 1 },
+  { station: 'Blue Gum Forest', race: 'Marathon', sku: 'FD-13', perRunner: 0.007, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-01', perRunner: 3, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-02', perRunner: 0.15, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-03', perRunner: 0.011236, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-04', perRunner: 0.8, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-05', perRunner: 0.5, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-23', perRunner: 0.5, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-06', perRunner: 0.2, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-07', perRunner: 0.1, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-08', perRunner: 0.012, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-09', perRunner: 0, flatQty: 1 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-10', perRunner: 0, flatQty: 1 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-11', perRunner: 0.055, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-12', perRunner: 0.0165, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-13', perRunner: 0.008, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-24', perRunner: 0.225, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-14', perRunner: 0.5, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-16', perRunner: 0.0175, flatQty: 0 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-17', perRunner: 0, flatQty: 1 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-18', perRunner: 0, flatQty: 1 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-19', perRunner: 0, flatQty: 1 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-20', perRunner: 0, flatQty: 1 },
+  { station: 'The Pinnacles Car Park', race: 'Marathon', sku: 'FD-21', perRunner: 0, flatQty: 1 },
 ];

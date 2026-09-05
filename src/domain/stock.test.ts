@@ -9,8 +9,7 @@ import {
   pieces,
   recordMovements,
   setQuantity,
-  shortfall,
-} from './stock';
+  shortfall, stockCsv } from './stock';
 import { recordCount, startStocktake } from './stocktake';
 import { PACKED_UNITS, UNITS, unitHasPackSize } from '../db/types';
 import type { Item } from '../db/types';
@@ -250,5 +249,32 @@ describe('proof that somebody looked', () => {
 
     // An open stocktake is an intention, not a count.
     expect(await countedItemIds()).toEqual(new Set());
+  });
+});
+
+describe('stockCsv', () => {
+  const base = {
+    id: 'x', createdAt: '', updatedAt: '', deletedAt: null, rev: 1, deviceId: 't', syncedAt: null,
+    sku: 'WAT-01', categoryId: 'water', unit: 'each' as const, packSize: 1, bin: 'A1',
+    qtyOnHand: 4, minQty: 10, barcode: null, notes: 'cubes', consumable: false, archived: false,
+  };
+
+  it('writes one row per item with the shortfall against its reorder point', () => {
+    const rows = stockCsv([{ ...base, name: 'Water cube' }], () => 'Water & Ice', new Set(['x']));
+    expect(rows[0][0]).toBe('Item');
+    expect(rows[1]).toEqual([
+      'Water cube', 'WAT-01', 'Water & Ice', 'each', '1', '4', '10', '6', 'yes', 'A1', 'cubes',
+    ]);
+  });
+
+  it('leaves the shortfall blank on stock nobody has counted', () => {
+    // Never touched by the ledger and sitting at zero: not counted, not short.
+    const rows = stockCsv(
+      [{ ...base, name: 'Water cube', qtyOnHand: 0 }],
+      () => 'Water & Ice',
+      new Set(),
+    );
+    expect(rows[1][7]).toBe('');
+    expect(rows[1][8]).toBe('no');
   });
 });
