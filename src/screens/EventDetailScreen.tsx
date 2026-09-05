@@ -7,7 +7,7 @@ import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, create, nextSort, softDelete, softDeleteChildren, update } from '../db/repo';
 import { useDestinations, useEvent } from '../hooks/useDb';
-import { applyTemplate, createPacklist, progressFor, PACKLIST_STATUS_LABELS } from '../domain/packlists';
+import { applyTemplate, createPacklist, primaryPacklist, progressFor, PACKLIST_STATUS_LABELS } from '../domain/packlists';
 import { downloadJson, exportEvent, slugify } from '../domain/backup';
 import {
   ACCESS_LABELS,
@@ -25,6 +25,7 @@ import type {
   Destination,
   DestinationType,
   EventStatus,
+  Packlist,
   PacklistStatus,
   RaceEvent,
 } from '../db/types';
@@ -61,11 +62,17 @@ export default function EventDetailScreen() {
     if (!eventId) return new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number }>();
     const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray());
     const allLines = alive(await db.packlistLines.toArray());
-    const map = new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number }>();
+    const linesOf = (packlist: Packlist) => allLines.filter((line) => line.packlistId === packlist.id);
+    const byDestination = new Map<string, Packlist[]>();
     for (const packlist of packlists) {
-      const lines = allLines.filter((line) => line.packlistId === packlist.id);
-      const progress = progressFor(lines);
-      map.set(packlist.destinationId, {
+      byDestination.set(packlist.destinationId, [...(byDestination.get(packlist.destinationId) ?? []), packlist]);
+    }
+    const map = new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number }>();
+    for (const [destinationId, candidates] of byDestination) {
+      const packlist = primaryPacklist(candidates, (entry) => linesOf(entry).length);
+      if (!packlist) continue;
+      const progress = progressFor(linesOf(packlist));
+      map.set(destinationId, {
         id: packlist.id,
         status: packlist.status,
         percent: progress.percent,

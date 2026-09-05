@@ -10,7 +10,7 @@ import { SignInPrompt } from '../components/SignInPrompt';
 import { ROLE_LABELS } from '../sync/types';
 import { isStationOnly } from '../sync/permissions';
 import { countedItemIds, isUncounted, lowStockItems } from '../domain/stock';
-import { progressFor, receiptFor } from '../domain/packlists';
+import { packlistForDestination, progressFor, receiptFor } from '../domain/packlists';
 import { daysUntil, formatDateRange, formatDateTime, plural, relativeDays } from '../domain/format';
 import { LOAD_STATUS_LABELS } from '../domain/transport';
 import type { Destination, Packlist, PacklistLine } from '../db/types';
@@ -83,9 +83,7 @@ export default function HomeScreen() {
       const destinationId = session?.scope.destinationId;
       if (!stationOnly || !destinationId) return undefined;
       const destination = await db.destinations.get(destinationId);
-      const packlist = alive(await db.packlists.toArray()).find(
-        (entry) => entry.destinationId === destinationId,
-      );
+      const packlist = await packlistForDestination(destinationId);
       const lines = packlist
         ? alive(await db.packlistLines.toArray()).filter((line) => line.packlistId === packlist.id)
         : [];

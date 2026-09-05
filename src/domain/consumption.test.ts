@@ -14,7 +14,7 @@ import {
   stationRunnersByDay,
   totalsToOrder,
 } from './consumption';
-import { addLine } from './packlists';
+import { addLine, createPacklist } from './packlists';
 import type { ConsumptionLine, Destination, Item, Race, RaceVisit } from '../db/types';
 
 async function makeEvent() {
@@ -352,6 +352,33 @@ describe('applyPlanToPacklists', () => {
     const lines = await liveWhere(db.packlistLines, 'packlistId', packlist.id);
     expect(lines.find((line) => line.itemId === gazebo.id)?.qtyRequired).toBe(2);
     expect(lines.find((line) => line.id === waterLine.id)?.note).toBe('Fill from the tank, not bottles');
+  });
+
+  it('fills the list the crew is working when a station has two', async () => {
+    const { event, station, water } = await planned();
+    // A tap on the station before its run sheet arrived left an empty list
+    // whose random id sorts ahead of the seeded one.
+    const stray = await createPacklist(station);
+    const seeded = await create(db.packlists, {
+      id: 'stw-plist-hc26-station',
+      eventId: event.id,
+      destinationId: station.id,
+      name: station.name,
+      code: 'ST-02',
+      status: 'draft',
+      packedBy: '',
+      packedAt: null,
+      deliveredAt: null,
+      receivedBy: '',
+      notes: '',
+    });
+    await addLine(seeded.id, (await makeItem('GAZ')).id, 1);
+
+    const result = await applyPlanToPacklists(event.id, [station]);
+    expect(result).toEqual({ stations: 1, created: 0, lines: 1 });
+    const onSeeded = await liveWhere(db.packlistLines, 'packlistId', seeded.id);
+    expect(onSeeded.find((line) => line.itemId === water.id)?.qtyRequired).toBe(360 + 735);
+    expect(await liveWhere(db.packlistLines, 'packlistId', stray.id)).toHaveLength(0);
   });
 
   it('skips a station whose plan computes to nothing', async () => {
