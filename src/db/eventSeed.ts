@@ -49,11 +49,11 @@ export const EVENT_SEED: SeedEvent[] = [
     status: 'packing',
     notes:
       'Village at Allview Escape, 415–419 Hat Hill Rd. Marathon Sat 6:15 am (overall cutoff 8:00 pm), ' +
-      '17k Sun, kids race Sun. Projections from the HC 2026 consumption planner.',
+      '17k Sun, kids race Sat. Projections from the HC 2026 consumption planner.',
     races: [
       { name: 'Marathon', projection: 450, day: '2026-09-12' },
       { name: '17k', projection: 612, day: '2026-09-13' },
-      { name: 'Kids', projection: 80, day: '2026-09-13' },
+      { name: 'Kids', projection: 80, day: '2026-09-12' },
     ],
     destinations: [
       {

@@ -393,13 +393,13 @@ describe('the Hounslow starting packlists and food plan', () => {
     const SAT = '2026-09-12';
     const SUN = '2026-09-13';
 
-    // Straight off the sheet's per-day station totals (kids moved to Sunday).
+    // Straight off the sheet's per-day station totals: marathon and kids Saturday, 17k Sunday.
     expect(onDay('Grand Canyon Carpark', 'FD-01', SAT)).toBe(360); // marathon water
     expect(onDay('Grand Canyon Carpark', 'FD-01', SUN)).toBe(735); // 17k water
     expect(onDay('Grand Canyon Carpark', 'FD-05', SAT)).toBe(45); // coke, 0.1 for the marathon
     expect(onDay('Grand Canyon Carpark', 'FD-05', SUN)).toBe(202); // coke, 0.33 for the 17k
-    expect(onDay('Allview Escape', 'FD-01', SAT)).toBe(1800); // marathon twice
-    expect(onDay('Allview Escape', 'FD-01', SUN)).toBe(1224 + 80); // 17k + kids
+    expect(onDay('Allview Escape', 'FD-01', SAT)).toBe(1800 + 80); // marathon twice + kids
+    expect(onDay('Allview Escape', 'FD-01', SUN)).toBe(1224); // 17k
     expect(onDay('Perrys Lookdown', 'FD-01', SAT)).toBe(2250);
     expect(onDay('Perrys Lookdown', 'FD-01', SUN)).toBe(0); // Perrys is Saturday only
     expect(onDay('Perrys Lookdown', 'FD-24', SAT)).toBe(120); // potatoes, two passes averaged
@@ -413,7 +413,25 @@ describe('the Hounslow starting packlists and food plan', () => {
     const races = alive(await db.races.toArray()).filter((race) => race.name === 'Marathon' || race.name === '17k' || race.name === 'Kids');
     expect(races.find((race) => race.name === 'Marathon')?.day).toBe('2026-09-12');
     expect(races.find((race) => race.name === '17k')?.day).toBe('2026-09-13');
-    expect(races.find((race) => race.name === 'Kids')?.day).toBe('2026-09-13');
+    expect(races.find((race) => race.name === 'Kids')?.day).toBe('2026-09-12');
+  });
+
+  it('corrects a seeded race day on a race nobody has touched, and leaves an edited one', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    const races = alive(await db.races.toArray());
+    const kids = races.find((race) => race.name === 'Kids')!;
+    const marathon = races.find((race) => race.name === 'Marathon')!;
+    // As an earlier build seeded it, untouched: wrong day, still revision 1.
+    await db.races.put({ ...kids, day: '2026-09-13', rev: 1 });
+    // As the crew set it, deliberately: a different day at a later revision.
+    await db.races.put({ ...marathon, day: '2026-09-13', rev: 4 });
+
+    await ensureSeeded();
+
+    expect((await db.races.get(kids.id))?.day).toBe('2026-09-12');
+    expect((await db.races.get(marathon.id))?.day).toBe('2026-09-13');
   });
 
   it('retires an untouched rule from the old one-per-station seed, but keeps an edited one', async () => {
