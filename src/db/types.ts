@@ -213,6 +213,11 @@ export interface Race extends SyncMeta {
   /** Expected starters. A projection, not entries — set it before entries close. */
   projection: number;
   sort: number;
+  /**
+   * The date this race runs (YYYY-MM-DD), for a weekend that splits its food
+   * by day. Absent means unset; the plan then reads as one day.
+   */
+  day?: string | null;
 }
 
 /**
@@ -233,6 +238,12 @@ export interface ConsumptionLine extends SyncMeta {
   flatQty: number;
   note: string;
   sort: number;
+  /**
+   * Which race this rule counts, or absent/null for every race through the
+   * station. A marathon field eats differently from a 17k field at the same
+   * table, and the planning sheets always kept them apart.
+   */
+  raceId?: string | null;
 }
 
 /* -------------------------------------------------------------- packlists -- */

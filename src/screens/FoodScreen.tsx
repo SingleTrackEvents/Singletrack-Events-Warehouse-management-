@@ -18,21 +18,29 @@ import {
 import {
   applyPlanToPacklists,
   addPlanItems,
-  lineQty,
+  copyRuleForRace,
+  dayLabel,
+  dayShort,
+  eventDays,
+  lineQtyByDay,
+  sortDays,
   stationRunners,
+  stationRunnersByDay,
+  stationVisits,
   totalsToOrder,
 } from '../domain/consumption';
 import { downloadCsv, slugify } from '../domain/backup';
 import { DESTINATION_ICONS, formatQty, plural } from '../domain/format';
-import type { ConsumptionLine, Destination, Race, RaceVisit } from '../db/types';
+import type { ConsumptionLine, Destination, Race, RaceEvent, RaceVisit } from '../db/types';
 
 /**
  * The food plan: projections in, shopping list and aid station quantities out.
  *
  * Everything on this screen is a rule rather than a number — races carry
- * projected fields, stations carry ratios — so when a projection moves a
- * fortnight out, every station and the order list move with it. The computed
- * quantities land on the packlists, which is where packing already happens.
+ * projected fields and the day they run, stations carry ratios per race — so
+ * when a projection moves a fortnight out, every station and the order list
+ * move with it, and a two-day weekend reads as Saturday and Sunday. The
+ * computed quantities land on the packlists, which is where packing happens.
  */
 export default function FoodScreen() {
   const { eventId } = useParams();
@@ -52,23 +60,19 @@ export default function FoodScreen() {
   const [working, setWorking] = useState(false);
 
   const itemById = useMemo(() => byId(items ?? []), [items]);
-  const runnersByDestination = useMemo(
-    () =>
-      new Map(
-        (destinations ?? []).map((destination) => [
-          destination.id,
-          stationRunners(destination, races ?? []),
-        ]),
-      ),
-    [destinations, races],
-  );
   const totals = useMemo(
-    () => totalsToOrder(lines ?? [], runnersByDestination, items ?? []),
-    [lines, runnersByDestination, items],
+    () => totalsToOrder(lines ?? [], destinations ?? [], races ?? [], items ?? []),
+    [lines, destinations, races, items],
   );
   const projected = (races ?? []).reduce((sum, race) => sum + race.projection, 0);
   const shortfalls = totals.filter((total) => total.toOrder > 0);
   const plannedStations = new Set((lines ?? []).map((line) => line.destinationId)).size;
+  // Once any race carries a date the whole plan reads by day.
+  const hasDays = (races ?? []).some((race) => race.day);
+  const days = useMemo(
+    () => sortDays(totals.flatMap((total) => total.byDay.map(([day]) => day))),
+    [totals],
+  );
 
   if (!event) {
     return (
@@ -78,25 +82,36 @@ export default function FoodScreen() {
     );
   }
 
-  const raceSummary = (destination: Destination) => {
-    const named = (destination.raceVisits ?? [])
-      .map((visit) => {
-        const race = (races ?? []).find((entry) => entry.id === visit.raceId);
-        if (!race) return null;
-        return visit.passes > 1 ? `${race.name} ×${visit.passes}` : race.name;
-      })
-      .filter(Boolean);
-    return named.join(', ');
+  const raceName = (raceId: string | null | undefined) =>
+    (races ?? []).find((race) => race.id === raceId)?.name;
+
+  const raceSummary = (destination: Destination) =>
+    stationVisits(destination, races ?? [])
+      .map((visit) => (visit.passes > 1 ? `${visit.race.name} ×${visit.passes}` : visit.race.name))
+      .join(', ');
+
+  const runnersLabel = (destination: Destination) => {
+    if (!hasDays) return `${stationRunners(destination, races ?? [])} through`;
+    const byDay = stationRunnersByDay(destination, races ?? []);
+    if (!byDay.length) return '0 through';
+    return byDay.map(([day, runners]) => `${dayShort(day)} ${runners}`).join(' · ');
   };
 
+  const splitLabel = (byDay: Array<[string | null, number]>) =>
+    byDay.map(([day, qty]) => `${dayShort(day)} ${qty}`).join(' · ');
+
   const exportOrder = () => {
+    const dayColumns = hasDays ? days.map((day) => dayLabel(day)) : [];
     downloadCsv(
       [
-        ['Item', 'Unit', 'Needed', 'On hand', 'To order'],
+        ['Item', 'Unit', 'Needed', ...dayColumns, 'On hand', 'To order'],
         ...totals.map((total) => [
           total.item.name,
           total.item.unit,
           String(total.total),
+          ...(hasDays
+            ? days.map((day) => String(total.byDay.find(([when]) => when === day)?.[1] ?? 0))
+            : []),
           String(total.onHand),
           String(total.toOrder),
         ]),
@@ -120,6 +135,8 @@ export default function FoodScreen() {
         (result.created ? `, ${result.created} created` : ''),
     );
   };
+
+  const dayOptions = eventDays(event);
 
   return (
     <Screen title="Food plan" subtitle={event.name} back={`/events/${event.id}`}>
@@ -150,7 +167,26 @@ export default function FoodScreen() {
             <div key={race.id} className="row row-static">
               <span className="row-body">
                 <span className="row-title">{race.name}</span>
-                <span className="row-sub">projected starters</span>
+                {dayOptions.length > 1 ? (
+                  <select
+                    className="select"
+                    style={{ marginTop: 4, minHeight: 36, padding: '4px 8px', fontSize: 'var(--text-sm)' }}
+                    aria-label={`${race.name} day`}
+                    value={race.day ?? ''}
+                    onChange={(changed) =>
+                      void update(db.races, race.id, { day: changed.target.value || null })
+                    }
+                  >
+                    <option value="">Day not set</option>
+                    {dayOptions.map((day) => (
+                      <option key={day} value={day}>
+                        {dayLabel(day)}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="row-sub">projected starters</span>
+                )}
               </span>
               <span className="row-end">
                 <Stepper
@@ -180,6 +216,12 @@ export default function FoodScreen() {
             </div>
           ) : null}
         </div>
+        {dayOptions.length > 1 && !hasDays ? (
+          <p className="tiny muted mt-2">
+            Give each race its day and every station and the order list split into Saturday and
+            Sunday.
+          </p>
+        ) : null}
       </section>
 
       {/* --------------------------------------------------------- stations */}
@@ -202,18 +244,18 @@ export default function FoodScreen() {
         ) : null}
 
         {(destinations ?? []).map((destination) => {
-          const runners = runnersByDestination.get(destination.id) ?? 0;
           const stationLines = (lines ?? []).filter(
             (line) => line.destinationId === destination.id,
           );
           const linked = raceSummary(destination);
+          const through = stationRunners(destination, races ?? []);
           return (
             <div key={destination.id} className="card card-pad mb-3">
               <div className="spread mb-2">
                 <span className="strong">
                   {DESTINATION_ICONS[destination.type]} {destination.name}
                 </span>
-                <Pill tone={runners ? 'info' : 'default'}>{runners} through</Pill>
+                <Pill tone={through ? 'info' : 'default'}>{runnersLabel(destination)}</Pill>
               </div>
               <button
                 type="button"
@@ -227,10 +269,15 @@ export default function FoodScreen() {
                 {stationLines.map((line) => {
                   const item = itemById.get(line.itemId);
                   if (!item) return null;
+                  const scope = line.raceId ? raceName(line.raceId) : null;
                   const parts = [
-                    line.perRunner > 0 ? `${trimRatio(line.perRunner)} per runner` : null,
+                    line.perRunner > 0
+                      ? `${trimRatio(line.perRunner)} per ${scope ? `${scope} ` : ''}runner`
+                      : null,
                     line.flatQty > 0 ? `${formatQty(line.flatQty, item.unit)} flat` : null,
                   ].filter(Boolean);
+                  const byDay = lineQtyByDay(line, destination, races ?? []);
+                  const total = byDay.reduce((sum, [, qty]) => sum + qty, 0);
                   return (
                     <button
                       key={line.id}
@@ -239,11 +286,19 @@ export default function FoodScreen() {
                       onClick={() => setEditingLine(line)}
                     >
                       <span className="row-body">
-                        <span className="row-title">{item.name}</span>
+                        <span className="row-title">
+                          {item.name}
+                          {scope ? <span className="muted"> · {scope}</span> : null}
+                        </span>
                         <span className="row-sub">{parts.join(' + ') || 'No rule yet — tap to set'}</span>
                       </span>
-                      <span className="row-end strong">
-                        {formatQty(lineQty(line, runners), item.unit)}
+                      <span className="row-end">
+                        <span className="strong">{formatQty(total, item.unit)}</span>
+                        {hasDays && byDay.length ? (
+                          <span className="tiny muted" style={{ display: 'block' }}>
+                            {splitLabel(byDay)}
+                          </span>
+                        ) : null}
                       </span>
                     </button>
                   );
@@ -277,7 +332,8 @@ export default function FoodScreen() {
                 <span className="row-body">
                   <span className="row-title">{total.item.name}</span>
                   <span className="row-sub">
-                    needs {formatQty(total.total, total.item.unit)} ·{' '}
+                    needs {formatQty(total.total, total.item.unit)}
+                    {hasDays && total.byDay.length > 1 ? ` (${splitLabel(total.byDay)})` : ''} ·{' '}
                     {formatQty(total.onHand, total.item.unit)} on hand
                   </span>
                 </span>
@@ -294,7 +350,7 @@ export default function FoodScreen() {
           {shortfalls.length ? (
             <p className="tiny muted mt-2">
               {plural(shortfalls.length, 'item')} short of the plan. The CSV is the list to take to
-              the supplier.
+              the supplier{hasDays ? ', with a column per day' : ''}.
             </p>
           ) : null}
         </section>
@@ -315,13 +371,13 @@ export default function FoodScreen() {
 
       {/* ----------------------------------------------------------- sheets */}
       {addingRace ? (
-        <RaceSheet eventId={event.id} existing={races ?? []} onClose={() => setAddingRace(false)} />
+        <RaceSheet event={event} existing={races ?? []} onClose={() => setAddingRace(false)} />
       ) : null}
 
       {removingRace ? (
         <ConfirmSheet
           title={`Remove the ${removingRace.name}?`}
-          body="Stations linked to it fall back to their other races. Nothing on any packlist changes until quantities are sent again."
+          body="Stations linked to it fall back to their other races, and rules written for it alone go with it. Nothing on any packlist changes until quantities are sent again."
           confirmLabel="Remove"
           tone="danger"
           onCancel={() => setRemovingRace(undefined)}
@@ -338,6 +394,9 @@ export default function FoodScreen() {
                     raceVisits: destination.raceVisits.filter((visit) => visit.raceId !== race.id),
                   });
                 }
+              }
+              for (const line of (lines ?? []).filter((entry) => entry.raceId === race.id)) {
+                await softDelete(db.consumptionLines, line.id);
               }
               toast('Race removed');
             })();
@@ -379,7 +438,14 @@ export default function FoodScreen() {
         <LineSheet
           line={editingLine}
           itemName={itemById.get(editingLine.itemId)?.name ?? 'Item'}
-          runners={runnersByDestination.get(editingLine.destinationId) ?? 0}
+          destination={(destinations ?? []).find((entry) => entry.id === editingLine.destinationId)}
+          races={races ?? []}
+          siblings={(lines ?? []).filter(
+            (entry) =>
+              entry.destinationId === editingLine.destinationId &&
+              entry.itemId === editingLine.itemId,
+          )}
+          hasDays={hasDays}
           onClose={() => setEditingLine(undefined)}
         />
       ) : null}
@@ -391,8 +457,8 @@ export default function FoodScreen() {
             <>
               Each station&rsquo;s computed quantities become the required amounts on its packlist —
               a packlist is created where a station has none. Planned items are set to today&rsquo;s
-              numbers; anything added to a packlist by hand is left alone. Safe to run again after a
-              projection changes.
+              numbers{hasDays ? ', with the day split written into the line note' : ''}; anything
+              added to a packlist by hand is left alone. Safe to run again after a projection changes.
             </>
           }
           confirmLabel={working ? 'Sending…' : 'Send'}
@@ -410,27 +476,31 @@ function trimRatio(value: number): string {
   return String(Math.round(value * 100000) / 100000);
 }
 
-/** Add a race distance and its projected field. */
+/** Add a race distance, its projected field and the day it runs. */
 function RaceSheet({
-  eventId,
+  event,
   existing,
   onClose,
 }: {
-  eventId: string;
+  event: RaceEvent;
   existing: Race[];
   onClose: () => void;
 }) {
   const toast = useToast();
+  const dayOptions = eventDays(event);
   const [name, setName] = useState('');
   const [projection, setProjection] = useState(100);
+  // A one-day event needs no asking; a weekend leaves it open until told.
+  const [day, setDay] = useState(dayOptions.length === 1 ? dayOptions[0] : '');
 
   const save = async () => {
     if (!name.trim()) return;
     await create(db.races, {
-      eventId,
+      eventId: event.id,
       name: name.trim(),
       projection,
       sort: nextSort(existing),
+      day: day || null,
     });
     toast('Race added');
     onClose();
@@ -465,7 +535,7 @@ function RaceSheet({
               autoFocus
               value={name}
               placeholder="50k"
-              onChange={(event) => setName(event.target.value)}
+              onChange={(changed) => setName(changed.target.value)}
             />
           )}
         </Field>
@@ -476,6 +546,20 @@ function RaceSheet({
             </span>
           )}
         </Field>
+        {dayOptions.length > 1 ? (
+          <Field label="Runs on" hint="Splits every station and the order list by day.">
+            {(id) => (
+              <select id={id} className="select" value={day} onChange={(changed) => setDay(changed.target.value)}>
+                <option value="">Not set</option>
+                {dayOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {dayLabel(option)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        ) : null}
       </div>
     </Sheet>
   );
@@ -538,7 +622,9 @@ function StationRacesSheet({
           <div key={race.id} className="row row-static">
             <span className="row-body">
               <span className="row-title">{race.name}</span>
-              <span className="row-sub">{race.projection} projected</span>
+              <span className="row-sub">
+                {race.projection} projected{race.day ? ` · ${dayLabel(race.day)}` : ''}
+              </span>
             </span>
             <span className="row-end">
               <Stepper
@@ -562,29 +648,48 @@ function StationRacesSheet({
   );
 }
 
-/** Edit one consumption rule: the per-runner ratio and the flat amount. */
+/**
+ * Edit one consumption rule: what it applies to, the per-runner ratio and the
+ * flat amount — and add a sibling rule for another race, because the marathon
+ * field and the 17k field do not drink the same amount of coke.
+ */
 function LineSheet({
   line,
   itemName,
-  runners,
+  destination,
+  races,
+  siblings,
+  hasDays,
   onClose,
 }: {
   line: ConsumptionLine;
   itemName: string;
-  runners: number;
+  destination: Destination | undefined;
+  races: Race[];
+  siblings: ConsumptionLine[];
+  hasDays: boolean;
   onClose: () => void;
 }) {
   const toast = useToast();
+  const [raceId, setRaceId] = useState<string>(line.raceId ?? '');
   const [perRunner, setPerRunner] = useState(line.perRunner ? String(line.perRunner) : '');
   const [flatQty, setFlatQty] = useState(line.flatQty);
   const [removing, setRemoving] = useState(false);
+  const [copyFor, setCopyFor] = useState('');
 
   const parsed = Number(perRunner);
   const ratio = perRunner.trim() && Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  const preview = lineQty({ ...line, perRunner: ratio, flatQty }, runners);
+  const draft: ConsumptionLine = { ...line, perRunner: ratio, flatQty, raceId: raceId || null };
+  const visits = destination ? stationVisits(destination, races) : [];
+  const byDay = destination ? lineQtyByDay(draft, destination, races) : [];
+  const preview = byDay.reduce((sum, [, qty]) => sum + qty, 0);
+  // Races through this station that have no rule of their own for this item yet.
+  const uncovered = visits
+    .map((visit) => visit.race)
+    .filter((race) => race.id !== (raceId || null) && !siblings.some((entry) => entry.raceId === race.id));
 
   const save = async () => {
-    await update(db.consumptionLines, line.id, { perRunner: ratio, flatQty });
+    await update(db.consumptionLines, line.id, { perRunner: ratio, flatQty, raceId: raceId || null });
     toast('Rule saved');
     onClose();
   };
@@ -605,9 +710,26 @@ function LineSheet({
       }
     >
       <div className="stack">
+        {visits.length ? (
+          <Field
+            label="Counts"
+            hint="One rule for every race through the station, or one per race where the fields eat differently."
+          >
+            {(id) => (
+              <select id={id} className="select" value={raceId} onChange={(changed) => setRaceId(changed.target.value)}>
+                <option value="">Every race through here</option>
+                {visits.map((visit) => (
+                  <option key={visit.race.id} value={visit.race.id}>
+                    {visit.race.name} only{visit.race.day ? ` · ${dayLabel(visit.race.day)}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        ) : null}
         <Field
           label="Per runner"
-          hint="Units of this item per runner through the station — 0.2 means one between five. Leave 0 for things that don't scale."
+          hint="Units of this item per runner — 0.2 means one between five. Leave 0 for things that don't scale."
         >
           {(id) => (
             <input
@@ -616,7 +738,7 @@ function LineSheet({
               inputMode="decimal"
               value={perRunner}
               placeholder="0.2"
-              onChange={(event) => setPerRunner(event.target.value)}
+              onChange={(changed) => setPerRunner(changed.target.value)}
             />
           )}
         </Field>
@@ -628,9 +750,49 @@ function LineSheet({
           )}
         </Field>
         <p className="small">
-          With <span className="strong">{runners}</span> through:{' '}
-          <span className="strong">{preview}</span> needed here.
+          <span className="strong">{preview}</span> needed here
+          {hasDays && byDay.length > 1
+            ? ` — ${byDay.map(([day, qty]) => `${dayShort(day)} ${qty}`).join(', ')}`
+            : ''}
+          .
         </p>
+
+        {uncovered.length ? (
+          <div className="card card-pad">
+            <p className="small strong">Another rule for a different race</p>
+            <p className="tiny muted mb-2">
+              Starts from this ratio, without the flat amount, so a shaker is not doubled.
+            </p>
+            <div className="row-flex">
+              <select
+                className="select grow"
+                aria-label="Race for the new rule"
+                value={copyFor}
+                onChange={(changed) => setCopyFor(changed.target.value)}
+              >
+                <option value="">Pick a race…</option>
+                {uncovered.map((race) => (
+                  <option key={race.id} value={race.id}>
+                    {race.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled={!copyFor}
+                onClick={() => {
+                  void copyRuleForRace(draft, copyFor).then(() => {
+                    toast(`Rule added for the ${races.find((race) => race.id === copyFor)?.name ?? 'race'}`);
+                    onClose();
+                  });
+                }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {removing ? (

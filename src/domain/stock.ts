@@ -166,3 +166,38 @@ export const MOVEMENT_LABELS: Record<MovementReason, string> = {
 
 /** Timestamp helper re-exported so screens do not reach into the db module. */
 export { nowIso };
+
+/**
+ * The stock list as a spreadsheet, for whoever does the ordering.
+ *
+ * One row per item as the screen shows it — the same filters apply, so the
+ * Low view exports as an order list. "Counted" is carried because a zero on
+ * an item nobody has walked past yet is not a zero, and a supplier order
+ * built off it would be wrong twice.
+ */
+export function stockCsv(
+  items: Item[],
+  categoryName: (categoryId: string | null) => string,
+  itemsWithMovements: ReadonlySet<string>,
+): string[][] {
+  const rows: string[][] = [
+    ['Item', 'SKU', 'Category', 'Unit', 'Pack size', 'On hand', 'Reorder at', 'Short by', 'Counted', 'Bin', 'Notes'],
+  ];
+  for (const item of items) {
+    const counted = !isUncounted(item, itemsWithMovements);
+    rows.push([
+      item.name,
+      item.sku,
+      categoryName(item.categoryId),
+      item.unit,
+      String(item.packSize),
+      String(item.qtyOnHand),
+      String(item.minQty),
+      String(counted ? shortfall(item) : ''),
+      counted ? 'yes' : 'no',
+      item.bin,
+      item.notes,
+    ]);
+  }
+  return rows;
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { db, getSettings } from './db';
 import { alive, softDelete, update } from './repo';
 import { ensureSeeded, seedStarterData } from './seed';
-import { lineQty, stationRunners } from '../domain/consumption';
+import { lineQtyByDay } from '../domain/consumption';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { EVENT_SEED } from './eventSeed';
 import { EXTRA_ITEMS } from './extrasCatalogue';
@@ -369,7 +369,7 @@ describe('the Hounslow starting packlists and food plan', () => {
     expect(line?.qtyRequired).toBe(17);
   });
 
-  it('reproduces the consumption sheet totals at its projections', async () => {
+  it('reproduces the consumption sheet, station by station and day by day', async () => {
     await seedStarterData();
 
     const events = alive(await db.events.toArray());
@@ -381,24 +381,62 @@ describe('the Hounslow starting packlists and food plan', () => {
     const lines = alive(await db.consumptionLines.toArray());
     const bySku = new Map(alive(await db.items.toArray()).map((item) => [item.id, item.sku]));
 
-    const expect_ = (station: string, sku: string, total: number) => {
+    // Every rule for an item at a station, added up per day.
+    const onDay = (station: string, sku: string, day: string) => {
       const destination = destinations.find((entry) => entry.name === station)!;
-      const runners = stationRunners(destination, races);
-      const line = lines.find(
-        (entry) => entry.destinationId === destination.id && bySku.get(entry.itemId) === sku,
-      )!;
-      expect(lineQty(line, runners), `${station} ${sku}`).toBe(total);
+      return lines
+        .filter((line) => line.destinationId === destination.id && bySku.get(line.itemId) === sku)
+        .flatMap((line) => lineQtyByDay(line, destination, races))
+        .filter(([when]) => when === day)
+        .reduce((sum, [, qty]) => sum + qty, 0);
     };
+    const SAT = '2026-09-12';
+    const SUN = '2026-09-13';
 
-    // Spot checks straight off the sheet's per-station totals (Sat + Sun).
-    expect_('Perrys Lookdown', 'FD-01', 2250); // water
-    expect_('Grand Canyon Carpark', 'FD-01', 1095);
-    expect_('Grand Canyon Carpark', 'FD-04', 850); // gels
-    expect_('Allview Escape', 'FD-23', 682); // ginger beer
-    expect_('The Pinnacles Car Park', 'FD-14', 225); // noodles
-    expect_('The Pinnacles Car Park', 'FD-24', 102); // boiled potatoes
-    expect_('Blue Gum Forest', 'FD-01', 338);
-    expect_('Perrys Lookdown', 'FD-09', 2); // salt shakers, flat
+    // Straight off the sheet's per-day station totals (kids moved to Sunday).
+    expect(onDay('Grand Canyon Carpark', 'FD-01', SAT)).toBe(360); // marathon water
+    expect(onDay('Grand Canyon Carpark', 'FD-01', SUN)).toBe(735); // 17k water
+    expect(onDay('Grand Canyon Carpark', 'FD-05', SAT)).toBe(45); // coke, 0.1 for the marathon
+    expect(onDay('Grand Canyon Carpark', 'FD-05', SUN)).toBe(202); // coke, 0.33 for the 17k
+    expect(onDay('Allview Escape', 'FD-01', SAT)).toBe(1800); // marathon twice
+    expect(onDay('Allview Escape', 'FD-01', SUN)).toBe(1224 + 80); // 17k + kids
+    expect(onDay('Perrys Lookdown', 'FD-01', SAT)).toBe(2250);
+    expect(onDay('Perrys Lookdown', 'FD-01', SUN)).toBe(0); // Perrys is Saturday only
+    expect(onDay('Perrys Lookdown', 'FD-24', SAT)).toBe(120); // potatoes, two passes averaged
+    expect(onDay('The Pinnacles Car Park', 'FD-14', SAT)).toBe(225); // noodles
+    expect(onDay('Blue Gum Forest', 'FD-01', SAT)).toBe(338);
+    expect(onDay('Perrys Lookdown', 'FD-09', SAT)).toBe(2); // salt, flat, both passes
+  });
+
+  it('dates the Hounslow races so the plan splits by day', async () => {
+    await seedStarterData();
+    const races = alive(await db.races.toArray()).filter((race) => race.name === 'Marathon' || race.name === '17k' || race.name === 'Kids');
+    expect(races.find((race) => race.name === 'Marathon')?.day).toBe('2026-09-12');
+    expect(races.find((race) => race.name === '17k')?.day).toBe('2026-09-13');
+    expect(races.find((race) => race.name === 'Kids')?.day).toBe('2026-09-13');
+  });
+
+  it('retires an untouched rule from the old one-per-station seed, but keeps an edited one', async () => {
+    await seedStarterData();
+    const settings = await getSettings();
+    await update(db.settings, settings.id, { seeded: true });
+    const hounslow = alive(await db.events.toArray()).find((event) => event.name.startsWith('Hounslow'))!;
+    const perrys = alive(await db.destinations.toArray()).find((entry) => entry.name === 'Perrys Lookdown')!;
+    const water = alive(await db.items.toArray()).find((item) => item.sku === 'FD-01')!;
+    const tongs = alive(await db.items.toArray()).find((item) => item.sku === 'FD-02')!;
+    // Two rules as the earlier build seeded them: one untouched, one the crew edited.
+    const legacy = (sku: string, itemId: string, rev: number) => ({
+      id: `stw-cline-hc26-perrys-lookdown-${sku.toLowerCase()}`,
+      createdAt: '', updatedAt: '', deletedAt: null, rev, deviceId: 't', syncedAt: null,
+      eventId: hounslow.id, destinationId: perrys.id, itemId, perRunner: 2.5, flatQty: 0, note: '', sort: 10,
+    });
+    await db.consumptionLines.put(legacy('FD-01', water.id, 1));
+    await db.consumptionLines.put(legacy('FD-02', tongs.id, 3));
+
+    await ensureSeeded();
+
+    expect((await db.consumptionLines.get('stw-cline-hc26-perrys-lookdown-fd-01'))?.deletedAt).not.toBeNull();
+    expect((await db.consumptionLines.get('stw-cline-hc26-perrys-lookdown-fd-02'))?.deletedAt).toBeNull();
   });
 
   it('lands the food on the food plan, not pre-packed onto the lists', async () => {

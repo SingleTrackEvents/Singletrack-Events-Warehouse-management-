@@ -9,8 +9,9 @@ import { useSearch } from '../hooks/useSearch';
 import { db } from '../db/db';
 import { create, update } from '../db/repo';
 import { useCategories, useItems } from '../hooks/useDb';
-import { isLowStock, isUncounted, countedItemIds } from '../domain/stock';
+import { isLowStock, isUncounted, countedItemIds, stockCsv } from '../domain/stock';
 import { formatQtyDetail, plural } from '../domain/format';
+import { downloadCsv } from '../domain/backup';
 import { suggestSku } from '../domain/skus';
 import { PackSizeField } from '../components/PackSizeField';
 import { CategoryPicker } from '../components/CategoryPicker';
@@ -196,6 +197,34 @@ export default function StockScreen() {
           }
         />
       )}
+
+      {matches.length ? (
+        <div className="btn-row mt-3 no-print">
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => {
+              // What is on screen is what goes in the file, filters included,
+              // so the Low view exports as an order list.
+              const categoryName = (id: string | null) =>
+                categories?.find((category) => category.id === id)?.name ?? '';
+              const stem = [
+                'stock',
+                activeCategory ? activeCategory.name : '',
+                lowOnly ? 'low' : '',
+              ]
+                .filter(Boolean)
+                .join('-')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-');
+              downloadCsv(stockCsv(matches, categoryName, counted), `${stem}.csv`);
+              toast(`${plural(matches.length, 'item')} saved to downloads`);
+            }}
+          >
+            ⬇ CSV{filtered ? ' (this view)' : ''}
+          </button>
+        </div>
+      ) : null}
 
       <div className="mt-4">
         <Link to="/stocktake" className="btn btn-outline btn-block">

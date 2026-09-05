@@ -1,5 +1,5 @@
 import { db, getSettings, SYNCED_TABLES } from './db';
-import { create, createMany, update } from './repo';
+import { create, createMany, softDelete, update } from './repo';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { EVENT_SEED } from './eventSeed';
 import { EXTRA_ITEMS } from './extrasCatalogue';
@@ -315,6 +315,7 @@ export async function seedStarterData(
           name: race.name,
           projection: race.projection,
           sort: (index + 1) * 10,
+          day: race.day ?? null,
         });
       }
     }
@@ -407,9 +408,24 @@ export async function seedStarterData(
     }
   }
 
+  // An earlier build seeded one rule per station with ratios derived across
+  // both days. Those are retired where nobody has touched them (still at
+  // revision 1), so the per-race rules below do not double the plan; an
+  // edited rule is the crew's and stays.
+  const retired = new Set<string>();
+  for (const line of HOUNSLOW_CONSUMPTION) {
+    const legacyId = seedId('cline', `hc26-${line.station}-${line.sku}`);
+    if (retired.has(legacyId)) continue;
+    retired.add(legacyId);
+    const legacy = await db.consumptionLines.get(legacyId);
+    if (legacy && !legacy.deletedAt && legacy.rev === 1) {
+      await softDelete(db.consumptionLines, legacyId);
+    }
+  }
+
   let consumptionSort = 10;
   for (const line of HOUNSLOW_CONSUMPTION) {
-    const lineId = seedId('cline', `hc26-${line.station}-${line.sku}`);
+    const lineId = seedId('cline', `hc26-${line.station}-${line.race}-${line.sku}`);
     const item = bySku.get(line.sku);
     if (item && isNew(lineId)) {
       await create(db.consumptionLines, {
@@ -421,6 +437,7 @@ export async function seedStarterData(
         flatQty: line.flatQty,
         note: '',
         sort: consumptionSort,
+        raceId: seedId('race', `hc26-${line.race}`),
       });
     }
     consumptionSort += 10;
