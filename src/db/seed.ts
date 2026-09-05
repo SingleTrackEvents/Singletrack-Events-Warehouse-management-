@@ -317,6 +317,13 @@ export async function seedStarterData(
           sort: (index + 1) * 10,
           day: race.day ?? null,
         });
+      } else {
+        // A seeded day that was wrong at the time is corrected on a race nobody
+        // has touched (still at revision 1). One the crew has edited is theirs.
+        const existing = await db.races.get(raceId);
+        if (existing && !existing.deletedAt && existing.rev === 1 && (existing.day ?? null) !== (race.day ?? null)) {
+          await update(db.races, raceId, { day: race.day ?? null });
+        }
       }
     }
 
