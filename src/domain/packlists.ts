@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { create, createMany, liveWhere, nextSort, softDelete, update } from '../db/repo';
+import { alive, create, createMany, liveWhere, nextSort, softDelete, update } from '../db/repo';
 import type { Destination, Packlist, PacklistLine, PacklistStatus, Template, TemplateLine } from '../db/types';
 import { makeCode } from './codes';
 import { recordMovements, round2 } from './stock';
@@ -112,6 +112,40 @@ export function receiptFor(lines: PacklistLine[]): Progress {
 }
 
 /** Create an empty packlist for a destination, with its QR short code. */
+/**
+ * The list a station is actually run from, when it has more than one.
+ *
+ * A station picks up a second list when someone opened it before its seeded
+ * run sheet arrived, or two phones opened it offline and both synced. The
+ * one with lines on it is the one the crew is working; between two with
+ * lines, the one furthest along, then the most recently touched. Every path
+ * from a station to its list resolves here, so the list the food plan fills
+ * is the list the event screen opens.
+ */
+export function primaryPacklist(
+  packlists: Packlist[],
+  lineCount: (packlist: Packlist) => number,
+): Packlist | undefined {
+  return [...packlists].sort(
+    (a, b) =>
+      Math.sign(lineCount(b)) - Math.sign(lineCount(a)) ||
+      statusIndex(b.status) - statusIndex(a.status) ||
+      lineCount(b) - lineCount(a) ||
+      b.updatedAt.localeCompare(a.updatedAt),
+  )[0];
+}
+
+/** The station's working list, per `primaryPacklist`; undefined when it has none. */
+export async function packlistForDestination(destinationId: string): Promise<Packlist | undefined> {
+  const packlists = alive(await db.packlists.where('destinationId').equals(destinationId).toArray());
+  if (packlists.length <= 1) return packlists[0];
+  const counts = new Map<string, number>();
+  for (const packlist of packlists) {
+    counts.set(packlist.id, (await liveWhere(db.packlistLines, 'packlistId', packlist.id)).length);
+  }
+  return primaryPacklist(packlists, (packlist) => counts.get(packlist.id) ?? 0);
+}
+
 export async function createPacklist(
   destination: Destination,
   name?: string,

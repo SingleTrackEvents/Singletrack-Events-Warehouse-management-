@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { db } from '../db/db';
-import { create, createMany, liveWhere, update } from '../db/repo';
+import { create, createMany, liveWhere, softDelete, update } from '../db/repo';
 import {
   addLine,
   applyTemplate,
@@ -10,11 +10,13 @@ import {
   hasIssued,
   nextStatus,
   outstanding,
+  packlistForDestination,
+  primaryPacklist,
   progressFor,
   setStatus,
   templateLineQty,
 } from './packlists';
-import type { Destination, Item, PacklistLine, Template } from '../db/types';
+import type { Destination, Item, Packlist, PacklistLine, Template } from '../db/types';
 
 async function makeItem(sku: string, qtyOnHand = 100) {
   return create(db.items, {
@@ -409,5 +411,81 @@ describe('starting a list again', () => {
     const kept = await db.packlistLines.get(line.id);
     expect(kept?.qtyReceived).toBe(1);
     expect(kept?.note).toBe('keep me');
+  });
+});
+
+describe('the list a station is run from', () => {
+  const list = (id: string, status: Packlist['status'], updatedAt: string): Packlist => ({
+    id,
+    eventId: 'e',
+    destinationId: 'd',
+    name: 'Aid 3',
+    code: 'A3',
+    status,
+    packedBy: '',
+    packedAt: null,
+    deliveredAt: null,
+    receivedBy: '',
+    notes: '',
+    createdAt: updatedAt,
+    updatedAt,
+    deletedAt: null,
+    rev: 1,
+    deviceId: 'x',
+    syncedAt: null,
+  });
+
+  it('prefers a list with lines over an empty one, whichever came first', () => {
+    const empty = list('0a-stray', 'draft', '2026-09-05T10:00:00.000Z');
+    const seeded = list('stw-plist', 'draft', '2026-09-01T10:00:00.000Z');
+    const count = (packlist: Packlist) => (packlist.id === 'stw-plist' ? 30 : 0);
+    expect(primaryPacklist([empty, seeded], count)?.id).toBe('stw-plist');
+    expect(primaryPacklist([seeded, empty], count)?.id).toBe('stw-plist');
+  });
+
+  it('then the one furthest along, then the most recently touched', () => {
+    const packed = list('a', 'packed', '2026-09-01T10:00:00.000Z');
+    const picking = list('b', 'picking', '2026-09-05T10:00:00.000Z');
+    const newer = list('c', 'picking', '2026-09-06T10:00:00.000Z');
+    expect(primaryPacklist([picking, packed], () => 5)?.id).toBe('a');
+    expect(primaryPacklist([picking, newer], () => 5)?.id).toBe('c');
+    expect(primaryPacklist([], () => 0)).toBeUndefined();
+  });
+
+  it('resolves a destination to that list, ignoring deleted ones', async () => {
+    const destination = await makeDestination();
+    const item = await makeItem('TBL');
+    const stray = await create(db.packlists, {
+      id: '00000000-stray',
+      eventId: destination.eventId,
+      destinationId: destination.id,
+      name: 'Aid 3',
+      code: 'A3',
+      status: 'draft',
+      packedBy: '',
+      packedAt: null,
+      deliveredAt: null,
+      receivedBy: '',
+      notes: '',
+    });
+    const worked = await create(db.packlists, {
+      id: 'stw-plist-a3',
+      eventId: destination.eventId,
+      destinationId: destination.id,
+      name: 'Aid 3',
+      code: 'A3',
+      status: 'draft',
+      packedBy: '',
+      packedAt: null,
+      deliveredAt: null,
+      receivedBy: '',
+      notes: '',
+    });
+    await addLine(worked.id, item.id, 2);
+    expect((await packlistForDestination(destination.id))?.id).toBe(worked.id);
+
+    await softDelete(db.packlists, worked.id);
+    expect((await packlistForDestination(destination.id))?.id).toBe(stray.id);
+    expect(await packlistForDestination('nowhere')).toBeUndefined();
   });
 });

@@ -1,7 +1,7 @@
 import { db } from '../db/db';
-import { alive, create, liveWhere, nextSort, update } from '../db/repo';
+import { create, liveWhere, nextSort, update } from '../db/repo';
 import type { ConsumptionLine, Destination, Item, Race, RaceEvent } from '../db/types';
-import { createPacklist } from './packlists';
+import { createPacklist, packlistForDestination } from './packlists';
 import { round2 } from './stock';
 
 /**
@@ -331,9 +331,7 @@ export async function applyPlanToPacklists(
     }
     if (!wanted.size) continue;
 
-    let packlist = alive(
-      await db.packlists.where('destinationId').equals(destination.id).toArray(),
-    )[0];
+    let packlist = await packlistForDestination(destination.id);
     if (!packlist) {
       packlist = await createPacklist(destination);
       result.created += 1;
