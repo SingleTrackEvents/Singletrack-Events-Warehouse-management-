@@ -4,7 +4,7 @@ import { Screen } from '../App';
 import { EmptyState, Pill, ProgressBar } from '../components/ui';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
-import { useEvents, useItems, useSettings } from '../hooks/useDb';
+import { useEvents, useItems } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { isStationOnly } from '../sync/permissions';
 import { countedItemIds, lowStockItems } from '../domain/stock';
@@ -12,6 +12,7 @@ import { packlistForDestination, progressFor, receiptFor } from '../domain/packl
 import { daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
 import { LOAD_STATUS_LABELS } from '../domain/transport';
 import type { Destination, Packlist, PacklistLine } from '../db/types';
+import logo from '../assets/logo-white.png';
 
 /**
  * The screen the crew lands on. It answers the three questions asked most often
@@ -37,7 +38,6 @@ export default function HomeScreen() {
     [stationOnly, session?.scope.destinationId],
   );
 
-  const settings = useSettings();
   const events = useEvents();
   const items = useItems();
   const counted = useLiveQuery(() => countedItemIds(), [], new Set<string>());
@@ -95,13 +95,10 @@ export default function HomeScreen() {
   // you teach someone to ignore the number. The stock screen already knew
   // this; the home screen did not.
   const low = items ? lowStockItems(items, counted) : [];
-  // The signed-in account wins over the device's own crew name, which is left
-  // over from offline-only mode and would otherwise greet you as someone else.
-  const who = session?.displayName || settings?.crewName;
-  const greeting = who ? `Gidday ${who.split(' ')[0]}` : 'Warehouse';
 
   return (
-    <Screen title="SingleTrack Warehouse" subtitle={greeting}>
+    // The artwork is white on transparent, so it sits straight on the teal header.
+    <Screen title={<img className="header-logo" src={logo} alt="SingleTrack Events" />}>
       {/* Scanning is the fastest way in, so it gets the biggest button. */}
       <button type="button" className="btn btn-primary btn-lg btn-block mb-4" onClick={() => navigate('/scan')}>
         ⛶ Scan a barcode or packlist code
