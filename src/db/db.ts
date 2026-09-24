@@ -151,8 +151,8 @@ export type TableName = (typeof ALL_TABLES)[number];
  * Tables that travel between devices.
  *
  * `settings` is deliberately excluded: it holds the crew member's own name,
- * theme and vehicle list, which belong to the phone rather than the warehouse.
- * Syncing it would have one person's dark mode follow everyone around.
+ * which belongs to the phone rather than the warehouse. Syncing it would have
+ * one person's name follow everyone around.
  */
 export const SYNCED_TABLES = ALL_TABLES.filter((table) => table !== 'settings');
 
@@ -162,11 +162,7 @@ export function defaultSettings(): Settings {
   return {
     ...stampNew(),
     id: SETTINGS_ID,
-    orgName: 'SingleTrack Events',
     crewName: '',
-    vehicles: ['Hilux', 'Troopy', '6m Truck', 'Trailer'],
-    crew: [],
-    theme: 'system',
     seeded: false,
   };
 }

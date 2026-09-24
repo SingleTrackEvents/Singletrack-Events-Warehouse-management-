@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { db } from '../db/db';
 import { create, softDelete, update } from '../db/repo';
-import { exportAll, exportEvent, importBackup, isBackup, shouldReplace, wipeAll } from './backup';
+import { exportAll, importBackup, isBackup, shouldReplace, wipeAll } from './backup';
 import type { SyncMeta } from '../db/types';
 
 async function makeItem(name: string, qtyOnHand = 5) {
@@ -165,60 +165,5 @@ describe('merging', () => {
     await importBackup(stale, 'replace');
 
     expect((await db.items.get(item.id))!.qtyOnHand).toBe(5);
-  });
-});
-
-describe('event handover', () => {
-  it('carries one event, its packlists and the catalogue they need', async () => {
-    await makeItem('cubes');
-    const { event, packlist } = await makeEventWithPacklist();
-    const other = await create(db.events, {
-      name: 'Hounslow Classic',
-      location: 'NSW',
-      startDate: '2026-10-10',
-      endDate: '2026-10-10',
-      status: 'planning',
-      notes: '',
-    });
-
-    const backup = await exportEvent(event.id, 'Handover');
-
-    expect(backup.eventId).toBe(event.id);
-    expect(backup.tables.events?.map((row) => row.id)).toEqual([event.id]);
-    expect(backup.tables.events?.map((row) => row.id)).not.toContain(other.id);
-    expect(backup.tables.packlists?.map((row) => row.id)).toEqual([packlist.id]);
-    expect(backup.tables.items).toHaveLength(1);
-  });
-
-  it('leaves out packlist lines belonging to other events', async () => {
-    const item = await makeItem('cubes');
-    const { event, packlist } = await makeEventWithPacklist();
-    await create(db.packlistLines, {
-      packlistId: packlist.id,
-      itemId: item.id,
-      qtyRequired: 4,
-      qtyPacked: 0,
-      qtyReturned: 0,
-      mandatory: true,
-      containerId: null,
-      note: '',
-      sort: 10,
-    });
-    await create(db.packlistLines, {
-      packlistId: 'someone-elses-packlist',
-      itemId: item.id,
-      qtyRequired: 9,
-      qtyPacked: 0,
-      qtyReturned: 0,
-      mandatory: false,
-      containerId: null,
-      note: '',
-      sort: 10,
-    });
-
-    const backup = await exportEvent(event.id);
-
-    expect(backup.tables.packlistLines).toHaveLength(1);
-    expect(backup.tables.packlistLines?.[0].id).not.toBe('someone-elses-packlist');
   });
 });

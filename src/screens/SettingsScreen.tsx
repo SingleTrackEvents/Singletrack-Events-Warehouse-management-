@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
-import { ConfirmSheet, Field, Pill, Sheet } from '../components/ui';
+import { ConfirmSheet, Field } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db, getSettings } from '../db/db';
 import { update } from '../db/repo';
@@ -10,12 +10,7 @@ import { useSettings } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
 import { downloadJson, exportAll, importBackup, isBackup, wipeAll } from '../domain/backup';
-import { seedStarterData } from '../db/seed';
-import { countDuplicates, mergeDuplicates } from '../domain/duplicates';
-import { demoFootprint, removeDemoCatalogue, removeDemoEvent } from '../domain/demo';
-import type { DemoFootprint } from '../domain/demo';
-import { ListEditor } from '../components/ListEditor';
-import { formatDateTime, plural } from '../domain/format';
+import { plural } from '../domain/format';
 import type { Settings } from '../db/types';
 
 /**
@@ -31,16 +26,6 @@ export default function SettingsScreen() {
   const toast = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
   const [wiping, setWiping] = useState(false);
-  const [reseeding, setReseeding] = useState(false);
-  const [merging, setMerging] = useState(false);
-  const [removingDemo, setRemovingDemo] = useState(false);
-
-  // Two phones that each seeded demo data end up with two of everything once
-  // they sync, and someone will eventually add the same item twice by hand.
-  const duplicates = useLiveQuery(() => countDuplicates(), []);
-
-  // What the worked example still occupies, so removing it can name it.
-  const demo = useLiveQuery(() => demoFootprint(), []);
 
   const counts = useLiveQuery(async () => ({
     items: await db.items.count(),
@@ -89,29 +74,6 @@ export default function SettingsScreen() {
                 value={settings?.crewName ?? ''}
                 placeholder="Jess Nolan"
                 onChange={(event) => set({ crewName: event.target.value })}
-              />
-            )}
-          </Field>
-          <Field label="Theme">
-            {(id) => (
-              <select
-                id={id}
-                className="select"
-                value={settings?.theme ?? 'system'}
-                onChange={(event) => set({ theme: event.target.value as Settings['theme'] })}
-              >
-                <option value="system">Match the phone</option>
-                <option value="light">Always light</option>
-                <option value="dark">Always dark</option>
-              </select>
-            )}
-          </Field>
-          <Field label="Vehicles" hint="Offered when planning a load. Tap one to remove it.">
-            {() => (
-              <ListEditor
-                values={settings?.vehicles ?? []}
-                placeholder="6m Truck"
-                onChange={(vehicles) => set({ vehicles })}
               />
             )}
           </Field>
@@ -210,50 +172,6 @@ export default function SettingsScreen() {
           <h2>Data</h2>
         </div>
         <div className="list">
-          <button
-            type="button"
-            className="row"
-            disabled={!duplicates || duplicates.items + duplicates.templates === 0}
-            onClick={() => setMerging(true)}
-          >
-            <span className="row-icon">🧹</span>
-            <span className="row-body">
-              <span className="row-title">Merge duplicates</span>
-              <span className="row-sub">
-                {!duplicates
-                  ? 'Checking…'
-                  : duplicates.items + duplicates.templates === 0
-                    ? 'Nothing duplicated'
-                    : `${plural(duplicates.items, 'duplicate item')}, ${plural(duplicates.templates, 'template')}`}
-              </span>
-            </span>
-            <span className="row-chevron">›</span>
-          </button>
-          <button type="button" className="row" onClick={() => setReseeding(true)}>
-            <span className="row-icon">🌱</span>
-            <span className="row-body">
-              <span className="row-title">Reload the warehouse catalogue</span>
-              <span className="row-sub">
-                Puts the 180 items, 20 categories and event templates back
-              </span>
-            </span>
-            <span className="row-chevron">›</span>
-          </button>
-          <button
-            type="button"
-            className="row"
-            disabled={!demo || demo.empty}
-            onClick={() => setRemovingDemo(true)}
-          >
-            <span className="row-icon">🧽</span>
-            <span className="row-body">
-              <span className="row-title">Remove the demo data</span>
-              <span className="row-sub">
-                {!demo ? 'Checking…' : demo.empty ? 'Nothing left to remove' : describeDemo(demo)}
-              </span>
-            </span>
-            <span className="row-chevron">›</span>
-          </button>
           <button type="button" className="row" onClick={() => setWiping(true)}>
             <span className="row-icon">🗑</span>
             <span className="row-body">
@@ -269,29 +187,6 @@ export default function SettingsScreen() {
 
       ) : null}
 
-      <section className="section">
-        <div className="section-head">
-          <h2>About</h2>
-        </div>
-        <div className="card card-pad small muted">
-          <p>
-            <span className="strong">SingleTrack Events — Warehouse</span>
-          </p>
-          <p>
-            Works with no signal: everything is stored on the device and the app keeps running once
-            installed. Add it to your home screen from the browser share menu for a full-screen,
-            offline copy.
-          </p>
-          <div className="row-flex wrap mt-2">
-            <Pill tone="ok">Offline-first</Pill>
-            <Pill tone="info">Sync-ready records</Pill>
-          </div>
-          {settings ? (
-            <p className="tiny mt-3">Settings last changed {formatDateTime(settings.updatedAt)}.</p>
-          ) : null}
-        </div>
-      </section>
-
       {wiping ? (
         <ConfirmSheet
           title="Erase everything?"
@@ -301,7 +196,7 @@ export default function SettingsScreen() {
               already exported are unaffected.
               <div className="mt-2">
                 It clears this device only. While you are signed in, syncing will bring the data
-                back — to remove the worked example for everyone, use “Remove the demo data”.
+                back.
               </div>
             </>
           }
@@ -318,191 +213,6 @@ export default function SettingsScreen() {
         />
       ) : null}
 
-      {merging ? (
-        <ConfirmSheet
-          title="Merge duplicates?"
-          body={
-            <>
-              Keeps one of each and folds the rest into it. Packlists, stocktakes and the stock
-              ledger are repointed at the copy that stays, so nothing loses its history.
-              <div className="mt-2">
-                Quantities are never added together — two records for one shelf is a naming problem,
-                not twice the stock, so check the counts afterwards.
-              </div>
-            </>
-          }
-          confirmLabel="Merge"
-          onCancel={() => setMerging(false)}
-          onConfirm={() => {
-            void mergeDuplicates().then((summary) => {
-              toast(
-                `Merged ${plural(summary.itemsMerged, 'item')} and ${plural(summary.templatesMerged, 'template')}`,
-              );
-              setMerging(false);
-            });
-          }}
-        />
-      ) : null}
-
-      {removingDemo && demo ? (
-        <RemoveDemoSheet
-          footprint={demo}
-          onClose={() => setRemovingDemo(false)}
-          onDone={(removed) => {
-            toast(`Removed ${plural(removed, 'record')}`);
-            setRemovingDemo(false);
-          }}
-        />
-      ) : null}
-
-      {reseeding ? (
-        <ConfirmSheet
-          title="Reload the catalogue?"
-          body="The SingleTrack item list, categories and per-event templates are added back. Anything you have entered yourself is left alone, and items already there are matched by code rather than duplicated."
-          confirmLabel="Reload"
-          onCancel={() => setReseeding(false)}
-          onConfirm={() => {
-            void seedStarterData().then(() => {
-              toast('Catalogue reloaded');
-              setReseeding(false);
-            });
-          }}
-        />
-      ) : null}
     </Screen>
-  );
-}
-
-/** Name only what is actually still there, so the row never reads "0 items". */
-function describeDemo(demo: DemoFootprint): string {
-  const parts: string[] = [];
-  if (demo.items) parts.push(plural(demo.items, 'catalogue item'));
-  if (demo.templates) parts.push(plural(demo.templates, 'template'));
-  if (demo.events.length) parts.push(plural(demo.events.length, 'example race'));
-  return `${parts.join(', ')} — removed everywhere, not just here`;
-}
-
-/**
- * Review what looks like demo data before removing it.
- *
- * The catalogue is safe to identify automatically — those SKUs are invented, so
- * a match is as close to certain as this gets. The example races are not: they
- * are named after real SingleTrack events, and a crew may well have adopted the
- * demo copy as their own. So each race is listed with what is hanging off it
- * and left unticked, and the amount of packing recorded against it is shown,
- * because that is the thing that tells you whose race it is.
- */
-function RemoveDemoSheet({
-  footprint,
-  onClose,
-  onDone,
-}: {
-  footprint: DemoFootprint;
-  onClose: () => void;
-  onDone: (removed: number) => void;
-}) {
-  const [catalogue, setCatalogue] = useState(footprint.catalogue > 0);
-  const [events, setEvents] = useState<Record<string, boolean>>({});
-  const [working, setWorking] = useState(false);
-
-  const chosenEvents = footprint.events.filter((entry) => events[entry.event.id]);
-  const nothingChosen = !catalogue && chosenEvents.length === 0;
-
-  const remove = async () => {
-    setWorking(true);
-    let removed = 0;
-    if (catalogue) removed += await removeDemoCatalogue();
-    for (const entry of chosenEvents) removed += await removeDemoEvent(entry.event.id);
-    onDone(removed);
-  };
-
-  return (
-    <Sheet
-      title="Remove the demo data"
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="btn btn-outline" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-danger"
-            disabled={nothingChosen || working}
-            onClick={() => void remove()}
-          >
-            {working ? 'Removing…' : 'Remove'}
-          </button>
-        </>
-      }
-    >
-      <p className="small muted mb-3">
-        This is a real deletion, not a tidy-up of this device: it syncs, so whatever you pick goes
-        from every phone and computer signed in to this account.
-      </p>
-
-      {footprint.catalogue ? (
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={catalogue}
-            onChange={(event) => setCatalogue(event.target.checked)}
-          />
-          <span>
-            <span className="strong">The example catalogue</span>
-            <span className="small muted" style={{ display: 'block' }}>
-              {plural(footprint.items, 'item')}, {plural(footprint.templates, 'template')} and{' '}
-              {plural(footprint.categories, 'category', 'categories')}. Matched on the codes the
-              demo uses, so anything you added yourself is left alone.
-            </span>
-          </span>
-        </label>
-      ) : null}
-
-      {footprint.events.length ? (
-        <div className="mt-3">
-          <p className="small strong">Example races</p>
-          <p className="tiny muted mb-2">
-            These carry the names of real SingleTrack races, so the app cannot tell the worked
-            example from one you have been running for real. Tick only the ones you know are the
-            demo.
-          </p>
-          <div className="stack">
-            {footprint.events.map((entry) => (
-              <label key={entry.event.id} className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={events[entry.event.id] ?? false}
-                  onChange={(changed) =>
-                    setEvents((current) => ({
-                      ...current,
-                      [entry.event.id]: changed.target.checked,
-                    }))
-                  }
-                />
-                <span>
-                  <span className="strong">{entry.event.name}</span>
-                  <span className="small muted" style={{ display: 'block' }}>
-                    {entry.event.location} · {plural(entry.destinations, 'destination')},{' '}
-                    {plural(entry.packlists, 'packlist')}
-                  </span>
-                  {entry.packedLines ? (
-                    <span className="tiny" style={{ display: 'block', color: 'var(--warn)' }}>
-                      {plural(entry.packedLines, 'line')} already packed against it — check this is
-                      not your real one.
-                    </span>
-                  ) : null}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      <p className="tiny muted mt-3">
-        Stock movements are kept either way — the ledger is the record of what actually left the
-        warehouse.
-      </p>
-    </Sheet>
   );
 }

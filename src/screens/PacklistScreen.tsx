@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { ItemPicker } from '../components/ItemPicker';
@@ -73,7 +73,6 @@ const STATUS_TONE: Record<PacklistStatus, 'ok' | 'warn' | 'info' | 'accent' | 'd
  */
 export default function PacklistScreen() {
   const { packlistId } = useParams();
-  const navigate = useNavigate();
   const toast = useToast();
   const crew = useCrewName();
   const packlist = usePacklist(packlistId);
@@ -235,18 +234,6 @@ export default function PacklistScreen() {
       title={packlist.name}
       subtitle={`${packlist.code} · ${PACKLIST_STATUS_LABELS[packlist.status]}`}
       back={stationOnly ? '/' : `/events/${packlist.eventId}`}
-      actions={
-        canManage ? (
-          <button
-            type="button"
-            className="header-btn"
-            aria-label="Labels and printing"
-            onClick={() => navigate(`/packlists/${packlist.id}/labels`)}
-          >
-            🏷
-          </button>
-        ) : undefined
-      }
     >
       <div className="card card-pad mb-3">
         <div className="spread mb-2">
@@ -453,11 +440,6 @@ export default function PacklistScreen() {
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotesOpen(true)}>
           📝 Notes
         </button>
-        {canManage ? (
-          <Link className="btn btn-ghost btn-sm" to={`/packlists/${packlist.id}/labels`}>
-            🏷 Labels &amp; print
-          </Link>
-        ) : null}
       </div>
 
       {canManage ? (

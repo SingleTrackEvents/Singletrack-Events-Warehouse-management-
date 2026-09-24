@@ -1,9 +1,9 @@
 /**
- * Short human codes for packlists and crates.
+ * Short human codes for packlists.
  *
- * These are what gets printed on a crate label under the QR code. A code has to
- * survive being read out over a radio in the wind, so the alphabet leaves out
- * characters that get confused when handwritten or spoken: I/1, O/0, S/5, Z/2.
+ * A code has to survive being read out over a radio in the wind, so the alphabet
+ * leaves out characters that get confused when handwritten or spoken: I/1, O/0,
+ * S/5, Z/2.
  */
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRTUVWXY346789';
@@ -49,11 +49,6 @@ export function makeCode(name: string): string {
   return `${prefixFor(name)}-${randomSuffix()}`;
 }
 
-/** A crate code within a packlist, e.g. "AS3-7K2M/02". */
-export function makeContainerCode(packlistCode: string, index: number): string {
-  return `${packlistCode}/${String(index).padStart(2, '0')}`;
-}
-
 /** Normalise anything typed or scanned into the canonical uppercase form. */
 export function normaliseCode(raw: string): string {
   return raw.trim().toUpperCase().replace(/\s+/g, '');
@@ -71,33 +66,6 @@ export function parseScan(raw: string): { code: string; container: string | null
   const match = cleaned.match(/^([A-Z0-9]{1,6}-[A-Z0-9]{3,6})(?:\/(\d{1,3}))?$/);
   if (!match) return null;
   return { code: match[1], container: match[2] ?? null };
-}
-
-/** Human-readable context carried alongside a code so a label describes itself. */
-export interface ScanLabel {
-  /** Packlist name, e.g. "Aid 3 — Buffalo Plateau". */
-  name?: string;
-  /** Event name, e.g. "Buffalo Stampede". */
-  event?: string;
-}
-
-/**
- * The URL encoded into a QR label.
- *
- * The code alone is only a pointer into whichever device's database created it,
- * so a label scanned on any other phone used to be a dead end. The name and
- * event ride along in the query string, which means a crate can always tell you
- * what it is even where the packlist itself is not stored. `parseScan` drops the
- * query before matching, so labels printed before this change still resolve.
- */
-export function scanUrl(code: string, label: ScanLabel = {}, origin?: string): string {
-  const base =
-    origin ?? (typeof location !== 'undefined' ? `${location.origin}${location.pathname}` : '');
-  const params = new URLSearchParams();
-  if (label.name) params.set('n', label.name);
-  if (label.event) params.set('e', label.event);
-  const query = params.toString();
-  return `${base}#/scan/${encodeURIComponent(code)}${query ? `?${query}` : ''}`;
 }
 
 /** The URL behind a volunteer invite QR. */

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from 'react';
+import { Suspense, lazy } from 'react';
 import type { ReactElement } from 'react';
 import {
   HashRouter,
@@ -15,7 +15,6 @@ import { SessionProvider } from './hooks/useSession';
 import { useSession } from './hooks/sessionContext';
 import { can, isStationOnly } from './sync/permissions';
 import type { Action } from './sync/permissions';
-import { useSettings } from './hooks/useDb';
 import './styles/app.css';
 
 /**
@@ -34,7 +33,6 @@ const ImportPacklistScreen = lazy(() => import('./screens/ImportPacklistScreen')
 const FoodScreen = lazy(() => import('./screens/FoodScreen'));
 const WarehouseScreen = lazy(() => import('./screens/WarehouseScreen'));
 const PacklistScreen = lazy(() => import('./screens/PacklistScreen'));
-const LabelsScreen = lazy(() => import('./screens/LabelsScreen'));
 const StockScreen = lazy(() => import('./screens/StockScreen'));
 const ItemScreen = lazy(() => import('./screens/ItemScreen'));
 const StocktakeScreen = lazy(() => import('./screens/StocktakeScreen'));
@@ -60,17 +58,6 @@ const NAV: Array<{ to: string; icon: string; label: string; end: boolean; needs?
   { to: '/transport', icon: '🚚', label: 'Transport', end: false, needs: 'load:read' },
   { to: '/more', icon: '⚙️', label: 'More', end: false },
 ];
-
-/** Applies the saved theme preference to the document. */
-function ThemeSync() {
-  const settings = useSettings();
-  useEffect(() => {
-    const theme = settings?.theme ?? 'system';
-    if (theme === 'system') document.documentElement.removeAttribute('data-theme');
-    else document.documentElement.setAttribute('data-theme', theme);
-  }, [settings?.theme]);
-  return null;
-}
 
 function BottomNav() {
   const { session } = useSession();
@@ -132,7 +119,6 @@ export default function App() {
     <HashRouter>
       <ToastProvider>
         <SessionProvider>
-          <ThemeSync />
           <div className="app">
           <Suspense fallback={<div className="app-main muted">Loading…</div>}>
             <StationOnlyGate>
@@ -144,7 +130,6 @@ export default function App() {
               <Route path="/events/:eventId/food" element={<Guard needs="packlist:manage"><FoodScreen /></Guard>} />
               <Route path="/import" element={<Guard needs="packlist:manage"><ImportPacklistScreen /></Guard>} />
               <Route path="/packlists/:packlistId" element={<PacklistScreen />} />
-              <Route path="/packlists/:packlistId/labels" element={<Guard needs="packlist:manage"><LabelsScreen /></Guard>} />
               <Route path="/stock" element={<Guard needs="item:read"><StockScreen /></Guard>} />
               <Route path="/stock/:itemId" element={<Guard needs="item:read"><ItemScreen /></Guard>} />
               <Route path="/stocktake" element={<Guard needs="stocktake:read"><StocktakeScreen /></Guard>} />

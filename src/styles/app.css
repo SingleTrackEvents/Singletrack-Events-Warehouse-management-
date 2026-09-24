@@ -385,18 +385,6 @@ button, input, select, textarea {
   50% { opacity: 0.35; }
 }
 
-/* The first-run nudge toward signing in. Given the accent edge so it reads as
-   an offer rather than a warning — nothing is wrong with working offline. */
-.sign-in-prompt {
-  border-color: var(--accent);
-  border-left-width: 4px;
-}
-
-.sign-in-prompt-title {
-  font-size: var(--text-base);
-  font-weight: 700;
-}
-
 /* ---------------------------------------------------------------- badges -- */
 
 .pill {
@@ -553,13 +541,6 @@ button, input, select, textarea {
 
 .chip-row::-webkit-scrollbar { display: none; }
 
-/* Inside a sheet or card the strip must not bleed past its container the way
-   the full-width screen version deliberately does. */
-.chip-row-inline {
-  margin: 0;
-  padding: 0 0 2px;
-}
-
 .chip {
   flex: 0 0 auto;
   min-height: 38px;
@@ -578,24 +559,6 @@ button, input, select, textarea {
   border-color: var(--brand);
   color: var(--brand-ink);
 }
-
-/* ----------------------------------------------------------------- stats -- */
-
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: var(--space-3);
-}
-
-.stat {
-  padding: var(--space-4);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-
-.stat .value { font-size: var(--text-2xl); font-weight: 800; font-variant-numeric: tabular-nums; }
-.stat .label { font-size: var(--text-sm); color: var(--text-muted); }
 
 /* ---------------------------------------------------------------- sheets -- */
 
@@ -800,30 +763,6 @@ button, input, select, textarea {
   text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
 }
 
-/* ------------------------------------------------------------ QR labels --- */
-
-.label-sheet {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-3);
-}
-
-.qr-label {
-  display: flex;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  background: #fff;
-  color: #000;
-  border: 2px solid #000;
-  border-radius: var(--radius);
-  break-inside: avoid;
-}
-
-.qr-label img { width: 96px; height: 96px; }
-.qr-label .code { font-family: var(--font-mono); font-size: var(--text-lg); font-weight: 800; }
-.qr-label .name { font-weight: 700; line-height: 1.15; }
-.qr-label .meta { font-size: var(--text-xs); }
-
 /* ---------------------------------------------------------------- print -- */
 
 @media print {
@@ -831,14 +770,7 @@ button, input, select, textarea {
   .app-main { max-width: none; padding: 0; }
   body { background: #fff; color: #000; }
   .card, .list { box-shadow: none; border-color: #999; }
-  .print-table { width: 100%; border-collapse: collapse; }
-  .print-table th, .print-table td { border: 1px solid #666; padding: 6px 8px; text-align: left; }
-  .page-break { break-after: page; }
 }
-
-/* Signature/tick boxes on a printed packlist. */
-.print-only { display: none; }
-@media print { .print-only { display: block; } }
 
 /* ------------------------------------------------------------- utilities -- */
 
@@ -928,26 +860,6 @@ button, input, select, textarea {
    stray red block rather than part of the row. */
 .swipe-row:has(> .swipe-row-content > .card) .swipe-row-actions {
   border-radius: var(--radius-lg);
-}
-
-/* ------------------------------------------------------------------ brand -- */
-
-/* SingleTrack logo strip on the home screen. The artwork is white-only, so it
-   always sits on the brand teal regardless of theme. */
-.brand-banner {
-  background: var(--teal-500);
-  border-radius: var(--radius);
-  padding: 16px 20px;
-  margin-bottom: 16px;
-  display: flex;
-  justify-content: center;
-}
-.brand-banner img {
-  display: block;
-  height: 40px;
-  width: auto;
-  max-width: 100%;
-  object-fit: contain;
 }
 
 /* Category headings inside a packlist, so a long load-out reads in sections. */

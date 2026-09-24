@@ -7,7 +7,7 @@ import { SwipeToDelete } from '../components/SwipeToDelete';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
-import { useEvents, useSettings } from '../hooks/useDb';
+import { useEvents } from '../hooks/useDb';
 import { LOAD_STATUS_LABELS, createLoad, loadProgress } from '../domain/transport';
 import { formatDateTime, plural } from '../domain/format';
 import { removeLoad } from '../domain/remove';
@@ -163,7 +163,6 @@ function NewLoadSheet({
   onCreated: (id: string) => void;
 }) {
   const events = useEvents();
-  const settings = useSettings();
   const toast = useToast();
   const [eventId, setEventId] = useState(defaultEventId);
   const [name, setName] = useState('Run 1');
@@ -224,38 +223,15 @@ function NewLoadSheet({
             />
           )}
         </Field>
-        {/*
-          Saved vehicles are offered as tap targets rather than a <datalist>.
-          Safari on iOS ignores datalist entirely, so half the crew would get no
-          suggestions at all, and where it does work the popup fights with the
-          scrolling sheet. Tapping a chip is also just faster than typing.
-        */}
         <Field label="Vehicle">
           {(id) => (
-            <>
-              <input
-                id={id}
-                className="input"
-                value={vehicle}
-                placeholder="6m Truck"
-                onChange={(event) => setVehicle(event.target.value)}
-              />
-              {settings?.vehicles.length ? (
-                <div className="chip-row chip-row-inline">
-                  {settings.vehicles.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className="chip"
-                      aria-pressed={vehicle === option}
-                      onClick={() => setVehicle(vehicle === option ? '' : option)}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </>
+            <input
+              id={id}
+              className="input"
+              value={vehicle}
+              placeholder="6m Truck"
+              onChange={(event) => setVehicle(event.target.value)}
+            />
           )}
         </Field>
         <div className="field-row">
