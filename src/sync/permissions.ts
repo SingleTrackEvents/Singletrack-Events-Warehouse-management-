@@ -1,5 +1,6 @@
 import type { TableName } from '../db/db';
 import type { Role, Scope, Session } from './types';
+import { UNSCOPED } from './types';
 
 /**
  * Who may do what.
@@ -19,6 +20,7 @@ export type Action =
   | 'stock:adjust'
   // Events and destinations
   | 'event:read'
+  | 'event:create'
   | 'event:write'
   | 'event:delete'
   // Packlists
@@ -49,7 +51,7 @@ export type Action =
 const GRANTS: Record<Role, Action[]> = {
   admin: [
     'item:read', 'item:write', 'item:archive', 'stock:adjust',
-    'event:read', 'event:write', 'event:delete',
+    'event:read', 'event:create', 'event:write', 'event:delete',
     'packlist:read', 'packlist:pack', 'packlist:receive', 'packlist:manage',
     'load:read', 'load:manage', 'load:deliver',
     'stocktake:read', 'stocktake:manage', 'template:manage',
@@ -57,7 +59,7 @@ const GRANTS: Record<Role, Action[]> = {
   ],
   crew: [
     'item:read', 'item:write', 'stock:adjust',
-    'event:read', 'event:write',
+    'event:read', 'event:create', 'event:write',
     'packlist:read', 'packlist:pack', 'packlist:receive', 'packlist:manage',
     'load:read', 'load:manage', 'load:deliver',
     'stocktake:read', 'stocktake:manage', 'template:manage',
@@ -75,6 +77,24 @@ const GRANTS: Record<Role, Action[]> = {
   ],
 };
 
+/**
+ * Actions that belong to the warehouse rather than to any one event.
+ *
+ * An invite can pin crew or a driver to a single event, and that pin has to
+ * mean something beyond which races appear in a list. The stock ledger, the
+ * stocktakes, the templates and the backup are shared by every event, so a
+ * person given one race has no business changing them; nor can they start a
+ * new event, since a new event is by definition outside the one they were
+ * given. They keep the catalogue to read, because a packlist is meaningless
+ * without it.
+ */
+const WAREHOUSE_ACTIONS: Action[] = [
+  'item:write', 'item:archive', 'stock:adjust',
+  'event:create', 'event:delete',
+  'stocktake:read', 'stocktake:manage', 'template:manage',
+  'member:manage', 'data:export', 'data:wipe',
+];
+
 /** A reference to the thing being acted on, for scope checks. */
 export interface Target {
   eventId?: string | null;
@@ -86,11 +106,37 @@ export interface Target {
  *
  * With no session the app is in offline-only mode — one device, no accounts —
  * and everything is permitted, exactly as it behaved before sync existed.
+ *
+ * A session pinned to an event is refused the warehouse-wide actions outright,
+ * whether or not a target is named: the check that hides a tab and the check
+ * that guards a route must agree, and neither has a row to point at.
  */
 export function can(session: Session | null, action: Action, target?: Target): boolean {
   if (!session) return true;
   if (isExpired(session)) return false;
   if (!GRANTS[session.role].includes(action)) return false;
+  if (isEventScoped(session) && WAREHOUSE_ACTIONS.includes(action)) return false;
+  return inScope(session.scope, target);
+}
+
+/** True for a session pinned to one event, whatever its role. */
+export function isEventScoped(session: Session | null): boolean {
+  return Boolean(session?.scope.eventId);
+}
+
+/**
+ * Can this session see this row at all?
+ *
+ * The lists read straight from the local database, and the local database
+ * holds whatever this phone was seeded with or synced before the sign-in, so
+ * an event the server would never send can still be sitting there. Every list
+ * of events, packlists or loads runs through here so that what is on the
+ * screen matches what the account was given, not what the phone happens to
+ * hold.
+ */
+export function reachable(session: Session | null, target: Target): boolean {
+  if (!session) return true;
+  if (isExpired(session)) return false;
   return inScope(session.scope, target);
 }
 
@@ -192,15 +238,31 @@ export function scrubChanges<T extends object>(
 }
 
 /**
+ * Tables that belong to one event: the row carries the event, directly or
+ * through its packlist or load. Everything else — the catalogue, the ledger,
+ * stocktakes, templates — is the warehouse's, shared by every event.
+ */
+export const EVENT_TABLES: TableName[] = [
+  'events', 'destinations', 'races', 'consumptionLines',
+  'packlists', 'packlistLines', 'containers',
+  'loads', 'loadStops',
+];
+
+/**
  * Narrow a change set down to what a session is actually allowed to write.
  * Used by the mock backend, and by the client to avoid pushing doomed rows.
+ *
+ * Crew given one event write that event's tables and nothing warehouse-wide;
+ * the server refuses those rows anyway, and a row refused after it was written
+ * locally is a number this phone believes and nobody else does.
  */
 export function writableTables(session: Session | null): TableName[] | 'all' {
   if (!session) return 'all';
   switch (session.role) {
     case 'admin':
-    case 'crew':
       return 'all';
+    case 'crew':
+      return isEventScoped(session) ? EVENT_TABLES : 'all';
     case 'driver':
       return ['loadStops', 'loads', 'packlists', 'packlistLines'];
     case 'volunteer':
@@ -208,18 +270,27 @@ export function writableTables(session: Session | null): TableName[] | 'all' {
   }
 }
 
-/** Plain-language summary for the access screen. */
-export function describeRole(role: Role): string[] {
-  const grants = GRANTS[role];
+/**
+ * Plain-language summary for the access screen.
+ *
+ * Takes a scope as well as a role, because the same role reads very
+ * differently pinned to one event: crew for the Hounslow Classic do not run
+ * stocktakes, and the card should not say they do.
+ */
+export function describeRole(role: Role, scope: Scope = UNSCOPED): string[] {
+  const who: Session = {
+    userId: '', displayName: '', email: null, role, scope, token: '', expiresAt: null, guest: false,
+  };
+  const has = (action: Action) => can(who, action);
   const lines: string[] = [];
-  if (grants.includes('item:write')) lines.push('Add and edit stock items');
-  else if (grants.includes('item:read')) lines.push('View the stock catalogue');
-  if (grants.includes('stock:adjust')) lines.push('Adjust stock quantities');
-  if (grants.includes('packlist:manage')) lines.push('Build and change packlists');
-  else if (grants.includes('packlist:receive')) lines.push('Record what arrived on a packlist');
-  if (grants.includes('load:manage')) lines.push('Plan transport loads');
-  else if (grants.includes('load:deliver')) lines.push('Confirm deliveries');
-  if (grants.includes('stocktake:manage')) lines.push('Run stocktakes');
-  if (grants.includes('member:manage')) lines.push('Invite people and set their access');
+  if (has('item:write')) lines.push('Add and edit stock items');
+  else if (has('item:read')) lines.push('View the stock catalogue');
+  if (has('stock:adjust')) lines.push('Adjust stock quantities');
+  if (has('packlist:manage')) lines.push('Build and change packlists');
+  else if (has('packlist:receive')) lines.push('Record what arrived on a packlist');
+  if (has('load:manage')) lines.push('Plan transport loads');
+  else if (has('load:deliver')) lines.push('Confirm deliveries');
+  if (has('stocktake:manage')) lines.push('Run stocktakes');
+  if (has('member:manage')) lines.push('Invite people and set their access');
   return lines;
 }

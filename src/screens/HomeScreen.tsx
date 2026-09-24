@@ -6,7 +6,7 @@ import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useEvents, useItems } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
-import { isStationOnly } from '../sync/permissions';
+import { can, isStationOnly, reachable } from '../sync/permissions';
 import { countedItemIds, lowStockItems } from '../domain/stock';
 import { packlistForDestination, progressFor, receiptFor } from '../domain/packlists';
 import { daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
@@ -74,15 +74,21 @@ export default function HomeScreen() {
 
   const activeLoads = useLiveQuery(
     async () =>
-      alive(await db.loads.toArray()).filter(
-        (load) => load.status === 'in_transit' || load.status === 'delivering' || load.status === 'loading',
-      ),
-    [],
+      alive(await db.loads.toArray())
+        .filter((load) => reachable(session, { eventId: load.eventId }))
+        .filter(
+          (load) => load.status === 'in_transit' || load.status === 'delivering' || load.status === 'loading',
+        ),
+    [session],
   );
 
+  const canCount = can(session, 'stocktake:read');
   const openStocktakes = useLiveQuery(
-    async () => alive(await db.stocktakes.toArray()).filter((entry) => entry.status === 'open'),
-    [],
+    async () =>
+      canCount
+        ? alive(await db.stocktakes.toArray()).filter((entry) => entry.status === 'open')
+        : [],
+    [canCount],
   );
 
   // A volunteer has one packlist and nothing else to do. Sending them through a

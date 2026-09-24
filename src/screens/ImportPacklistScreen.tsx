@@ -38,10 +38,12 @@ export default function ImportPacklistScreen() {
   const items = useItems();
   const categories = useCategories();
 
-  // With no event named, the one most likely being packed right now.
+  // With no event named, the one most likely being packed right now. An event
+  // named in the address that this account may not see is treated as none.
   const [chosenEventId, setEventId] = useState(params.get('event') ?? '');
   const eventId = useMemo(() => {
-    if (chosenEventId || !events?.length) return chosenEventId;
+    if (!events?.length) return '';
+    if (chosenEventId && events.some((event) => event.id === chosenEventId)) return chosenEventId;
     const open = events.filter((event) => event.status !== 'closed');
     return (open.find((event) => event.status === 'packing') ?? open[0] ?? events[0]).id;
   }, [chosenEventId, events]);

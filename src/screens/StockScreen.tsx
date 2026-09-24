@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
+import { useSession } from '../hooks/sessionContext';
+import { can } from '../sync/permissions';
 import { ConfirmSheet, EmptyState, Field, Pill, Sheet } from '../components/ui';
 import { SwipeToDelete } from '../components/SwipeToDelete';
 import { useToast } from '../components/toastContext';
@@ -34,6 +36,10 @@ export default function StockScreen() {
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState(false);
   const [archiving, setArchiving] = useState<Item>();
+  const { session } = useSession();
+  const canEdit = can(session, 'item:write');
+  const canArchive = can(session, 'item:archive');
+  const canCount = can(session, 'stocktake:read');
 
   const categoryFilter = params.get('category') ?? '';
   const lowOnly = params.get('filter') === 'low';
@@ -88,9 +94,13 @@ export default function StockScreen() {
           : undefined
       }
       actions={
-        <button type="button" className="header-btn" aria-label="Add item" onClick={() => setAdding(true)}>
-          +
-        </button>
+        canEdit ? (
+          <button type="button" className="header-btn" aria-label="Add item" onClick={() => setAdding(true)}>
+            +
+          </button>
+        ) : (
+          <span />
+        )
       }
     >
       <div className="search-bar">
@@ -144,8 +154,8 @@ export default function StockScreen() {
 
       {matches.length ? (
         <div className="list">
-          {matches.map((item) => (
-            <SwipeToDelete key={item.id} label="Archive" onDelete={() => setArchiving(item)}>
+          {matches.map((item) => {
+            const row = (
             <Link to={`/stock/${item.id}`} className="row">
               <span className="row-body">
                 <span className="row-title truncate">{item.name}</span>
@@ -166,8 +176,15 @@ export default function StockScreen() {
                 )}
               </span>
             </Link>
-            </SwipeToDelete>
-          ))}
+            );
+            return canArchive ? (
+              <SwipeToDelete key={item.id} label="Archive" onDelete={() => setArchiving(item)}>
+                {row}
+              </SwipeToDelete>
+            ) : (
+              <div key={item.id}>{row}</div>
+            );
+          })}
         </div>
       ) : (
         <EmptyState
@@ -189,11 +206,11 @@ export default function StockScreen() {
               <button type="button" className="btn btn-primary" onClick={clearFilters}>
                 Show all {plural(totalItems, 'item')}
               </button>
-            ) : (
+            ) : canEdit ? (
               <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
                 Add an item
               </button>
-            )
+            ) : undefined
           }
         />
       )}
@@ -226,11 +243,13 @@ export default function StockScreen() {
         </div>
       ) : null}
 
-      <div className="mt-4">
-        <Link to="/stocktake" className="btn btn-outline btn-block">
-          🔢 Stocktake
-        </Link>
-      </div>
+      {canCount ? (
+        <div className="mt-4">
+          <Link to="/stocktake" className="btn btn-outline btn-block">
+            🔢 Stocktake
+          </Link>
+        </div>
+      ) : null}
 
       {adding ? <NewItemSheet onClose={() => setAdding(false)} /> : null}
 

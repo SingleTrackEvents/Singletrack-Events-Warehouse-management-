@@ -112,7 +112,13 @@ $$;
 --
 -- Deliberately strict: a scoped user is denied a row whose own scope is null,
 -- because the client supplies these columns and could otherwise send nulls to
--- slip past the check. An unscoped membership (admin, crew) still sees all.
+-- slip past the check. An unscoped membership (an admin, or crew given every
+-- event) still sees all.
+--
+-- A scoped membership therefore never writes anything warehouse-wide: the
+-- catalogue, the ledger, stocktakes and templates carry no event, so crew
+-- given one race are refused them here. What such crew may still *read* of
+-- that shared data is decided by reference_readable, on the select policy.
 create or replace function public.row_in_scope(
   p_table text, p_event text, p_destination text
 ) returns boolean
@@ -125,8 +131,6 @@ begin
     return true;
   end if;
 
-  -- Warehouse-wide reference data carries no event; which roles may see it at
-  -- all is decided by can_read_table / can_write_table, not here.
   if m_event is not null then
     if p_event is null or p_event <> m_event then
       return false;
@@ -178,6 +182,18 @@ returns text[] language sql immutable as $$
   end
 $$;
 
+-- Warehouse-wide rows a scoped crew member or driver may still read.
+--
+-- These carry no event, so row_in_scope refuses them to anyone pinned to one
+-- event; but a packlist is meaningless without the catalogue, and crew build
+-- lists from the templates. Read only: writing them stays refused above.
+-- Mirrors REFERENCE_TABLES in the demo server.
+create or replace function public.reference_readable(p_role text, p_table text)
+returns boolean language sql immutable as $$
+  select p_role in ('admin', 'crew', 'driver')
+    and p_table in ('items', 'categories', 'templates', 'templateLines')
+$$;
+
 -- Which tables a role may read. A volunteer must never receive the
 -- warehouse catalogue — they only need their own packlist.
 create or replace function public.can_read_table(p_role text, p_table text)
@@ -202,7 +218,14 @@ create policy records_select on public.records for select to authenticated
 using (
   public.my_role() is not null
   and public.can_read_table(public.my_role(), table_name)
-  and public.row_in_scope(table_name, event_id, destination_id)
+  and (
+    public.row_in_scope(table_name, event_id, destination_id)
+    or (
+      event_id is null
+      and destination_id is null
+      and public.reference_readable(public.my_role(), table_name)
+    )
+  )
 );
 
 drop policy if exists records_insert on public.records;

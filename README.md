@@ -176,9 +176,18 @@ with no bars.
 | Role | Can do |
 | --- | --- |
 | **Admin** | Everything, including the catalogue and who else has access |
-| **Crew** | Pack, adjust stock, run stocktakes, build loads |
-| **Driver** | Assigned loads, confirm deliveries |
+| **Crew, all events** | The warehouse: pack, adjust stock, run stocktakes, keep templates, build loads |
+| **Crew, one event** | Pack, build loads and plan food for that event; read the catalogue |
+| **Driver** | Assigned loads for one event, confirm deliveries |
 | **Volunteer** | One aid station's packlist; record what arrived |
+
+An invite names an event, or for crew may name none. Crew given one event see
+that event and nothing else: the events list holds one race, the transport tab
+one race's runs, and the stock tab is read-only. Stocktakes, templates, backups
+and starting a new event belong to the warehouse crew, who are invited with
+"All events". Typing another event's address, or opening another event's
+packlist or load, sends them home; the server never sends those rows in the
+first place.
 
 Volunteers are pinned to a single destination for a single event, and may only
 change what *arrived* — never what was supposed to be sent, since that would

@@ -32,7 +32,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 
 export const ROLE_BLURBS: Record<Role, string> = {
   admin: 'Full control, including the item catalogue and who else has access.',
-  crew: 'Pack, adjust stock, run stocktakes and build transport loads.',
+  crew: 'Pack, build transport loads and plan food. Given every event, they also run the warehouse: stock, stocktakes and templates.',
   driver: 'See assigned loads and confirm deliveries on the road.',
   volunteer: 'See one aid station’s packlist and record what actually arrived.',
 };
@@ -40,9 +40,11 @@ export const ROLE_BLURBS: Record<Role, string> = {
 /**
  * What a session is allowed to reach.
  *
- * A volunteer is pinned to one destination for one event; crew and admins are
- * unscoped. The backend is expected to enforce this too — the client-side check
- * is for a sensible UI, not for security.
+ * A volunteer is pinned to one destination for one event. Crew and drivers may
+ * be pinned to one event, in which case they see that event and the catalogue
+ * and nothing warehouse-wide; given no event they run the whole warehouse.
+ * Admins are always unscoped. The backend is expected to enforce this too —
+ * the client-side check is for a sensible UI, not for security.
  */
 export interface Scope {
   /** Restrict to a single event. Null means every event. */

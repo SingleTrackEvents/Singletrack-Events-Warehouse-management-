@@ -12,7 +12,9 @@ import { freshDb, wireRow } from './pg';
 
 const ADMIN = '11111111-1111-4111-8111-111111111111';
 const VOLUNTEER = '22222222-2222-4222-8222-222222222222';
+const CREW = '66666666-6666-4666-8666-666666666666';
 const EVENT = 'event-buffalo';
+const OTHER_EVENT = 'event-hounslow';
 const MY_STATION = 'dest-aid-3';
 const OTHER_STATION = 'dest-aid-4';
 
@@ -36,6 +38,14 @@ async function seeded() {
         table_name: 'packlists', id: 'pl-theirs',
         event_id: EVENT, destination_id: OTHER_STATION,
       }),
+      // A second race, with its own list, and a warehouse-wide stocktake.
+      wireRow({ table_name: 'events', id: OTHER_EVENT, event_id: OTHER_EVENT }),
+      wireRow({
+        table_name: 'packlists', id: 'pl-other-event',
+        event_id: OTHER_EVENT, destination_id: 'dest-hounslow-1',
+      }),
+      wireRow({ table_name: 'stocktakes', id: 'count-1' }),
+      wireRow({ table_name: 'templates', id: 'tpl-1' }),
     ]),
   ]);
 
@@ -243,6 +253,150 @@ describe('what a volunteer can change on a line', () => {
     );
     expect(rows[0].data.status).toBeUndefined();
     expect(rows[0].data.notes).toBe('all good');
+    await db.close();
+  });
+});
+
+/**
+ * Crew invited to one event. They pack Buffalo; Hounslow, the stocktake and
+ * the ledger are not theirs.
+ */
+async function eventCrew() {
+  const db = await seeded();
+  await db.actAs(ADMIN);
+  await db.addUser(CREW, 'sam@example.com');
+  const invite = await db.query<{ token: string }>(
+    `insert into public.invites (token, role, event_id, destination_id, label)
+     values ('CREW-BUFF', 'crew', $1, null, 'Crew — Buffalo') returning token`,
+    [EVENT],
+  );
+  await db.actAs(CREW);
+  await db.query(`select public.redeem_invite($1, 'Sam')`, [invite.rows[0].token]);
+  return db;
+}
+
+const push = (db: Awaited<ReturnType<typeof eventCrew>>, row: Record<string, unknown>) =>
+  db.query<{ push_records: Record<string, number> }>(
+    'select public.push_records($1::jsonb) as push_records',
+    [JSON.stringify([wireRow({ rev: 9, updated_at: '2026-05-01T00:00:00.000Z', ...row })])],
+  );
+
+describe('what crew given one event can read', () => {
+  it('sees every aid station on their event', async () => {
+    const db = await eventCrew();
+    await db.enforceRls();
+    const { rows } = await db.query<{ id: string }>(
+      `select id from public.records where table_name = 'packlists' order by id`,
+    );
+    expect(rows.map((r) => r.id)).toEqual(['pl-mine', 'pl-theirs']);
+    await db.close();
+  });
+
+  it('never sees another event', async () => {
+    const db = await eventCrew();
+    await db.enforceRls();
+    const { rows } = await db.query<{ id: string }>(
+      `select id from public.records where table_name = 'events'`,
+    );
+    expect(rows.map((r) => r.id)).toEqual([EVENT]);
+    await db.close();
+  });
+
+  it('still receives the catalogue and the templates', async () => {
+    // Without the catalogue their packlist is a list of ids.
+    const db = await eventCrew();
+    await db.enforceRls();
+    const { rows } = await db.query<{ id: string }>(
+      `select id from public.records where table_name in ('items', 'templates') order by id`,
+    );
+    expect(rows.map((r) => r.id)).toEqual(['item-1', 'tpl-1']);
+    await db.close();
+  });
+
+  it('does not receive stocktakes or anything else warehouse-wide', async () => {
+    const db = await eventCrew();
+    await db.enforceRls();
+    const { rows } = await db.query(
+      `select id from public.records where table_name = 'stocktakes'`,
+    );
+    expect(rows).toHaveLength(0);
+    await db.close();
+  });
+});
+
+describe('what crew given one event can write', () => {
+  it('rebuilds a packlist on their event outright', async () => {
+    const db = await eventCrew();
+    const { rows } = await push(db, {
+      table_name: 'packlists', id: 'pl-theirs',
+      event_id: EVENT, destination_id: OTHER_STATION,
+      data: { id: 'pl-theirs', status: 'packed', name: 'Aid 4 rebuilt' },
+    });
+    expect(rows[0].push_records.accepted).toBe(1);
+    const stored = await db.query<{ data: Record<string, unknown> }>(
+      `select data from public.records where id = 'pl-theirs'`,
+    );
+    expect(stored.rows[0].data).toMatchObject({ status: 'packed', name: 'Aid 4 rebuilt' });
+    await db.close();
+  });
+
+  it('is refused a write to another event', async () => {
+    const db = await eventCrew();
+    const { rows } = await push(db, {
+      table_name: 'packlists', id: 'pl-other-event',
+      event_id: OTHER_EVENT, destination_id: 'dest-hounslow-1',
+    });
+    expect(rows[0].push_records.refused).toBe(1);
+    expect(rows[0].push_records.accepted).toBe(0);
+    await db.close();
+  });
+
+  it('is refused a change to the catalogue they can read', async () => {
+    const db = await eventCrew();
+    const { rows } = await push(db, { table_name: 'items', id: 'item-1' });
+    expect(rows[0].push_records.refused).toBe(1);
+    await db.close();
+  });
+
+  it('is refused a stocktake, a stock movement and a template', async () => {
+    const db = await eventCrew();
+    for (const table_name of ['stocktakes', 'movements', 'templates']) {
+      const { rows } = await push(db, { table_name, id: `new-${table_name}` });
+      expect([table_name, rows[0].push_records.refused]).toEqual([table_name, 1]);
+    }
+    await db.close();
+  });
+
+  it('cannot create a new event of their own', async () => {
+    const db = await eventCrew();
+    const { rows } = await push(db, {
+      table_name: 'events', id: 'event-new', event_id: 'event-new',
+    });
+    expect(rows[0].push_records.refused).toBe(1);
+    await db.close();
+  });
+});
+
+describe('crew given every event', () => {
+  it('run the warehouse as before', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await db.addUser(CREW, 'sam@example.com');
+    await db.query(
+      `insert into public.invites (token, role, event_id, destination_id, label)
+       values ('CREW-ALL', 'crew', null, null, 'Crew — all events')`,
+    );
+    await db.actAs(CREW);
+    await db.query(`select public.redeem_invite('CREW-ALL', 'Sam')`);
+
+    const { rows } = await push(db, { table_name: 'items', id: 'item-1' });
+    expect(rows[0].push_records.accepted).toBe(1);
+
+    await db.enforceRls();
+    const seen = await db.query<{ id: string }>(
+      `select id from public.records where table_name = 'events' order by id`,
+    );
+    expect(seen.rows.map((r) => r.id)).toEqual([EVENT, OTHER_EVENT]);
     await db.close();
   });
 });

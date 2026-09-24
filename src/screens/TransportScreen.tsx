@@ -8,6 +8,8 @@ import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useEvents } from '../hooks/useDb';
+import { useSession } from '../hooks/sessionContext';
+import { can, reachable } from '../sync/permissions';
 import { LOAD_STATUS_LABELS, createLoad, loadProgress } from '../domain/transport';
 import { formatDateTime, plural } from '../domain/format';
 import { removeLoad } from '../domain/remove';
@@ -27,18 +29,23 @@ const TONE: Record<LoadStatus, 'default' | 'ok' | 'warn' | 'info' | 'accent'> = 
 export default function TransportScreen() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
+  const { session } = useSession();
   const events = useEvents();
   const toast = useToast();
   const eventFilter = params.get('event') ?? '';
   const [creating, setCreating] = useState(false);
   const [removing, setRemoving] = useState<Load>();
+  const canManage = can(session, 'load:manage');
 
+  // Only runs for events this account was given: the phone may hold others
+  // from its seed or from before the sign-in.
   const loads = useLiveQuery(
     async () =>
       alive(await db.loads.toArray())
+        .filter((load) => reachable(session, { eventId: load.eventId }))
         .filter((load) => !eventFilter || load.eventId === eventFilter)
         .sort((a, b) => (b.departAt ?? b.createdAt).localeCompare(a.departAt ?? a.createdAt)),
-    [eventFilter],
+    [eventFilter, session],
   );
 
   const stops = useLiveQuery(async () => alive(await db.loadStops.toArray()), [loads]);
@@ -47,32 +54,39 @@ export default function TransportScreen() {
     <Screen
       title="Transport"
       actions={
-        <button type="button" className="header-btn" aria-label="New load" onClick={() => setCreating(true)}>
-          +
-        </button>
+        canManage ? (
+          <button type="button" className="header-btn" aria-label="New load" onClick={() => setCreating(true)}>
+            +
+          </button>
+        ) : (
+          <span />
+        )
       }
     >
-      <div className="chip-row mb-3">
-        <button
-          type="button"
-          className="chip"
-          aria-pressed={!eventFilter}
-          onClick={() => setParams({}, { replace: true })}
-        >
-          All events
-        </button>
-        {(events ?? []).map((event) => (
+      {/* A filter with one option is nothing to choose between. */}
+      {(events?.length ?? 0) > 1 ? (
+        <div className="chip-row mb-3">
           <button
-            key={event.id}
             type="button"
             className="chip"
-            aria-pressed={eventFilter === event.id}
-            onClick={() => setParams(eventFilter === event.id ? {} : { event: event.id }, { replace: true })}
+            aria-pressed={!eventFilter}
+            onClick={() => setParams({}, { replace: true })}
           >
-            {event.name}
+            All events
           </button>
-        ))}
-      </div>
+          {(events ?? []).map((event) => (
+            <button
+              key={event.id}
+              type="button"
+              className="chip"
+              aria-pressed={eventFilter === event.id}
+              onClick={() => setParams(eventFilter === event.id ? {} : { event: event.id }, { replace: true })}
+            >
+              {event.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {loads && !loads.length ? (
         <EmptyState
@@ -80,9 +94,11 @@ export default function TransportScreen() {
           title="No loads yet"
           body="A load is one vehicle doing one trip — a driver, a run sheet and the crates on board."
           action={
-            <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-              Plan a load
-            </button>
+            canManage ? (
+              <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+                Plan a load
+              </button>
+            ) : undefined
           }
         />
       ) : null}
@@ -91,8 +107,7 @@ export default function TransportScreen() {
         {(loads ?? []).map((load) => {
           const progress = loadProgress((stops ?? []).filter((stop) => stop.loadId === load.id));
           const event = events?.find((entry) => entry.id === load.eventId);
-          return (
-            <SwipeToDelete key={load.id} onDelete={() => setRemoving(load)}>
+          const row = (
             <Link to={`/transport/${load.id}`} className="row">
               <span className="row-icon">🚚</span>
               <span className="row-body">
@@ -113,12 +128,18 @@ export default function TransportScreen() {
               </span>
               <Pill tone={TONE[load.status]}>{LOAD_STATUS_LABELS[load.status]}</Pill>
             </Link>
+          );
+          return canManage ? (
+            <SwipeToDelete key={load.id} onDelete={() => setRemoving(load)}>
+              {row}
             </SwipeToDelete>
+          ) : (
+            <div key={load.id}>{row}</div>
           );
         })}
       </div>
 
-      {loads?.length ? (
+      {loads?.length && canManage ? (
         <p className="tiny muted center mt-3">Swipe a run left to delete it.</p>
       ) : null}
 

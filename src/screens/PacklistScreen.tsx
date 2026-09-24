@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { ItemPicker } from '../components/ItemPicker';
@@ -205,6 +205,14 @@ export default function PacklistScreen() {
         <p className="muted">Loading…</p>
       </Screen>
     );
+  }
+
+  // The address names only the packlist, so the scope check has to wait until
+  // the record is read. A list from another event or another aid station sends
+  // the person home rather than opening: a shared phone, a stale link or a
+  // seeded list is not a way past what the account was given.
+  if (!can(session, 'packlist:read', { eventId: packlist.eventId, destinationId: packlist.destinationId })) {
+    return <Navigate to="/" replace />;
   }
 
   const advanceTo = nextStatus(packlist.status);

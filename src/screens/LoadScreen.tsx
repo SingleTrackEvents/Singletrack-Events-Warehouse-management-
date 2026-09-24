@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, Navigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { ConfirmSheet, Field, Pill, ProgressBar, Sheet } from '../components/ui';
@@ -7,6 +7,8 @@ import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, liveWhere, update } from '../db/repo';
 import { useCrewName, useDestinations } from '../hooks/useDb';
+import { useSession } from '../hooks/sessionContext';
+import { can } from '../sync/permissions';
 import {
   LOAD_STATUS_LABELS,
   addStop,
@@ -39,6 +41,10 @@ export default function LoadScreen() {
   const { loadId } = useParams();
   const toast = useToast();
   const crew = useCrewName();
+  const { session } = useSession();
+  // A driver confirms deliveries; the warehouse plans the run.
+  const canManage = can(session, 'load:manage');
+  const canDeliver = canManage || can(session, 'load:deliver');
 
   const load = useLiveQuery(async () => (loadId ? db.loads.get(loadId) : undefined), [loadId]);
   const stops = useLiveQuery(
@@ -65,6 +71,12 @@ export default function LoadScreen() {
     );
   }
 
+  // The address names only the load; the event it belongs to is known once
+  // the record is read, and a run for another event is not this account's.
+  if (!can(session, 'load:read', { eventId: load.eventId })) {
+    return <Navigate to="/" replace />;
+  }
+
   const progress = loadProgress(stops ?? []);
   const available = unassignedDestinations(destinations ?? [], stops ?? []);
   const destinationFor = (id: string) => destinations?.find((entry) => entry.id === id);
@@ -77,9 +89,13 @@ export default function LoadScreen() {
       subtitle={`${load.vehicle || 'No vehicle'} · ${LOAD_STATUS_LABELS[load.status]}`}
       back="/transport"
       actions={
-        <button type="button" className="header-btn" aria-label="Edit load" onClick={() => setEditing(true)}>
-          ✎
-        </button>
+        canManage ? (
+          <button type="button" className="header-btn" aria-label="Edit load" onClick={() => setEditing(true)}>
+            ✎
+          </button>
+        ) : (
+          <span />
+        )
       }
     >
       <div className="card card-pad mb-4">
@@ -106,7 +122,7 @@ export default function LoadScreen() {
       <section className="section">
         <div className="section-head">
           <h2>Run sheet</h2>
-          {available.length ? (
+          {available.length && canManage ? (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingStop(true)}>
               + Add stop
             </button>
@@ -179,39 +195,45 @@ export default function LoadScreen() {
                     </p>
                   ) : (
                     <div className="btn-row mt-3">
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={() => setDelivering(stop)}
-                      >
-                        Confirm delivery
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm"
-                        aria-label="Move stop earlier"
-                        disabled={index === 0}
-                        onClick={() => void moveStop(stops, stop.id, -1)}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm"
-                        aria-label="Move stop later"
-                        disabled={index === stops.length - 1}
-                        onClick={() => void moveStop(stops, stop.id, 1)}
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        aria-label="Remove stop"
-                        onClick={() => void removeStop(stop.id).then(() => toast('Stop removed'))}
-                      >
-                        🗑
-                      </button>
+                      {canDeliver ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => setDelivering(stop)}
+                        >
+                          Confirm delivery
+                        </button>
+                      ) : null}
+                      {canManage ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            aria-label="Move stop earlier"
+                            disabled={index === 0}
+                            onClick={() => void moveStop(stops, stop.id, -1)}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            aria-label="Move stop later"
+                            disabled={index === stops.length - 1}
+                            onClick={() => void moveStop(stops, stop.id, 1)}
+                          >
+                            ↓
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            aria-label="Remove stop"
+                            onClick={() => void removeStop(stop.id).then(() => toast('Stop removed'))}
+                          >
+                            🗑
+                          </button>
+                        </>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -221,7 +243,7 @@ export default function LoadScreen() {
         ) : (
           <div className="card card-pad center muted">
             No stops yet.{' '}
-            {available.length ? (
+            {!canManage ? null : available.length ? (
               <button type="button" className="btn btn-primary btn-sm mt-3" onClick={() => setAddingStop(true)}>
                 Add the first stop
               </button>
@@ -232,7 +254,7 @@ export default function LoadScreen() {
         )}
       </section>
 
-      {load.status === 'planned' || load.status === 'loading' ? (
+      {!canManage ? null : load.status === 'planned' || load.status === 'loading' ? (
         <div className="action-bar no-print">
           <button
             type="button"

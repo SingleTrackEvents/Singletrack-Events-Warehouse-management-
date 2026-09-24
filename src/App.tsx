@@ -8,6 +8,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useParams,
 } from 'react-router-dom';
 import { AccountChip } from './components/AccountChip';
 import { ToastProvider } from './components/ui';
@@ -90,11 +91,18 @@ function BottomNav() {
  * suggestion and a URL is not — a shared phone, a bookmark or a stale link all
  * get past it. The server refuses the data either way; this stops someone
  * landing on a screen that can only sit there empty and look broken.
+ *
+ * Where the address names an event, that event is checked against the
+ * account's scope too, so crew given one race cannot open another by editing
+ * the URL. Packlists and loads name only their own id and are checked by their
+ * screens once the record is read.
  */
 function Guard({ needs, children }: { needs: Action; children: ReactElement }) {
   const { session, ready } = useSession();
+  const { eventId } = useParams();
   if (!ready) return <div className="app-main muted">Loading…</div>;
-  return can(session, needs) ? children : <Navigate to="/" replace />;
+  const allowed = can(session, needs, eventId ? { eventId } : undefined);
+  return allowed ? children : <Navigate to="/" replace />;
 }
 
 /**

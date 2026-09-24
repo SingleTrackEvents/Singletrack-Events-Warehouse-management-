@@ -195,8 +195,9 @@ export default function AccessScreen() {
           </button>
         ) : null}
         <p className="tiny muted">{ROLE_BLURBS[session.role]}</p>
+        <ScopeLine scope={session.scope} />
         <ul className="small muted mt-2" style={{ paddingLeft: '1.1em', margin: 0 }}>
-          {describeRole(session.role).map((line) => (
+          {describeRole(session.role, session.scope).map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
@@ -664,6 +665,27 @@ function LinkFailureNotice() {
   );
 }
 
+/**
+ * What an account or an invite is limited to, in words.
+ *
+ * The event name comes from this phone's copy of the events; the one the
+ * account is pinned to is always among them, since it is the one the server
+ * sends.
+ */
+function ScopeLine({ scope }: { scope: Scope }) {
+  const events = useEvents();
+  const destinations = useDestinations(scope.destinationId ? scope.eventId ?? undefined : undefined);
+  if (!scope.eventId) return <p className="tiny muted mt-1">Every event, and the warehouse.</p>;
+  const event = events?.find((entry) => entry.id === scope.eventId);
+  const destination = destinations?.find((entry) => entry.id === scope.destinationId);
+  return (
+    <p className="tiny muted mt-1">
+      Limited to {event?.name ?? 'one event'}
+      {scope.destinationId ? ` · ${destination?.name ?? 'one aid station'}` : ' only'}.
+    </p>
+  );
+}
+
 /** A printable invite: QR, code and what it grants. */
 function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => void }) {
   const { backend, session } = useSession();
@@ -695,6 +717,7 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
             {invite.expiresAt ? `Ends ${formatDateTime(invite.expiresAt)}` : 'No expiry'} ·{' '}
             {plural(invite.usedCount, 'person', 'people')} joined
           </p>
+          <ScopeLine scope={invite.scope} />
           {!dead ? (
             <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={() => setRevoking(true)}>
               Revoke
@@ -782,6 +805,9 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const create = async () => {
     if (!backend || !session) return;
     const scope: Scope = {
+      // Crew may be given every event, which makes them warehouse crew: stock,
+      // stocktakes and templates as well as packing. Everyone else is pinned
+      // to one event.
       eventId: eventId || null,
       // Only a volunteer gets pinned to a single aid station; a driver needs the
       // whole event to see every stop on their run.
@@ -792,7 +818,7 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
     const label =
       role === 'volunteer' && destination
         ? destination.name
-        : `${ROLE_LABELS[role]}${event ? ` — ${event.name}` : ''}`;
+        : `${ROLE_LABELS[role]} — ${event ? event.name : 'all events'}`;
 
     try {
       await backend.createInvite(session, { role, scope, label });
@@ -805,6 +831,9 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
   };
 
   const needsDestination = role === 'volunteer';
+  // Only crew can be let loose on the whole warehouse; a driver or a volunteer
+  // without an event would have nothing to be shown.
+  const needsEvent = role !== 'crew';
 
   return (
     <Sheet
@@ -818,7 +847,7 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
           <button
             type="button"
             className="btn btn-primary"
-            disabled={!eventId || (needsDestination && !destinationId)}
+            disabled={(needsEvent && !eventId) || (needsDestination && !destinationId)}
             onClick={() => void create()}
           >
             Create
@@ -832,13 +861,22 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
             <select id={id} className="select" value={role} onChange={(e) => setRole(e.target.value as Role)}>
               <option value="volunteer">Volunteer — one aid station</option>
               <option value="driver">Driver — their loads for one event</option>
-              <option value="crew">Crew — full operational access</option>
+              <option value="crew">Crew — pack and run one event, or the whole warehouse</option>
             </select>
           )}
         </Field>
         <p className="tiny muted">{ROLE_BLURBS[role]}</p>
 
-        <Field label="Event">
+        <Field
+          label="Event"
+          hint={
+            role === 'crew'
+              ? eventId
+                ? 'They will see this event and the catalogue, and nothing warehouse-wide.'
+                : 'Every event, plus stock, stocktakes and templates. For the warehouse crew.'
+              : undefined
+          }
+        >
           {(id) => (
             <select
               id={id}
@@ -849,7 +887,7 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
                 setDestinationId('');
               }}
             >
-              <option value="">Choose an event</option>
+              <option value="">{needsEvent ? 'Choose an event' : 'All events (warehouse crew)'}</option>
               {(events ?? []).map((event) => (
                 <option key={event.id} value={event.id}>
                   {event.name}
