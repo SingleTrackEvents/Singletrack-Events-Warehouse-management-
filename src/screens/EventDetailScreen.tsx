@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
@@ -8,7 +8,6 @@ import { db } from '../db/db';
 import { alive, create, nextSort, softDelete, softDeleteChildren, update } from '../db/repo';
 import { useDestinations, useEvent } from '../hooks/useDb';
 import { applyTemplate, createPacklist, primaryPacklist, progressFor, PACKLIST_STATUS_LABELS } from '../domain/packlists';
-import { downloadJson, exportEvent, slugify } from '../domain/backup';
 import {
   ACCESS_LABELS,
   DESTINATION_ICONS,
@@ -18,8 +17,6 @@ import {
   plural,
   relativeDays,
 } from '../domain/format';
-import { copyEvent, nextYearDefaults, previewCopy } from '../domain/events';
-import type { CopyEventOptions, CopyPreview } from '../domain/events';
 import type {
   AccessType,
   Destination,
@@ -54,7 +51,6 @@ export default function EventDetailScreen() {
   const [addingDestination, setAddingDestination] = useState(false);
   const [editing, setEditing] = useState(false);
   const [buildingLists, setBuildingLists] = useState(false);
-  const [copying, setCopying] = useState(false);
   const [removing, setRemoving] = useState<Destination>();
 
   // Packlists and their line progress, keyed by destination for the list below.
@@ -92,12 +88,6 @@ export default function EventDetailScreen() {
 
   const withoutPacklist = (destinations ?? []).filter((destination) => !summaries?.get(destination.id));
 
-  const handover = async () => {
-    const backup = await exportEvent(event.id, `${event.name} handover`);
-    downloadJson(backup, `${slugify(event.name)}-handover.json`);
-    toast('Handover file saved to downloads');
-  };
-
   return (
     <Screen
       title={event.name}
@@ -128,12 +118,6 @@ export default function EventDetailScreen() {
           <Link className="btn btn-outline btn-sm" to={`/import?event=${event.id}`}>
             📄 Import pack list
           </Link>
-          <button type="button" className="btn btn-outline btn-sm" onClick={() => void handover()}>
-            ⬇ Handover file
-          </button>
-          <button type="button" className="btn btn-outline btn-sm" onClick={() => setCopying(true)}>
-            🗓 Copy for {nextYearDefaults(event).startDate.slice(0, 4)}
-          </button>
         </div>
       </div>
 
@@ -252,18 +236,6 @@ export default function EventDetailScreen() {
       ) : null}
 
       {editing ? <EditEventSheet eventId={event.id} onClose={() => setEditing(false)} /> : null}
-
-      {copying ? (
-        <CopyEventSheet
-          event={event}
-          onClose={() => setCopying(false)}
-          onDone={(copy) => {
-            setCopying(false);
-            toast(`${copy.name} created`);
-            navigate(`/events/${copy.id}`);
-          }}
-        />
-      ) : null}
 
       {buildingLists ? (
         <BuildListsSheet
@@ -606,144 +578,6 @@ function EditEventSheet({ eventId, onClose }: { eventId: string; onClose: () => 
       </div>
     </Sheet>
   );
-}
-
-/**
- * Roll the whole race over to next year.
- *
- * The dates default to the same weekend rather than the same date — a race on
- * the first Saturday in September stays on a Saturday — and everything is
- * editable before it commits, because a course changes and a venue moves.
- */
-function CopyEventSheet({
-  event,
-  onClose,
-  onDone,
-}: {
-  event: RaceEvent;
-  onClose: () => void;
-  onDone: (copy: RaceEvent) => void;
-}) {
-  const [options, setOptions] = useState<CopyEventOptions>(() => nextYearDefaults(event));
-  const [preview, setPreview] = useState<CopyPreview>();
-  const [working, setWorking] = useState(false);
-
-  useEffect(() => {
-    void previewCopy(event.id).then(setPreview);
-  }, [event.id]);
-
-  const set = <K extends keyof CopyEventOptions>(key: K, value: CopyEventOptions[K]) =>
-    setOptions((current) => ({ ...current, [key]: value }));
-
-  return (
-    <Sheet
-      title="Copy to next year"
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="btn btn-outline" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!options.name.trim() || working}
-            onClick={() => {
-              setWorking(true);
-              void copyEvent(event.id, options).then((copy) => {
-                if (copy) onDone(copy);
-                else setWorking(false);
-              });
-            }}
-          >
-            {working ? 'Copying…' : 'Create copy'}
-          </button>
-        </>
-      }
-    >
-      <div className="stack">
-        <p className="small muted">
-          {preview
-            ? `${plural(preview.destinations, 'destination')} come across with their access notes, crew leads and timings.`
-            : 'Reading this year’s setup…'}
-        </p>
-
-        <Field label="Event name">
-          {(id) => (
-            <input
-              id={id}
-              className="input"
-              value={options.name}
-              onChange={(changed) => set('name', changed.target.value)}
-            />
-          )}
-        </Field>
-        <Field label="Location">
-          {(id) => (
-            <input
-              id={id}
-              className="input"
-              value={options.location}
-              onChange={(changed) => set('location', changed.target.value)}
-            />
-          )}
-        </Field>
-        <div className="field-row">
-          <Field label="Starts">
-            {(id) => (
-              <input
-                id={id}
-                type="date"
-                className="input"
-                value={options.startDate}
-                onChange={(changed) => set('startDate', changed.target.value)}
-              />
-            )}
-          </Field>
-          <Field label="Ends">
-            {(id) => (
-              <input
-                id={id}
-                type="date"
-                className="input"
-                value={options.endDate}
-                onChange={(changed) => set('endDate', changed.target.value)}
-              />
-            )}
-          </Field>
-        </div>
-        <p className="tiny muted">
-          Dates default to the same weekend next year — {formatDateRange(event.startDate, event.endDate)}{' '}
-          was a {weekdayOf(event.startDate)}, so this one is too.
-        </p>
-
-        {preview?.packlists ? (
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={options.withPacklists}
-              onChange={(changed) => set('withPacklists', changed.target.checked)}
-            />
-            <span>
-              <span className="strong">Copy the packlists too</span>
-              <span className="small muted" style={{ display: 'block' }}>
-                {plural(preview.packlists, 'list')} and {plural(preview.lines, 'line')} come over as
-                quantities to pack. Nothing is marked packed, no crates are recreated and no stock
-                moves.
-              </span>
-            </span>
-          </label>
-        ) : null}
-      </div>
-    </Sheet>
-  );
-}
-
-/** Weekday of an ISO date, for explaining why the copy picked its dates. */
-function weekdayOf(iso: string): string {
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return 'weekend';
-  return date.toLocaleDateString(undefined, { weekday: 'long', timeZone: 'UTC' });
 }
 
 /**

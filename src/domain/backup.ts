@@ -34,54 +34,6 @@ export async function exportAll(label = 'Full backup'): Promise<Backup> {
   return { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: nowIso(), label, tables };
 }
 
-/**
- * One event and everything hanging off it, plus the item catalogue the
- * packlists refer to. This is the file you hand to a driver or an aid station
- * lead who only needs their own race.
- */
-export async function exportEvent(eventId: string, label = 'Event handover'): Promise<Backup> {
-  const [event, destinations, packlists, loads, items, categories, containers, races, consumptionLines] =
-    await Promise.all([
-      db.events.get(eventId),
-      db.destinations.where('eventId').equals(eventId).toArray(),
-      db.packlists.where('eventId').equals(eventId).toArray(),
-      db.loads.where('eventId').equals(eventId).toArray(),
-      db.items.toArray(),
-      db.categories.toArray(),
-      db.containers.toArray(),
-      db.races.where('eventId').equals(eventId).toArray(),
-      db.consumptionLines.where('eventId').equals(eventId).toArray(),
-    ]);
-
-  const packlistIds = new Set(packlists.map((packlist) => packlist.id));
-  const loadIds = new Set(loads.map((load) => load.id));
-  const [allLines, allStops] = await Promise.all([
-    db.packlistLines.toArray(),
-    db.loadStops.toArray(),
-  ]);
-
-  return {
-    format: BACKUP_FORMAT,
-    version: BACKUP_VERSION,
-    exportedAt: nowIso(),
-    eventId,
-    label,
-    tables: {
-      events: event ? [event] : [],
-      destinations,
-      packlists,
-      packlistLines: allLines.filter((line) => packlistIds.has(line.packlistId)),
-      containers: containers.filter((container) => packlistIds.has(container.packlistId)),
-      loads,
-      loadStops: allStops.filter((stop) => loadIds.has(stop.loadId)),
-      races,
-      consumptionLines,
-      items,
-      categories,
-    },
-  };
-}
-
 export interface ImportResult {
   added: number;
   updated: number;
@@ -159,8 +111,7 @@ export async function importBackup(
  * nothing, and sits empty for good.
  *
  * It follows that on a signed-in device the data comes back on the next sync.
- * To remove something for everyone, delete the record itself; to drop the
- * worked example, use removeDemoData().
+ * To remove something for everyone, delete the record itself.
  */
 export async function wipeAll(): Promise<void> {
   for (const name of ALL_TABLES) {

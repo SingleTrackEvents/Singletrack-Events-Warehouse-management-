@@ -440,14 +440,8 @@ export interface LoadStop extends SyncMeta {
 /* --------------------------------------------------------------- settings -- */
 
 export interface Settings extends SyncMeta {
-  orgName: string;
   /** Name stamped on movements and packlists made from this device. */
   crewName: string;
-  /** Vehicles available to build loads from. */
-  vehicles: string[];
-  /** Crew names offered in pickers. */
-  crew: string[];
-  theme: 'system' | 'light' | 'dark';
-  /** Whether the demo dataset has been offered/loaded. */
+  /** Whether the starter catalogue has been loaded on this device. */
   seeded: boolean;
 }

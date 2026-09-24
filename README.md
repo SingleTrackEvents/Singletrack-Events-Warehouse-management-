@@ -49,11 +49,9 @@ a new item with a category, and a heading that matches no station can be
 skipped or created. An item lands on a packlist once however many times the
 file mentions it, and importing the same file twice changes nothing.
 
-**QR codes** — every packlist and crate gets a short code (`AS3-7K2M`,
-`AS3-7K2M/02`) and a printable QR label. Scanning opens the right list; the code
-can also be typed or read out over the radio when the camera won't cooperate.
-Supplier barcodes can be linked to items so scanning a carton opens its stock
-page.
+**Codes** — every packlist gets a short code (`AS3-7K2M`) that can be typed into
+the scanner or read out over the radio. Supplier barcodes can be linked to items
+so scanning a carton opens its stock page.
 
 **Stocktake** — count sessions scoped to everything or one category, ordered by
 bin so you walk the racks rather than an alphabet. Expected quantities are
@@ -64,9 +62,6 @@ create a phantom discrepancy. Uncounted lines are never zeroed.
 delivery order, access notes per stop, and a delivery confirmation with a name.
 Departing the warehouse issues everything on board out of stock; reconciling
 returns books back whatever came home.
-
-**Paper** — printable packlists with tick boxes and a signature line, plus CSV
-export. Paper is still the fallback when a phone dies at an aid station.
 
 ## Running it
 
@@ -84,10 +79,10 @@ npm run dev        # http://localhost:5173
 | `npm run lint` | Lint |
 | `npm run icons` | Regenerate PWA icons from `public/icon.svg` |
 
-A new install seeds a worked example — one race a fortnight out and mid-pack, one
-in planning, one just finished — so the app opens on something recognisable
-rather than an empty shell. Settings → Data clears it once you're ready to enter
-your own gear.
+A new install seeds the SingleTrack warehouse catalogue and the season's events
+with their aid stations, so the app opens on something recognisable rather than
+an empty shell. More → Data → Erase everything clears this device if you want to
+start from nothing.
 
 ### Installing it on a phone
 
@@ -104,21 +99,20 @@ UUID, a revision counter, `updatedAt`, the originating device, and a soft-delete
 tombstone instead of a hard delete. Writes go through `src/db/repo.ts`, which
 stamps all of it. Adding a server later is a sync layer, not a data migration.
 
-Until then, data moves as files. Settings → Backup exports the whole device;
-an event page exports just that race, its packlists and the catalogue they refer
-to — the file you hand to a driver. Imports **merge** by revision, so importing a
-stale file can never undo fresher local work.
+Until then, data moves as files. More → Backup & handover exports the whole
+device as one file. Imports **merge** by revision, so importing a stale file can
+never undo fresher local work.
 
 ## Layout
 
 ```
 src/
-  db/          Schema, Dexie database, CRUD helpers, demo data
+  db/          Schema, Dexie database, CRUD helpers, seed data
   domain/      Business logic — stock ledger, packlist lifecycle, stocktake,
                transport, backup, short codes, formatting, pack list import
                (a workbook reader, a PDF-to-grid pass, name matching)
   hooks/       Live queries (Dexie useLiveQuery) and search
-  components/  Shared UI — sheets, steppers, toasts, scanner, QR codes
+  components/  Shared UI — sheets, steppers, toasts, scanner, invite QR codes
   screens/     One file per screen, lazily routed
   sync/        Backend contract, role permissions, sync engine, Supabase adapter
 supabase/      Database schema and row-level security policies
@@ -138,20 +132,20 @@ actually read and write. Two SQL bugs reached production before this existed,
 because the only way to run the schema was to deploy it.
 
 ```bash
-npm test    # 427 tests, including the Postgres schema and policies
+npm test    # 432 tests, including the Postgres schema and policies
 ```
 
 ## Design notes
 
 - **Sunlight and gloves.** 48px minimum tap targets, heavy weights, solid fills,
-  16px inputs so iOS doesn't zoom on focus. Light and dark themes, plus a manual
-  override for people who keep their phone on one setting.
+  16px inputs so iOS doesn't zoom on focus. Light and dark themes follow the
+  phone.
 - **Filters default to what's left.** Packing and counting both open on the
   outstanding items so the list shrinks as the work gets done.
 - **Sticky primary action.** The one thing to do next sits under the thumb.
-- **Hash routing.** QR deep links resolve wherever the app is served from — a
-  subfolder, a static host, a copy on the warehouse laptop — with no server
-  rewrites.
+- **Hash routing.** Invite QR codes and typed deep links resolve wherever the app
+  is served from (a subfolder, a static host, a copy on the warehouse laptop)
+  with no server rewrites.
 - **Scanning degrades.** Native `BarcodeDetector` where it exists, jsQR
   everywhere else (including iOS Safari), and a typed-code fallback under both.
 

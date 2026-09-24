@@ -42,17 +42,11 @@ import type { Item, RaceVisit, SyncMeta, Unit } from './types';
  * double every item and template. Deriving the ids from the content makes the
  * two copies the same rows, so they collapse into one set.
  *
- * The prefix is `stw-`, not the `demo-` the old worked example used: the demo
- * removal tool matches that prefix, and sharing it would have pointed the tool
- * at the real warehouse.
+ * The prefix is `stw-`, not the `demo-` the old worked example used, so the two
+ * never collide.
  */
 export function seedId(kind: string, key: string): string {
   return `stw-${kind}-${key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
-}
-
-/** True for anything the old worked-example seed created. */
-export function isDemoId(id: string): boolean {
-  return id.startsWith('demo-');
 }
 
 /**

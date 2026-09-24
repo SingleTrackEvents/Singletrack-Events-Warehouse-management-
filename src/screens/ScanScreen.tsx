@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { Scanner } from '../components/Scanner';
@@ -12,9 +12,9 @@ import { PACKLIST_STATUS_LABELS } from '../domain/packlists';
 /**
  * One scanner for everything.
  *
- * A scan resolves in this order: packlist code → crate label → item barcode →
- * item SKU. That means the same button works whether someone is holding a crate,
- * a carton of gels or a printed run sheet, which is the only way a scanner gets
+ * A scan resolves in this order: packlist code → item barcode → item SKU. That
+ * means the same button works whether someone is holding a packlist code, a
+ * carton of gels or a printed run sheet, which is the only way a scanner gets
  * used in the field rather than ignored.
  */
 
@@ -32,16 +32,7 @@ async function resolve(raw: string): Promise<Resolution> {
     if (packlist) return { kind: 'packlist', id: packlist.id, label: packlist.name };
   }
 
-  // A crate label carries the packlist code plus a crate number.
   const code = normaliseCode(value);
-  const container = alive(await db.containers.toArray()).find(
-    (entry) => normaliseCode(entry.code) === code,
-  );
-  if (container) {
-    const packlist = await db.packlists.get(container.packlistId);
-    if (packlist) return { kind: 'packlist', id: packlist.id, label: `${packlist.name} · ${container.code}` };
-  }
-
   const items = alive(await db.items.toArray());
   const byBarcode = items.find((item) => item.barcode && item.barcode.trim() === value);
   if (byBarcode) return { kind: 'item', id: byBarcode.id, label: byBarcode.name };
@@ -54,17 +45,11 @@ async function resolve(raw: string): Promise<Resolution> {
 
 export default function ScanScreen() {
   const { code } = useParams();
-  const [search] = useSearchParams();
   const navigate = useNavigate();
   const toast = useToast();
   const [manual, setManual] = useState('');
   const [missed, setMissed] = useState<string>();
   const [busy, setBusy] = useState(false);
-
-  // A label printed by a newer build carries what it is, so an unrecognised code
-  // can still say "this crate is Aid 3 — Buffalo Plateau" rather than nothing.
-  const labelName = search.get('n') ?? '';
-  const labelEvent = search.get('e') ?? '';
 
   // Offered as a fallback when a code does not resolve on this device.
   const localPacklists = useLiveQuery(
@@ -100,8 +85,8 @@ export default function ScanScreen() {
   return (
     <Screen title="Scan" back="-1">
       <p className="small muted mb-3">
-        Point the camera at a crate label, a packlist QR or a barcode on a carton. Codes can also be
-        typed in — handy when the lens is covered in mud.
+        Point the camera at a barcode on a carton, or type a packlist code in — handy when the lens
+        is covered in mud.
       </p>
 
       <Scanner onDetect={(value) => void handle(value)} />
@@ -129,29 +114,12 @@ export default function ScanScreen() {
 
       {missed ? (
         <div className="card card-pad mt-4">
-          {labelName ? (
-            <>
-              <p className="small muted mb-1">That label says it is:</p>
-              <h3>{labelName}</h3>
-              {labelEvent ? <p className="small muted">{labelEvent}</p> : null}
-              <p className="mono strong mt-2">{missed}</p>
-              <div className="divider" />
-              <p className="small strong mb-2">
-                …but this device has no packlist with that code.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="small strong mb-2">Nothing matches that code.</p>
-              <p className="tiny muted mono mb-3">{missed}</p>
-            </>
-          )}
+          <p className="small strong mb-2">Nothing matches that code.</p>
+          <p className="tiny muted mono mb-3">{missed}</p>
 
           <p className="tiny muted">
-            Packlists live on the device that built them. A label scanned with the phone's camera
-            app opens in the browser, which keeps its own separate data — so use the{' '}
-            <span className="strong">Scan</span> button inside this app instead, or import that
-            device's backup from More → Backup &amp; handover.
+            Packlists live on the device that built them. If the code came from another phone, sign
+            in to sync or import that device's backup from More → Backup &amp; handover.
           </p>
 
           {localPacklists?.length ? (

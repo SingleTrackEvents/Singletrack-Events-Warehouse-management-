@@ -6,73 +6,18 @@ import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useEvents, useItems, useSettings } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
-import { SignInPrompt } from '../components/SignInPrompt';
-import { ROLE_LABELS } from '../sync/types';
 import { isStationOnly } from '../sync/permissions';
-import { countedItemIds, isUncounted, lowStockItems } from '../domain/stock';
+import { countedItemIds, lowStockItems } from '../domain/stock';
 import { packlistForDestination, progressFor, receiptFor } from '../domain/packlists';
-import { daysUntil, formatDateRange, formatDateTime, plural, relativeDays } from '../domain/format';
+import { daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
 import { LOAD_STATUS_LABELS } from '../domain/transport';
 import type { Destination, Packlist, PacklistLine } from '../db/types';
-import logo from '../assets/logo-white.png';
-
-/**
- * Says plainly who is signed in and whether their work has left the phone.
- *
- * The sync state is not a technical detail here: a crew member who has packed
- * four stations needs to know that landed somewhere before they drive out of
- * range, and "it looked fine" is not good enough.
- */
-function AccountBanner() {
-  const { backend, session, pending, phase, lastSyncAt } = useSession();
-  // Nothing truthful to say about an account that does not exist yet; the
-  // first-run prompt covers that case instead.
-  if (!backend) return <SignInPrompt />;
-
-  if (!session) {
-    return (
-      <Link to="/access" className="card card-pad mb-4" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
-        <div className="spread">
-          <span className="strong">Not signed in</span>
-          <Pill tone="warn">Tap to sign in</Pill>
-        </div>
-        <p className="tiny muted mt-2">Working on this device only — nothing is shared with the crew.</p>
-      </Link>
-    );
-  }
-
-  const busy = phase === 'pushing' || phase === 'pulling';
-  const tone = phase === 'error' ? 'danger' : pending > 0 || busy ? 'accent' : 'ok';
-
-  return (
-    <Link to="/access" className="card card-pad mb-4" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
-      <div className="spread">
-        <span className="grow truncate">
-          <span className="strong">{session.displayName}</span>
-          <span className="muted"> · {ROLE_LABELS[session.role]}</span>
-        </span>
-        <Pill tone={tone}>
-          {phase === 'error'
-            ? 'Sync problem'
-            : busy
-              ? 'Syncing…'
-              : pending > 0
-                ? `${pending} waiting`
-                : 'Synced'}
-        </Pill>
-      </div>
-      <p className="tiny muted mt-2">
-        {session.email ?? 'Joined by invite'}
-        {lastSyncAt ? ` · last synced ${formatDateTime(lastSyncAt)}` : ' · not synced yet'}
-      </p>
-    </Link>
-  );
-}
 
 /**
  * The screen the crew lands on. It answers the three questions asked most often
  * in the week before a race: what is next, how far through packing are we, and
- * what are we short of.
+ * what are we short of. Account and sync state live in the header chip, and
+ * everything else has a tab, so nothing here repeats what is a tap away.
  */
 export default function HomeScreen() {
   const navigate = useNavigate();
@@ -150,7 +95,6 @@ export default function HomeScreen() {
   // you teach someone to ignore the number. The stock screen already knew
   // this; the home screen did not.
   const low = items ? lowStockItems(items, counted) : [];
-  const uncounted = items ? items.filter((item) => isUncounted(item, counted)).length : 0;
   // The signed-in account wins over the device's own crew name, which is left
   // over from offline-only mode and would otherwise greet you as someone else.
   const who = session?.displayName || settings?.crewName;
@@ -158,15 +102,9 @@ export default function HomeScreen() {
 
   return (
     <Screen title="SingleTrack Warehouse" subtitle={greeting}>
-      {/* The logo artwork is white-on-transparent, so it sits on brand teal. */}
-      <div className="brand-banner">
-        <img src={logo} alt="SingleTrack Events" />
-      </div>
-      <AccountBanner />
-
       {/* Scanning is the fastest way in, so it gets the biggest button. */}
       <button type="button" className="btn btn-primary btn-lg btn-block mb-4" onClick={() => navigate('/scan')}>
-        ⛶ Scan a crate or item
+        ⛶ Scan a barcode or packlist code
       </button>
 
       {focus ? (
@@ -266,33 +204,14 @@ export default function HomeScreen() {
         </section>
       ) : null}
 
-      <section className="section">
-        <div className="section-head">
-          <h2>Needs attention</h2>
-        </div>
-        <div className="stat-grid mb-3">
-          <Link to="/stock?filter=low" className="stat" style={{ textDecoration: 'none', color: 'inherit' }}>
-            <div className="value" style={{ color: low.length ? 'var(--danger)' : 'var(--ok)' }}>
-              {low.length}
-            </div>
-            <div className="label">Below reorder point</div>
-          </Link>
-          <div className="stat">
-            <div className="value">{items?.length ?? '—'}</div>
-            <div className="label">Items in catalogue</div>
+      {low.length ? (
+        <section className="section">
+          <div className="section-head">
+            <h2>Running low</h2>
+            <Link to="/stock?filter=low" className="small">
+              {plural(low.length, 'item')}
+            </Link>
           </div>
-        </div>
-
-        {/* Said out loud rather than folded into the low count: a shelf nobody
-            has counted is not the same problem as a shelf that has run out. */}
-        {uncounted ? (
-          <p className="tiny muted mb-3">
-            {uncounted} of them have never been counted, so the warehouse cannot vouch for what is
-            on the shelf. <Link to="/stocktake">Run a stocktake</Link>
-          </p>
-        ) : null}
-
-        {low.length ? (
           <div className="list">
             {low.slice(0, 5).map((item) => (
               <Link key={item.id} to={`/stock/${item.id}`} className="row">
@@ -307,42 +226,8 @@ export default function HomeScreen() {
               </Link>
             ))}
           </div>
-        ) : (
-          <p className="small muted">Everything is above its reorder point.</p>
-        )}
-      </section>
-
-      <section className="section">
-        <div className="section-head">
-          <h2>Jump to</h2>
-        </div>
-        <div className="list">
-          <Link to="/stocktake" className="row">
-            <span className="row-icon">🔢</span>
-            <span className="row-body">
-              <span className="row-title">Start a stocktake</span>
-              <span className="row-sub">Count the racks, fix the numbers</span>
-            </span>
-            <span className="row-chevron">›</span>
-          </Link>
-          <Link to="/templates" className="row">
-            <span className="row-icon">📋</span>
-            <span className="row-body">
-              <span className="row-title">Packlist templates</span>
-              <span className="row-sub">Reusable patterns for each station type</span>
-            </span>
-            <span className="row-chevron">›</span>
-          </Link>
-          <Link to="/more" className="row">
-            <span className="row-icon">💾</span>
-            <span className="row-body">
-              <span className="row-title">Backup &amp; handover</span>
-              <span className="row-sub">Export a file for the driver</span>
-            </span>
-            <span className="row-chevron">›</span>
-          </Link>
-        </div>
-      </section>
+        </section>
+      ) : null}
     </Screen>
   );
 }
