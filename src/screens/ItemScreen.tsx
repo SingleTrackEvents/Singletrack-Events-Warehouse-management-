@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
+import { useSession } from '../hooks/sessionContext';
+import { can } from '../sync/permissions';
 import { ItemPicker } from '../components/ItemPicker';
 import { Scanner } from '../components/Scanner';
 import { SwipeToDelete } from '../components/SwipeToDelete';
@@ -47,6 +49,12 @@ export default function ItemScreen() {
   const [addingContents, setAddingContents] = useState(false);
   const allItems = useItems();
   const itemsById = useMemo(() => byId(allItems ?? []), [allItems]);
+  const { session } = useSession();
+  // Crew given one event, and drivers, read the catalogue to make sense of
+  // their packlists; changing what is in it, or how much, is the warehouse's.
+  const canEdit = can(session, 'item:write');
+  const canAdjust = can(session, 'stock:adjust');
+  const canArchive = can(session, 'item:archive');
 
   if (!item) {
     return (
@@ -64,9 +72,13 @@ export default function ItemScreen() {
       subtitle={item.sku || undefined}
       back="/stock"
       actions={
-        <button type="button" className="header-btn" aria-label="Edit item" onClick={() => setEditing(true)}>
-          ✎
-        </button>
+        canEdit ? (
+          <button type="button" className="header-btn" aria-label="Edit item" onClick={() => setEditing(true)}>
+            ✎
+          </button>
+        ) : (
+          <span />
+        )
       }
     >
       <div className="card card-pad mb-4">
@@ -99,63 +111,85 @@ export default function ItemScreen() {
         {item.notes ? <p className="small muted mt-3">{item.notes}</p> : null}
       </div>
 
-      <div className="btn-row mb-3">
-        <button type="button" className="btn btn-primary" onClick={() => setAdjusting(true)}>
-          ± Adjust
-        </button>
-        <button type="button" className="btn btn-outline" onClick={() => setCounting(true)}>
-          🔢 Set count
-        </button>
-      </div>
-
-      <div className="btn-row mb-4">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setScanning(true)}>
-          {item.barcode ? '⛶ Change barcode' : '⛶ Link a barcode'}
-        </button>
-        {!isKit(item) ? (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingContents(true)}>
-            📦 List what’s inside
+      {canAdjust ? (
+        <div className="btn-row mb-3">
+          <button type="button" className="btn btn-primary" onClick={() => setAdjusting(true)}>
+            ± Adjust
           </button>
-        ) : null}
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setArchiving(true)}>
-          🗄 Archive
-        </button>
-      </div>
+          <button type="button" className="btn btn-outline" onClick={() => setCounting(true)}>
+            🔢 Set count
+          </button>
+        </div>
+      ) : null}
+
+      {canEdit || canArchive ? (
+        <div className="btn-row mb-4">
+          {canEdit ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setScanning(true)}>
+              {item.barcode ? '⛶ Change barcode' : '⛶ Link a barcode'}
+            </button>
+          ) : null}
+          {canEdit && !isKit(item) ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingContents(true)}>
+              📦 List what’s inside
+            </button>
+          ) : null}
+          {canArchive ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setArchiving(true)}>
+              🗄 Archive
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {isKit(item) ? (
         <section className="section">
           <div className="section-head">
             <h2>What’s in this kit</h2>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingContents(true)}>
-              + Add
-            </button>
+            {canEdit ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingContents(true)}>
+                + Add
+              </button>
+            ) : null}
           </div>
           <p className="tiny muted mb-2">
-            Packing this kit on a packlist packs everything below. Swipe a line to take it out.
+            Packing this kit on a packlist packs everything below.
+            {canEdit ? ' Swipe a line to take it out.' : ''}
           </p>
           <div className="list">
-            {kitLines(item, itemsById).map((line) => (
-              <SwipeToDelete
-                key={line.itemId}
-                label="Remove"
-                onDelete={() => void removeKitContent(item.id, line.itemId)}
-              >
+            {kitLines(item, itemsById).map((line) => {
+              const row = (
                 <div className="row row-static">
                   <span className="row-body">
                     <span className="row-title truncate">{line.item?.name ?? 'Unknown item'}</span>
                     <span className="row-sub">{line.item?.sku ?? ''}</span>
                   </span>
                   <span className="row-end">
-                    <Stepper
-                      label={`${line.item?.name ?? 'item'} in kit`}
-                      value={line.qty}
-                      min={0}
-                      onChange={(next) => void setKitContentQty(item.id, line.itemId, next)}
-                    />
+                    {canEdit ? (
+                      <Stepper
+                        label={`${line.item?.name ?? 'item'} in kit`}
+                        value={line.qty}
+                        min={0}
+                        onChange={(next) => void setKitContentQty(item.id, line.itemId, next)}
+                      />
+                    ) : (
+                      <span className="strong">× {line.qty}</span>
+                    )}
                   </span>
                 </div>
-              </SwipeToDelete>
-            ))}
+              );
+              return canEdit ? (
+                <SwipeToDelete
+                  key={line.itemId}
+                  label="Remove"
+                  onDelete={() => void removeKitContent(item.id, line.itemId)}
+                >
+                  {row}
+                </SwipeToDelete>
+              ) : (
+                <div key={line.itemId}>{row}</div>
+              );
+            })}
           </div>
         </section>
       ) : null}

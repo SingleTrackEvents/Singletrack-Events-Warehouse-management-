@@ -8,6 +8,8 @@ import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { normaliseCode, parseScan } from '../domain/codes';
 import { PACKLIST_STATUS_LABELS } from '../domain/packlists';
+import { useSession } from '../hooks/sessionContext';
+import { reachable } from '../sync/permissions';
 
 /**
  * One scanner for everything.
@@ -50,11 +52,18 @@ export default function ScanScreen() {
   const [manual, setManual] = useState('');
   const [missed, setMissed] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const { session } = useSession();
 
-  // Offered as a fallback when a code does not resolve on this device.
+  // Offered as a fallback when a code does not resolve on this device. Only
+  // lists the account may open, or the fallback becomes a way around the scope.
   const localPacklists = useLiveQuery(
-    async () => alive(await db.packlists.toArray()).slice(0, 25),
-    [],
+    async () =>
+      alive(await db.packlists.toArray())
+        .filter((packlist) =>
+          reachable(session, { eventId: packlist.eventId, destinationId: packlist.destinationId }),
+        )
+        .slice(0, 25),
+    [session],
   );
 
   const handle = useCallback(

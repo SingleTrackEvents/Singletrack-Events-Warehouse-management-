@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EVENT_TABLES,
   can,
   canEditField,
   describeRole,
   inScope,
+  isEventScoped,
   isExpired,
   isStationOnly,
+  reachable,
   roleAtLeast,
   scrubChanges,
   writableTables,
@@ -63,8 +66,95 @@ describe('crew', () => {
   });
 });
 
+describe('crew given one event', () => {
+  // The invite named an event, so this account is that event's crew and not
+  // the warehouse's.
+  const crew = session('crew', { scope: { eventId: 'event-1', destinationId: null } });
+
+  it('is recognised as pinned to an event', () => {
+    expect(isEventScoped(crew)).toBe(true);
+    expect(isEventScoped(session('crew'))).toBe(false);
+    expect(isEventScoped(null)).toBe(false);
+  });
+
+  it('packs, plans loads and edits their own event', () => {
+    expect(can(crew, 'event:read', { eventId: 'event-1' })).toBe(true);
+    expect(can(crew, 'event:write', { eventId: 'event-1' })).toBe(true);
+    expect(can(crew, 'packlist:manage', { eventId: 'event-1', destinationId: 'dest-3' })).toBe(true);
+    expect(can(crew, 'packlist:pack', { eventId: 'event-1' })).toBe(true);
+    expect(can(crew, 'load:manage', { eventId: 'event-1' })).toBe(true);
+    expect(can(crew, 'load:deliver', { eventId: 'event-1' })).toBe(true);
+  });
+
+  it('cannot reach another event', () => {
+    expect(can(crew, 'event:read', { eventId: 'event-2' })).toBe(false);
+    expect(can(crew, 'event:write', { eventId: 'event-2' })).toBe(false);
+    expect(can(crew, 'packlist:read', { eventId: 'event-2', destinationId: 'dest-9' })).toBe(false);
+    expect(can(crew, 'load:read', { eventId: 'event-2' })).toBe(false);
+    expect(reachable(crew, { eventId: 'event-2' })).toBe(false);
+    expect(reachable(crew, { eventId: 'event-1' })).toBe(true);
+  });
+
+  it('may read the catalogue but not change it', () => {
+    // A packlist is meaningless without the item names behind it.
+    expect(can(crew, 'item:read')).toBe(true);
+    expect(can(crew, 'item:write')).toBe(false);
+    expect(can(crew, 'item:archive')).toBe(false);
+    expect(can(crew, 'stock:adjust')).toBe(false);
+  });
+
+  it('is kept out of everything warehouse-wide, target or no target', () => {
+    for (const action of [
+      'event:create', 'event:delete',
+      'stocktake:read', 'stocktake:manage', 'template:manage',
+      'data:export', 'data:wipe', 'member:manage',
+    ] as const) {
+      expect([action, can(crew, action)]).toEqual([action, false]);
+      expect([action, can(crew, action, { eventId: 'event-1' })]).toEqual([action, false]);
+    }
+  });
+
+  it('only pushes the tables that belong to an event', () => {
+    expect(writableTables(crew)).toEqual(EVENT_TABLES);
+    expect(EVENT_TABLES).not.toContain('items');
+    expect(EVENT_TABLES).not.toContain('movements');
+    expect(EVENT_TABLES).not.toContain('stocktakes');
+    expect(EVENT_TABLES).not.toContain('templates');
+    // Given every event, crew still write the lot.
+    expect(writableTables(session('crew'))).toBe('all');
+  });
+
+  it('is described honestly on the access screen', () => {
+    const lines = describeRole('crew', { eventId: 'event-1', destinationId: null });
+    expect(lines).toContain('View the stock catalogue');
+    expect(lines).toContain('Build and change packlists');
+    expect(lines).not.toContain('Run stocktakes');
+    expect(lines).not.toContain('Adjust stock quantities');
+    expect(describeRole('crew')).toContain('Run stocktakes');
+  });
+});
+
+describe('crew given every event', () => {
+  const crew = session('crew');
+
+  it('runs the warehouse as well as the events', () => {
+    expect(can(crew, 'event:create')).toBe(true);
+    expect(can(crew, 'stocktake:manage')).toBe(true);
+    expect(can(crew, 'template:manage')).toBe(true);
+    expect(can(crew, 'data:export')).toBe(true);
+    expect(reachable(crew, { eventId: 'anything' })).toBe(true);
+  });
+});
+
 describe('driver', () => {
   const driver = session('driver');
+
+  it('sees only the event on their invite', () => {
+    const pinned = session('driver', { scope: { eventId: 'event-1', destinationId: null } });
+    expect(can(pinned, 'load:read', { eventId: 'event-1' })).toBe(true);
+    expect(can(pinned, 'load:read', { eventId: 'event-2' })).toBe(false);
+    expect(can(pinned, 'item:read')).toBe(true);
+  });
 
   it('sees the run and confirms deliveries', () => {
     expect(can(driver, 'load:read')).toBe(true);
@@ -141,6 +231,15 @@ describe('volunteer', () => {
 describe('scope matching', () => {
   it('treats a null scope as unrestricted', () => {
     expect(inScope(UNSCOPED, { eventId: 'anything', destinationId: 'anything' })).toBe(true);
+  });
+
+  it('lets an offline-only device reach everything, and an expired account nothing', () => {
+    expect(reachable(null, { eventId: 'anything' })).toBe(true);
+    const lapsed = session('crew', {
+      scope: { eventId: 'event-1', destinationId: null },
+      expiresAt: '2020-01-01T00:00:00.000Z',
+    });
+    expect(reachable(lapsed, { eventId: 'event-1' })).toBe(false);
   });
 
   it('ignores dimensions the target does not mention', () => {

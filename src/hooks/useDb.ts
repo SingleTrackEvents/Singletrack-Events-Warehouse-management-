@@ -2,6 +2,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { db, getSettings } from '../db/db';
 import { alive, sortBySort } from '../db/repo';
+import { useSession } from './sessionContext';
+import { reachable } from '../sync/permissions';
 import type {
   Category,
   ConsumptionLine,
@@ -53,11 +55,24 @@ export function useCategories(): Category[] | undefined {
   return useMemo(() => (rows ? sortBySort(alive(rows)) : undefined), [rows]);
 }
 
+/**
+ * Every event this account may see.
+ *
+ * Narrowed to the session's scope, not just to what is in the database: a
+ * phone is seeded with the whole season and keeps whatever it synced before
+ * the sign-in, so crew given one event would otherwise be shown all of them.
+ */
 export function useEvents(): RaceEvent[] | undefined {
+  const { session } = useSession();
   const rows = useLiveQuery(() => db.events.toArray(), []);
   return useMemo(
-    () => (rows ? alive(rows).sort((a, b) => a.startDate.localeCompare(b.startDate)) : undefined),
-    [rows],
+    () =>
+      rows
+        ? alive(rows)
+            .filter((event) => reachable(session, { eventId: event.id }))
+            .sort((a, b) => a.startDate.localeCompare(b.startDate))
+        : undefined,
+    [rows, session],
   );
 }
 
@@ -77,11 +92,20 @@ export function useDestinations(eventId: string | undefined): Destination[] | un
 }
 
 export function usePacklists(eventId: string | undefined): Packlist[] | undefined {
+  const { session } = useSession();
   const rows = useLiveQuery(
     () => (eventId ? db.packlists.where('eventId').equals(eventId).toArray() : db.packlists.toArray()),
     [eventId],
   );
-  return useMemo(() => (rows ? alive(rows) : undefined), [rows]);
+  return useMemo(
+    () =>
+      rows
+        ? alive(rows).filter((packlist) =>
+            reachable(session, { eventId: packlist.eventId, destinationId: packlist.destinationId }),
+          )
+        : undefined,
+    [rows, session],
+  );
 }
 
 export function usePacklist(id: string | undefined): Packlist | undefined {

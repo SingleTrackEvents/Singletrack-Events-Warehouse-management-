@@ -8,6 +8,7 @@ import { db } from '../db/db';
 import { create } from '../db/repo';
 import { useEvents } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
+import { can } from '../sync/permissions';
 import { EVENT_STATUS_LABELS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
 import { describeEventRemoval, removeEvent } from '../domain/remove';
 import type { RemovalSummary } from '../domain/remove';
@@ -29,6 +30,10 @@ export default function EventsScreen() {
   const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<{ event: RaceEvent; summary: RemovalSummary }>();
+  // Starting or deleting a race is the warehouse's call, not that of crew who
+  // were given one event to pack.
+  const canAdd = can(session, 'event:create');
+  const canDelete = can(session, 'event:delete');
 
   // The summary is read before anything changes, so the confirmation can name
   // exactly what is about to go with it.
@@ -43,21 +48,31 @@ export default function EventsScreen() {
     <Screen
       title="Events"
       actions={
-        <button type="button" className="header-btn" aria-label="Add event" onClick={() => setAdding(true)}>
-          +
-        </button>
+        canAdd ? (
+          <button type="button" className="header-btn" aria-label="Add event" onClick={() => setAdding(true)}>
+            +
+          </button>
+        ) : (
+          <span />
+        )
       }
     >
       {events && !events.length ? (
         <EmptyState
           glyph="🏃"
           title="No events yet"
-          body="An event holds the aid stations, packlists and transport runs for one race."
+          body={
+            canAdd
+              ? 'An event holds the aid stations, packlists and transport runs for one race.'
+              : 'The event you were given has not reached this phone yet. It will appear once the phone has signal.'
+          }
           action={
             <>
-              <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
-                Add your first event
-              </button>
+              {canAdd ? (
+                <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
+                  Add your first event
+                </button>
+              ) : null}
               {/* An empty list is the moment someone is most likely to be
                   looking at the wrong device rather than an empty warehouse. */}
               {session ? null : (
@@ -78,7 +93,7 @@ export default function EventsScreen() {
           </div>
           <div className="list">
             {upcoming.map((event) => (
-              <SwipeToDelete key={event.id} onDelete={() => askToRemove(event)}>
+              <Deletable key={event.id} enabled={canDelete} onDelete={() => askToRemove(event)}>
                 <Link to={`/events/${event.id}`} className="row">
                   <span className="row-body">
                     <span className="row-title">{event.name}</span>
@@ -91,7 +106,7 @@ export default function EventsScreen() {
                     <span className="tiny muted">{relativeDays(event.startDate)}</span>
                   </span>
                 </Link>
-              </SwipeToDelete>
+              </Deletable>
             ))}
           </div>
         </section>
@@ -104,7 +119,7 @@ export default function EventsScreen() {
           </div>
           <div className="list">
             {past.map((event) => (
-              <SwipeToDelete key={event.id} onDelete={() => askToRemove(event)}>
+              <Deletable key={event.id} enabled={canDelete} onDelete={() => askToRemove(event)}>
                 <Link to={`/events/${event.id}`} className="row">
                   <span className="row-body">
                     <span className="row-title">{event.name}</span>
@@ -114,13 +129,13 @@ export default function EventsScreen() {
                   </span>
                   <Pill tone={STATUS_TONE[event.status]}>{EVENT_STATUS_LABELS[event.status]}</Pill>
                 </Link>
-              </SwipeToDelete>
+              </Deletable>
             ))}
           </div>
         </section>
       ) : null}
 
-      {events?.length ? (
+      {events?.length && canDelete ? (
         <p className="tiny muted center mt-3">Swipe an event left to delete it.</p>
       ) : null}
 
@@ -152,6 +167,19 @@ export default function EventsScreen() {
       ) : null}
     </Screen>
   );
+}
+
+/** A swipe-to-delete row, or a plain row for someone who may not delete. */
+function Deletable({
+  enabled,
+  onDelete,
+  children,
+}: {
+  enabled: boolean;
+  onDelete: () => void;
+  children: React.ReactElement;
+}) {
+  return enabled ? <SwipeToDelete onDelete={onDelete}>{children}</SwipeToDelete> : children;
 }
 
 /** Create-event form. Kept to the fields you actually know when a race is booked. */

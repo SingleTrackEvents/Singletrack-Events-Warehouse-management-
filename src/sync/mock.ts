@@ -86,6 +86,9 @@ class MockServerDb extends Dexie {
 const server = new MockServerDb();
 const SESSION_KEY = 'stw.sync.mock.session';
 
+/** Warehouse-wide rows a scoped crew member or driver still needs to read. */
+const REFERENCE_TABLES: TableName[] = ['items', 'categories', 'templates', 'templateLines'];
+
 /** Monotonic sequence, standing in for a database transaction id. */
 async function nextSeq(count: number): Promise<number> {
   return server.transaction('rw', server.meta, async () => {
@@ -253,7 +256,7 @@ export class MockBackend implements SyncBackend {
         result.refused += 1;
         continue;
       }
-      if (!this.rowInScope(session, table, row)) {
+      if (!(await this.rowInScope(session, table, row))) {
         result.refused += 1;
         continue;
       }
@@ -289,7 +292,7 @@ export class MockBackend implements SyncBackend {
     let highest = since;
     for (const entry of rows) {
       // A volunteer pulling must not receive the whole warehouse.
-      if (!this.rowVisible(session, entry.table, entry.row)) continue;
+      if (!(await this.rowVisible(session, entry.table, entry.row))) continue;
       (changes[entry.table] ??= []).push(entry.row);
       highest = Math.max(highest, entry.seq);
     }
@@ -349,26 +352,72 @@ export class MockBackend implements SyncBackend {
     }
   }
 
-  /** Scope check for a row being written. */
-  private rowInScope(session: Session, table: TableName, row: SyncMeta): boolean {
+  /**
+   * Scope check for a row being written.
+   *
+   * Strict in the same way as the server: a scoped session may only write rows
+   * that carry its event, so the catalogue and the ledger — which carry none —
+   * are refused, and so is a line whose packlist the server has never seen.
+   */
+  private async rowInScope(session: Session, table: TableName, row: SyncMeta): Promise<boolean> {
     if (!session.scope.eventId && !session.scope.destinationId) return true;
-    const target = this.targetOf(table, row);
+    const target = await this.targetOf(table, row);
+    if (!target.eventId) return false;
     return inScope(session.scope, target);
   }
 
   /** Scope check for a row being read. */
-  private rowVisible(session: Session, table: TableName, row: SyncMeta): boolean {
+  private async rowVisible(session: Session, table: TableName, row: SyncMeta): Promise<boolean> {
     if (!session.scope.eventId && !session.scope.destinationId) return true;
-    // Reference data a scoped session still needs to make sense of its packlist.
-    if (table === 'items' || table === 'categories') return session.role !== 'volunteer';
-    return inScope(session.scope, this.targetOf(table, row));
+    // Reference data a scoped session still needs to make sense of its
+    // packlists: the catalogue and the templates it builds lists from. A
+    // volunteer gets none of it, since their lines name the items already.
+    if (REFERENCE_TABLES.includes(table)) return session.role !== 'volunteer';
+    const target = await this.targetOf(table, row);
+    if (!target.eventId) return false;
+    return inScope(session.scope, target);
   }
 
-  /** Pull the event/destination out of whichever row shape this table has. */
-  private targetOf(table: TableName, row: SyncMeta): { eventId?: string; destinationId?: string } {
-    const record = row as SyncMeta & { eventId?: string; destinationId?: string };
+  /**
+   * Pull the event/destination out of whichever row shape this table has.
+   *
+   * Lines and containers name only their packlist, and a stop only its load,
+   * so their scope is read off the parent already on the server — the same
+   * inheritance the real adapter does before pushing, done here on the server
+   * side so a client cannot claim a scope its parent does not have.
+   */
+  private async targetOf(
+    table: TableName,
+    row: SyncMeta,
+  ): Promise<{ eventId?: string; destinationId?: string }> {
+    const record = row as SyncMeta & {
+      eventId?: string;
+      destinationId?: string;
+      packlistId?: string;
+      loadId?: string;
+    };
     if (table === 'events') return { eventId: row.id };
     if (table === 'destinations') return { eventId: record.eventId, destinationId: row.id };
+    if (table === 'packlistLines' || table === 'containers') {
+      const parent = record.packlistId
+        ? ((await server.rows.get(`packlists:${record.packlistId}`))?.row as
+            | (SyncMeta & { eventId?: string; destinationId?: string })
+            | undefined)
+        : undefined;
+      return {
+        ...(parent?.eventId ? { eventId: parent.eventId } : {}),
+        ...(parent?.destinationId ? { destinationId: parent.destinationId } : {}),
+      };
+    }
+    if (table === 'loadStops') {
+      const parent = record.loadId
+        ? ((await server.rows.get(`loads:${record.loadId}`))?.row as (SyncMeta & { eventId?: string }) | undefined)
+        : undefined;
+      return {
+        ...(parent?.eventId ? { eventId: parent.eventId } : {}),
+        ...(record.destinationId ? { destinationId: record.destinationId } : {}),
+      };
+    }
     return {
       ...(record.eventId ? { eventId: record.eventId } : {}),
       ...(record.destinationId ? { destinationId: record.destinationId } : {}),

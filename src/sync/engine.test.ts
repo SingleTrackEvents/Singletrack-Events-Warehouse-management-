@@ -232,6 +232,69 @@ describe('offline', () => {
   });
 });
 
+describe('crew invited to one event', () => {
+  async function eventCrew() {
+    const admin = await adminSession();
+    const mine = await makeEventWithPacklist('1');
+    const other = await makeEventWithPacklist('2');
+    const item = await makeItem('cubes');
+    // The warehouse's copy of everything is on the server first.
+    await runSync(backend, admin);
+    const invite = await backend.createInvite(admin, {
+      role: 'crew', scope: { eventId: mine.event.id, destinationId: null }, label: 'Crew — Event 1',
+    });
+    const crew = await backend.joinWithInvite(invite.token, 'Sam');
+    return { admin, crew, mine, other, item };
+  }
+
+  it('pulls their event, the catalogue, and not the other race', async () => {
+    const { crew, mine, other } = await eventCrew();
+    const pulled = await backend.pull(crew, null);
+
+    expect(pulled.changes.events?.map((row) => row.id)).toEqual([mine.event.id]);
+    expect(pulled.changes.packlists?.map((row) => row.id)).toEqual([mine.packlist.id]);
+    expect(pulled.changes.destinations?.map((row) => row.id)).toEqual([mine.destination.id]);
+    expect(pulled.changes.items).toHaveLength(1);
+    expect(pulled.changes.events?.map((row) => row.id)).not.toContain(other.event.id);
+  });
+
+  it('is refused a stock change and another event\'s packlist', async () => {
+    const { crew, other, item } = await eventCrew();
+    await update(db.items, item.id, { qtyOnHand: 99 });
+    await update(db.packlists, other.packlist.id, { notes: 'not mine' });
+
+    const result = await backend.push(crew, {
+      items: [(await db.items.get(item.id))!],
+      packlists: [(await db.packlists.get(other.packlist.id))!],
+    });
+
+    expect(result.accepted).toBe(0);
+    expect(result.refused).toBe(2);
+  });
+
+  it('writes lines on their own event, whose scope comes from the packlist', async () => {
+    const { crew, mine, item } = await eventCrew();
+    const line = await create(db.packlistLines, {
+      packlistId: mine.packlist.id, itemId: item.id, qtyRequired: 4, qtyPacked: 0,
+      qtyReturned: 0, mandatory: false, containerId: null, note: '', sort: 10,
+    });
+
+    const result = await backend.push(crew, { packlistLines: [line] });
+
+    expect(result.accepted).toBe(1);
+    expect(result.refused).toBe(0);
+  });
+
+  it('never has warehouse-wide rows in its outbox', async () => {
+    const { crew, item } = await eventCrew();
+    await update(db.items, item.id, { qtyOnHand: 99 });
+
+    const outbox = await collectOutbox(crew);
+
+    expect(outbox.items).toBeUndefined();
+  });
+});
+
 describe('invites and volunteer access', () => {
   it('lets an admin invite a volunteer to one aid station', async () => {
     const admin = await adminSession();
