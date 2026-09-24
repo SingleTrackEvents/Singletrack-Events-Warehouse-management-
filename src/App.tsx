@@ -163,7 +163,8 @@ export function Screen({
   actions,
   children,
 }: {
-  title: string;
+  /** Usually text; the home screen passes the logo instead. */
+  title: React.ReactNode;
   subtitle?: string;
   back?: string;
   actions?: React.ReactNode;

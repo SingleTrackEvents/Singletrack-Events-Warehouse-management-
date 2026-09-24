@@ -81,6 +81,16 @@ button, input, select, textarea {
   white-space: nowrap;
 }
 
+/* The home screen carries the logo where other screens carry a title. */
+.app-header .header-logo {
+  display: block;
+  height: 26px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: left center;
+}
+
 .app-header .sub {
   display: block;
   font-size: var(--text-xs);
