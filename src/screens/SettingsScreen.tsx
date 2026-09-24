@@ -131,6 +131,16 @@ export default function SettingsScreen() {
             </span>
             <span className="row-chevron">›</span>
           </Link>
+          {can(session, 'packlist:manage') ? (
+            <Link to="/import" className="row">
+              <span className="row-icon">📄</span>
+              <span className="row-body">
+                <span className="row-title">Import a pack list</span>
+                <span className="row-sub">Read a run sheet from Excel, CSV or PDF onto an event</span>
+              </span>
+              <span className="row-chevron">›</span>
+            </Link>
+          ) : null}
           {can(session, 'template:manage') ? (
             <Link to="/templates" className="row">
               <span className="row-icon">📋</span>

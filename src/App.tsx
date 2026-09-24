@@ -30,6 +30,7 @@ import './styles/app.css';
 const HomeScreen = lazy(() => import('./screens/HomeScreen'));
 const EventsScreen = lazy(() => import('./screens/EventsScreen'));
 const EventDetailScreen = lazy(() => import('./screens/EventDetailScreen'));
+const ImportPacklistScreen = lazy(() => import('./screens/ImportPacklistScreen'));
 const FoodScreen = lazy(() => import('./screens/FoodScreen'));
 const WarehouseScreen = lazy(() => import('./screens/WarehouseScreen'));
 const PacklistScreen = lazy(() => import('./screens/PacklistScreen'));
@@ -141,6 +142,7 @@ export default function App() {
               <Route path="/events/:eventId" element={<Guard needs="event:read"><EventDetailScreen /></Guard>} />
               <Route path="/events/:eventId/warehouse" element={<Guard needs="packlist:manage"><WarehouseScreen /></Guard>} />
               <Route path="/events/:eventId/food" element={<Guard needs="packlist:manage"><FoodScreen /></Guard>} />
+              <Route path="/import" element={<Guard needs="packlist:manage"><ImportPacklistScreen /></Guard>} />
               <Route path="/packlists/:packlistId" element={<PacklistScreen />} />
               <Route path="/packlists/:packlistId/labels" element={<Guard needs="packlist:manage"><LabelsScreen /></Guard>} />
               <Route path="/stock" element={<Guard needs="item:read"><StockScreen /></Guard>} />

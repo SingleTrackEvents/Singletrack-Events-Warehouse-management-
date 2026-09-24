@@ -37,6 +37,18 @@ onto each station's packlist, and it's safe to tap again whenever projections
 change — planned items are set to today's numbers, hand-added lines are never
 touched.
 
+**Import a pack list** — the crew's lists already exist as spreadsheets and PDF
+run sheets, so the app reads them rather than asking for them again. Pick an
+event, pick a file (Excel, CSV or PDF), and the sheet is read on the device:
+stations across the top, one block per station, or a plain list. Headings are
+matched to the event's destinations and names to the catalogue, loosely enough
+that "Trestle table" finds "Trestle Tables" and "GC Carpark" finds Grand Canyon
+Carpark. Everything is shown back before it is written: the matcher's guesses
+are marked as guesses, anything the warehouse has never heard of is offered as
+a new item with a category, and a heading that matches no station can be
+skipped or created. An item lands on a packlist once however many times the
+file mentions it, and importing the same file twice changes nothing.
+
 **QR codes** — every packlist and crate gets a short code (`AS3-7K2M`,
 `AS3-7K2M/02`) and a printable QR label. Scanning opens the right list; the code
 can also be typed or read out over the radio when the camera won't cooperate.
@@ -103,7 +115,8 @@ stale file can never undo fresher local work.
 src/
   db/          Schema, Dexie database, CRUD helpers, demo data
   domain/      Business logic — stock ledger, packlist lifecycle, stocktake,
-               transport, backup, short codes, formatting
+               transport, backup, short codes, formatting, pack list import
+               (a workbook reader, a PDF-to-grid pass, name matching)
   hooks/       Live queries (Dexie useLiveQuery) and search
   components/  Shared UI — sheets, steppers, toasts, scanner, QR codes
   screens/     One file per screen, lazily routed
