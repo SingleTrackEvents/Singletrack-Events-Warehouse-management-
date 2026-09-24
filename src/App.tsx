@@ -16,6 +16,7 @@ import { SessionProvider } from './hooks/useSession';
 import { useSession } from './hooks/sessionContext';
 import { can, isStationOnly } from './sync/permissions';
 import type { Action } from './sync/permissions';
+import type { Session, SyncBackend } from './sync/types';
 import './styles/app.css';
 
 /**
@@ -61,10 +62,11 @@ const NAV: Array<{ to: string; icon: string; label: string; end: boolean; needs?
 ];
 
 function BottomNav() {
-  const { session } = useSession();
+  const { backend, session } = useSession();
   // Someone pinned to one aid station has one screen; a row of tabs leading
-  // nowhere they may go is just something to mis-tap.
-  if (isStationOnly(session)) return null;
+  // nowhere they may go is just something to mis-tap. Someone signed out has
+  // no screens at all until they sign back in.
+  if (isStationOnly(session) || isSignedOut(backend, session)) return null;
   const visible = NAV.filter((entry) => !entry.needs || can(session, entry.needs));
   return (
     <nav
@@ -122,6 +124,44 @@ function StationOnlyGate({ children }: { children: ReactElement }) {
   return STATION_ROUTES.some((route) => route.test(pathname)) ? children : <Navigate to="/" replace />;
 }
 
+/**
+ * Connected to the server, with nobody signed in.
+ *
+ * Not the same as having no server at all. A device that has never connected
+ * is one phone working on its own, and every permission check passes because
+ * there is nobody to check. A device that is connected and signed out belongs
+ * to a crew with accounts, and must wait for one.
+ */
+function isSignedOut(backend: SyncBackend | null, session: Session | null): boolean {
+  return Boolean(backend) && !session;
+}
+
+/**
+ * Where a signed-out device may go: the sign-in page, and the invite page a
+ * scanned QR lands on. Nothing else.
+ */
+const SIGNED_OUT_ROUTES = [/^\/access$/, /^\/join\//];
+
+/**
+ * Signed out means signed out.
+ *
+ * Signing out used to leave the device in the one-phone-on-its-own state: the
+ * connection stayed, the session went, and every screen opened as if the
+ * phone had never had an account, warehouse, stock and backup included. Now
+ * a connected device with nobody signed in shows the sign-in page and nothing
+ * else, and the routes stay closed until someone signs in. The wait for the
+ * stored session to be read back is shown as loading rather than as the home
+ * screen, so a signed-out phone never flashes the warehouse on its way to
+ * the sign-in page.
+ */
+function SignedOutGate({ children }: { children: ReactElement }) {
+  const { backend, session, ready } = useSession();
+  const { pathname } = useLocation();
+  if (!ready) return <div className="app-main muted">Loading…</div>;
+  if (!isSignedOut(backend, session)) return children;
+  return SIGNED_OUT_ROUTES.some((route) => route.test(pathname)) ? children : <Navigate to="/access" replace />;
+}
+
 export default function App() {
   return (
     <HashRouter>
@@ -129,6 +169,7 @@ export default function App() {
         <SessionProvider>
           <div className="app">
           <Suspense fallback={<div className="app-main muted">Loading…</div>}>
+            <SignedOutGate>
             <StationOnlyGate>
             <Routes>
               <Route path="/" element={<HomeScreen />} />
@@ -154,6 +195,7 @@ export default function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             </StationOnlyGate>
+            </SignedOutGate>
           </Suspense>
           <BottomNav />
         </div>

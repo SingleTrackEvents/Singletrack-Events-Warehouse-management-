@@ -22,6 +22,8 @@ import { SyncError } from './types';
 
 const CURSOR_KEY = 'stw.sync.cursor';
 const LAST_SYNC_KEY = 'stw.sync.lastAt';
+/** Whose cursor it is; see bindCursor. */
+const CURSOR_OWNER_KEY = 'stw.sync.cursorOwner';
 
 /** How many rows to push in one request, to keep payloads sane on a bad link. */
 const BATCH = 200;
@@ -220,6 +222,39 @@ export function resetCursor(): void {
   if (typeof localStorage === 'undefined') return;
   localStorage.removeItem(CURSOR_KEY);
   localStorage.removeItem(LAST_SYNC_KEY);
+  localStorage.removeItem(CURSOR_OWNER_KEY);
+}
+
+/** What the server shows a session: the account, its role and its scope. */
+function cursorOwner(session: Session): string {
+  return [
+    session.userId,
+    session.role,
+    session.scope.eventId ?? '',
+    session.scope.destinationId ?? '',
+  ].join('|');
+}
+
+/**
+ * Tie the cursor to the account that is about to sync with it.
+ *
+ * The cursor says how far this device has read the server's log, and the
+ * server shows each account a different slice of that log. A phone that had
+ * synced as a volunteer for one aid station and was then handed to a driver
+ * was still parked at the volunteer's position, so every packlist the driver
+ * was newly allowed to see, all written before that position, was never
+ * pulled. The same happened to anyone whose access changed: a driver made
+ * crew, one email account signed in after another. The cursor is now trusted
+ * only by the account and scope that set it; anyone else starts from the
+ * beginning. Signing back in as the same person keeps it, so nothing is
+ * downloaded twice for no reason.
+ */
+export function bindCursor(session: Session): void {
+  if (typeof localStorage === 'undefined') return;
+  const owner = cursorOwner(session);
+  if (localStorage.getItem(CURSOR_OWNER_KEY) === owner) return;
+  resetCursor();
+  localStorage.setItem(CURSOR_OWNER_KEY, owner);
 }
 
 /**

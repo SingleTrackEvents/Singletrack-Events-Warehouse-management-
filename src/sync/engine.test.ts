@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../db/db';
 import { create, update } from '../db/repo';
-import { applyRemote, collectOutbox, markAllDirty, pendingCount, resetCursor, runSync } from './engine';
+import {
+  applyRemote, bindCursor, collectOutbox, getCursor, markAllDirty, pendingCount, resetCursor, runSync, setCursor,
+} from './engine';
 import { MockBackend, mockServer, resetMockServer } from './mock';
 import type { Session } from './types';
 import { SyncError, UNSCOPED } from './types';
@@ -551,5 +553,70 @@ describe('email sign-in', () => {
     await adminSession();
     await backend.signOut();
     expect(await backend.currentSession()).toBeNull();
+  });
+});
+
+describe('the cursor belongs to one account', () => {
+  const who = (overrides: Partial<Session>): Session => ({
+    userId: 'user-a', displayName: 'A', email: null, role: 'volunteer',
+    scope: { eventId: 'event-1', destinationId: 'dest-1' }, token: 't', expiresAt: null, guest: true,
+    ...overrides,
+  });
+
+  it('is kept when the same person signs back in', () => {
+    bindCursor(who({}));
+    setCursor('40');
+    bindCursor(who({}));
+    expect(getCursor()).toBe('40');
+  });
+
+  it('starts over for a different account on the same phone', () => {
+    // A phone synced as a volunteer, then handed to a driver: the driver may
+    // see rows written before the volunteer's position, so the position
+    // cannot be trusted.
+    bindCursor(who({}));
+    setCursor('40');
+    bindCursor(who({ userId: 'user-b', role: 'driver', scope: { eventId: 'event-1', destinationId: null } }));
+    expect(getCursor()).toBeNull();
+  });
+
+  it('starts over when the same account is given wider access', () => {
+    bindCursor(who({}));
+    setCursor('40');
+    bindCursor(who({ scope: { eventId: 'event-1', destinationId: null } }));
+    expect(getCursor()).toBeNull();
+  });
+
+  it('pulls what the new account may see, not just what came after the old one', async () => {
+    // Two events on the server, written by an admin elsewhere.
+    const admin = await adminSession();
+    const first = await makeEventWithPacklist('1');
+    const second = await makeEventWithPacklist('2');
+    await runSync(backend, admin);
+
+    // A volunteer on the second event syncs this phone: the cursor now sits
+    // past the first event's rows, which this phone was never shown.
+    for (const table of ['events', 'destinations', 'packlists'] as const) await db[table].clear();
+    const invite = await backend.createInvite(admin, {
+      role: 'volunteer', label: 'Aid 2',
+      scope: { eventId: second.event.id, destinationId: second.destination.id },
+    });
+    const volunteer = await backend.joinWithInvite(invite.token, 'Tom');
+    bindCursor(volunteer);
+    await runSync(backend, volunteer);
+    expect((await db.packlists.toArray()).map((row) => row.id)).toEqual([second.packlist.id]);
+
+    // The phone is handed to a driver for the first event. Without a fresh
+    // cursor the first event's packlist, written earlier, never arrives.
+    const driverInvite = await backend.createInvite(admin, {
+      role: 'driver', label: 'Driver',
+      scope: { eventId: first.event.id, destinationId: null },
+    });
+    const driver = await backend.joinWithInvite(driverInvite.token, 'Dee');
+    bindCursor(driver);
+    await runSync(backend, driver);
+    expect((await db.packlists.toArray()).map((row) => row.id).sort()).toEqual(
+      [first.packlist.id, second.packlist.id].sort(),
+    );
   });
 });

@@ -10,7 +10,7 @@ import {
 } from '../sync';
 import { SessionContext } from './sessionContext';
 import type { SessionContextValue } from './sessionContext';
-import { getLastSync, markAllDirty, pendingCount, resetCursor, runSync } from '../sync/engine';
+import { bindCursor, getLastSync, markAllDirty, pendingCount, resetCursor, runSync } from '../sync/engine';
 import type { SyncPhase } from '../sync/engine';
 import { setCurrentSession } from '../sync/current';
 import type { Session, SyncBackend } from '../sync/types';
@@ -43,16 +43,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setCurrentSession(session);
   }, [session]);
 
+  /**
+   * Take on a session, from whichever door it came through.
+   *
+   * Every path that produces a session (a restore on boot, an email link, a
+   * passkey, an invite) goes through here so the sync cursor is always tied
+   * to the account before the first sync runs against it.
+   */
+  const adopt = useCallback((next: Session | null) => {
+    if (next) bindCursor(next);
+    setSessionState(next);
+  }, []);
+
   // Restore the connection and session from the last time the app was open.
   useEffect(() => {
     void (async () => {
       const restored = restoreBackend();
       setBackendState(restored);
-      if (restored) setSessionState(await restored.currentSession());
+      if (restored) adopt(await restored.currentSession());
       setPending(await pendingCount());
       setReady(true);
     })();
-  }, []);
+  }, [adopt]);
 
   const refreshPending = useCallback(async () => {
     setPending(await pendingCount(getBackend() ? session : null));
@@ -89,8 +101,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(BACKEND_ENABLED_KEY, 'supabase');
     setBackendState(created);
     // Following an email link lands back here with a session already live.
-    setSessionState(await created.currentSession());
-  }, []);
+    adopt(await created.currentSession());
+  }, [adopt]);
 
   const disconnect = useCallback(async () => {
     await getBackend()?.signOut();
@@ -102,13 +114,29 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setLastSyncAt(null);
   }, []);
 
+  /**
+   * Sign out and stay connected.
+   *
+   * The connection is kept on purpose: it is what makes the device show a
+   * sign-in page rather than fall back to running as one phone on its own,
+   * which would open every screen to whoever picks it up next. The cursor is
+   * kept too, so the same person signing back in does not download the whole
+   * warehouse again; a different account is given a fresh one by adopt.
+   */
+  const signOut = useCallback(async () => {
+    await getBackend()?.signOut();
+    setSessionState(null);
+    setPhase('idle');
+    setLastError(null);
+  }, []);
+
   const applySession = useCallback((next: Session | null) => {
-    setSessionState(next);
+    adopt(next);
     if (next) {
       // Anything already on this device predates the account, so queue it all.
       void markAllDirty().then(() => refreshPending());
     }
-  }, [refreshPending]);
+  }, [adopt, refreshPending]);
 
   /**
    * Keep the two devices in step.
@@ -147,10 +175,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SessionContextValue>(
     () => ({
       backend, session, ready, phase, pending, lastSyncAt, lastError,
-      connectDemo, connectServer, disconnect, setSession: applySession, sync, refreshPending,
+      connectDemo, connectServer, disconnect, signOut, setSession: applySession, sync, refreshPending,
     }),
     [backend, session, ready, phase, pending, lastSyncAt, lastError,
-     connectDemo, connectServer, disconnect, applySession, sync, refreshPending],
+     connectDemo, connectServer, disconnect, signOut, applySession, sync, refreshPending],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
