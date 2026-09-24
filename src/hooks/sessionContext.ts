@@ -19,6 +19,8 @@ export interface SessionContextValue {
   connectDemo: () => void;
   connectServer: () => Promise<void>;
   disconnect: () => Promise<void>;
+  /** Leave the account but stay connected: the device then shows only the sign-in page. */
+  signOut: () => Promise<void>;
   setSession: (session: Session | null) => void;
   sync: () => Promise<void>;
   refreshPending: () => Promise<void>;
@@ -35,6 +37,7 @@ export const SessionContext = createContext<SessionContextValue>({
   connectDemo: () => {},
   connectServer: async () => {},
   disconnect: async () => {},
+  signOut: async () => {},
   setSession: () => {},
   sync: async () => {},
   refreshPending: async () => {},

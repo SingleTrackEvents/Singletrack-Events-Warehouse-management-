@@ -170,6 +170,11 @@ with no bars.
   a device back from a weekend offline cannot stomp fresher work by reconnecting.
 - A row edited while its push is in flight stays in the outbox. Revisions are
   compared before anything is marked as sent.
+- The pull cursor belongs to the account that set it. The server shows each
+  account a different slice of its log, so a phone handed from a volunteer to
+  a driver, or from one account to another, starts its pull from the
+  beginning rather than skipping everything written before the old account's
+  position.
 
 ### Roles
 
@@ -215,6 +220,12 @@ Core crew sign in with an email link. Volunteers scan an invite QR at their aid
 station and type their name — no inbox, no password, nothing to remember, because
 race morning is the worst possible time to make someone set up an account. Invites
 are scoped to one destination and expire after the weekend.
+
+Signing out keeps the phone connected and shows the sign-in page, and nothing
+else, until someone signs in again. Work already on the phone stays there. Only
+a phone that has never been connected runs with no account at all. A phone that
+reloads with no signal keeps the account it had, using the access it was given
+the last time the server answered.
 
 ### The Supabase backend
 

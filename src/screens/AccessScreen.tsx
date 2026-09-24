@@ -25,7 +25,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
  * set up an account.
  */
 export default function AccessScreen() {
-  const { backend, session, connectDemo, connectServer, disconnect, setSession, sync, pending, phase, lastSyncAt, lastError } =
+  const { backend, session, connectDemo, connectServer, disconnect, signOut, setSession, sync, pending, phase, lastSyncAt, lastError } =
     useSession();
   const toast = useToast();
   const [signingIn, setSigningIn] = useState(false);
@@ -98,13 +98,22 @@ export default function AccessScreen() {
   }
 
   if (!session) {
+    /*
+     * The only page a signed-out device has.
+     *
+     * There is no back button and, on the real server, no way out to "this
+     * device only": both led to every screen in the app with nobody signed in,
+     * which is the door this page exists to close. The demo keeps its exit,
+     * since it is a playground and the way to leave one should be obvious.
+     */
     return (
-      <Screen title="Sign in" back="/more">
+      <Screen title="Sign in">
         <LinkFailureNotice />
         <div className="card card-pad mb-3">
           <p className="small muted">
-            Connected to <span className="strong">{backend.name}</span>
-            {backend.isReal ? '' : ' — a stand-in for trying the flow, not a real server.'}
+            {backend.isReal
+              ? 'This phone is connected to the SingleTrack server. Sign in to see the crew’s events and packlists.'
+              : `Connected to ${backend.name}, a stand-in for trying the flow rather than a real server.`}
           </p>
         </div>
         {/*
@@ -170,9 +179,11 @@ export default function AccessScreen() {
         <p className="small muted center">
           Volunteers do not sign in — scan the QR the crew give you at your aid station.
         </p>
-        <button type="button" className="btn btn-ghost btn-block mt-4" onClick={() => void disconnect()}>
-          Go back to this device only
-        </button>
+        {backend.isReal ? null : (
+          <button type="button" className="btn btn-ghost btn-block mt-4" onClick={() => void disconnect()}>
+            Go back to this device only
+          </button>
+        )}
 
         {signingIn ? <SignInSheet onClose={() => setSigningIn(false)} /> : null}
       </Screen>
@@ -282,8 +293,7 @@ export default function AccessScreen() {
           tone="danger"
           onCancel={() => setSigningOut(false)}
           onConfirm={() => {
-            void backend.signOut().then(() => {
-              setSession(null);
+            void signOut().then(() => {
               toast('Signed out');
               setSigningOut(false);
             });

@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { SYNCED_TABLES, db } from '../db/db';
 import { getAuthNotice, setAuthNotice } from './authRedirect';
+import { forgetSession, recallSession, rememberSession } from './sessionCache';
 import { cleanDisplayName, displayNameFromEmail } from './names';
 import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
@@ -310,7 +311,7 @@ export class SupabaseBackend implements SyncBackend {
       p_display_name: data.user.email?.split('@')[0] ?? '',
     });
     if (membershipError) throw toSyncError(membershipError.message);
-    return sessionFrom(data.user, membership as MembershipRow, data.session.access_token);
+    return this.settle(data.user, membership as MembershipRow, data.session.access_token);
   }
 
   /**
@@ -354,20 +355,44 @@ export class SupabaseBackend implements SyncBackend {
     if (error) throw toPasskeyError(error.message);
   }
 
+  /**
+   * Build the session and remember its membership, so a reload with no signal
+   * can still say who this is. Every way in goes through here.
+   */
+  private settle(user: User, membership: MembershipRow, token: string): Session {
+    const session = sessionFrom(user, membership, token);
+    rememberSession(session);
+    return session;
+  }
+
   async currentSession(): Promise<Session | null> {
     const { data } = await this.client.auth.getSession();
-    if (!data.session) return null;
+    if (!data.session) {
+      forgetSession();
+      return null;
+    }
+    const { user, access_token: token } = data.session;
 
-    let membership = await this.membership();
+    const asked = await this.membership(user.id);
+    if (!asked.reachable) {
+      // No signal, or the server is down. The credential is on the device and
+      // the membership was remembered the last time the server answered, and
+      // that is enough to carry on with: a phone in a valley must not be
+      // signed out for want of reception. Access revoked in the meantime
+      // catches up the moment the server can be asked again.
+      return recallSession(user.id, token);
+    }
+
+    let membership = asked.row;
     if (!membership) {
       // Arriving back from an email link: Supabase has authenticated the
       // person, but nothing has claimed a membership for them yet. Without
       // this the app finds an account it cannot describe and shows the sign-in
       // screen to someone who is already signed in.
-      membership = await this.claimMembership(data.session.user.email ?? '');
+      membership = await this.claimMembership(user.email ?? '');
       if (!membership) return null;
     }
-    return sessionFrom(data.session.user, membership, data.session.access_token);
+    return this.settle(user, membership, token);
   }
 
   /**
@@ -416,14 +441,28 @@ export class SupabaseBackend implements SyncBackend {
         'permission',
       );
     }
-    return sessionFrom(data.user, membership, data.session.access_token);
+    return this.settle(data.user, membership, data.session.access_token);
   }
 
-  /** The caller's own membership row, or null if they have not been granted one. */
-  private async membership(): Promise<MembershipRow | null> {
-    const { data, error } = await this.client.from('memberships').select('*').maybeSingle();
-    if (error) return null;
-    return (data as MembershipRow) ?? null;
+  /**
+   * The caller's own membership row, if they have been granted one.
+   *
+   * Says whether the server answered at all, separately from whether it had
+   * a row: no row means no access, no answer means no signal, and a phone
+   * that has just lost reception must not mistake the one for the other.
+   *
+   * Filtered by user on purpose. An admin may read every membership, and a
+   * single-row query against the whole table failed for them the moment a
+   * second person joined.
+   */
+  private async membership(userId: string): Promise<{ row: MembershipRow | null; reachable: boolean }> {
+    const { data, error } = await this.client
+      .from('memberships')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) return { row: null, reachable: false };
+    return { row: (data as MembershipRow | null) ?? null, reachable: true };
   }
 
   async signInWithEmail(email: string): Promise<SignInChallenge> {
@@ -456,7 +495,7 @@ export class SupabaseBackend implements SyncBackend {
       p_display_name: displayNameFromEmail(data.session.user.email ?? ''),
     });
     if (error) throw toSyncError(error.message);
-    return sessionFrom(data.session.user, membership as MembershipRow, data.session.access_token);
+    return this.settle(data.session.user, membership as MembershipRow, data.session.access_token);
   }
 
   /** Rename this account. */
@@ -468,7 +507,7 @@ export class SupabaseBackend implements SyncBackend {
       p_display_name: cleanDisplayName(name),
     });
     if (error) throw toSyncError(error.message);
-    return sessionFrom(
+    return this.settle(
       sessionData.session.user,
       data as MembershipRow,
       sessionData.session.access_token,
@@ -499,11 +538,12 @@ export class SupabaseBackend implements SyncBackend {
       p_display_name: displayName,
     });
     if (error) throw toSyncError(error.message);
-    return sessionFrom(data.session.user, membership as MembershipRow, data.session.access_token);
+    return this.settle(data.session.user, membership as MembershipRow, data.session.access_token);
   }
 
   async signOut(): Promise<void> {
     await this.client.auth.signOut();
+    forgetSession();
   }
 
   async push(_session: Session, changes: ChangeSet): Promise<PushResult> {

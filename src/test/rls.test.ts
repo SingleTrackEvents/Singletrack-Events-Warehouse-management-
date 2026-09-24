@@ -524,3 +524,111 @@ describe('privilege boundaries', () => {
     await db.close();
   });
 });
+
+/**
+ * A driver invited to one event. They see every stop on their run and the
+ * catalogue behind the lines; the other race is not theirs, and nor is the
+ * warehouse.
+ */
+const DRIVER = '77777777-7777-4777-8777-777777777777';
+
+async function eventDriver() {
+  const db = await seeded();
+  await db.actAs(ADMIN);
+  // Lines on both events, scoped the way the app scopes them: from the packlist.
+  await db.query('select public.push_records($1::jsonb)', [
+    JSON.stringify([
+      wireRow({
+        table_name: 'packlistLines', id: 'line-mine',
+        data: { id: 'line-mine', packlistId: 'pl-mine', itemId: 'item-1', qtyRequired: 4 },
+        event_id: EVENT, destination_id: MY_STATION,
+      }),
+      wireRow({
+        table_name: 'packlistLines', id: 'line-theirs',
+        data: { id: 'line-theirs', packlistId: 'pl-theirs', itemId: 'item-1', qtyRequired: 2 },
+        event_id: EVENT, destination_id: OTHER_STATION,
+      }),
+      wireRow({
+        table_name: 'packlistLines', id: 'line-other-event',
+        data: { id: 'line-other-event', packlistId: 'pl-other-event', itemId: 'item-1', qtyRequired: 1 },
+        event_id: OTHER_EVENT, destination_id: 'dest-hounslow-1',
+      }),
+    ]),
+  ]);
+  await db.addUser(DRIVER, null);
+  const invite = await db.query<{ token: string }>(
+    `insert into public.invites (token, role, event_id, destination_id, label)
+     values ('DRIV-BUFF', 'driver', $1, null, 'Driver — Buffalo') returning token`,
+    [EVENT],
+  );
+  await db.actAs(DRIVER);
+  await db.query(`select public.redeem_invite($1, 'Dee')`, [invite.rows[0].token]);
+  return db;
+}
+
+describe('what a driver given one event can read', () => {
+  it('receives every packlist on their event, and the lines on them', async () => {
+    const db = await eventDriver();
+    await db.enforceRls();
+    const { rows } = await db.query<{ table_name: string; id: string }>(
+      `select table_name, id from public.records
+       where table_name in ('packlists', 'packlistLines') order by table_name, id`,
+    );
+    expect(rows.map((r) => r.id)).toEqual(['line-mine', 'line-theirs', 'pl-mine', 'pl-theirs']);
+    await db.close();
+  });
+
+  it('receives the event itself and the catalogue', async () => {
+    const db = await eventDriver();
+    await db.enforceRls();
+    const { rows } = await db.query<{ id: string }>(
+      `select id from public.records where table_name in ('events', 'items') order by id`,
+    );
+    expect(rows.map((r) => r.id)).toEqual([EVENT, 'item-1']);
+    await db.close();
+  });
+
+  it('never sees the other race or the warehouse', async () => {
+    const db = await eventDriver();
+    await db.enforceRls();
+    const { rows } = await db.query<{ id: string }>(
+      `select id from public.records
+       where event_id = $1 or table_name = 'stocktakes'`,
+      [OTHER_EVENT],
+    );
+    expect(rows).toHaveLength(0);
+    await db.close();
+  });
+});
+
+describe('what a driver given one event can write', () => {
+  it('moves a packlist on their run along, and nothing else on it', async () => {
+    const db = await eventDriver();
+    const { rows } = await push(db, {
+      table_name: 'packlists', id: 'pl-mine', event_id: EVENT, destination_id: MY_STATION,
+      data: { id: 'pl-mine', status: 'delivered', name: 'Renamed by the driver' },
+    });
+    expect(rows[0].push_records.accepted).toBe(1);
+    await db.enforceRls();
+    const seen = await db.query<{ data: { status: string; name?: string } }>(
+      `select data from public.records where table_name = 'packlists' and id = 'pl-mine'`,
+    );
+    expect(seen.rows[0].data.status).toBe('delivered');
+    // The rename never landed: the warehouse's name is kept.
+    expect(seen.rows[0].data.name).toBe('Water cube');
+    await db.close();
+  });
+
+  it('is refused the other race and the catalogue', async () => {
+    const db = await eventDriver();
+    const other = await push(db, {
+      table_name: 'packlists', id: 'pl-other-event',
+      event_id: OTHER_EVENT, destination_id: 'dest-hounslow-1',
+      data: { id: 'pl-other-event', status: 'delivered' },
+    });
+    expect(other.rows[0].push_records.refused).toBe(1);
+    const item = await push(db, { table_name: 'items', id: 'item-1' });
+    expect(item.rows[0].push_records.refused).toBe(1);
+    await db.close();
+  });
+});
