@@ -40,7 +40,10 @@ export default defineConfig({
       },
       workbox: {
         // Precache the whole app: once installed it must open with no network.
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // The PDF reader's worker is emitted as an .mjs asset and must be in
+        // the cache too, or importing a run sheet fails the first time it is
+        // tried with no signal.
+        globPatterns: ['**/*.{js,mjs,css,html,svg,png,ico,woff2}'],
         cleanupOutdatedCaches: true,
         navigateFallback: 'index.html',
       },

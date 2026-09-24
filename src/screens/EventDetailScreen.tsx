@@ -125,6 +125,9 @@ export default function EventDetailScreen() {
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/food`}>
             🍌 Food plan
           </Link>
+          <Link className="btn btn-outline btn-sm" to={`/import?event=${event.id}`}>
+            📄 Import pack list
+          </Link>
           <button type="button" className="btn btn-outline btn-sm" onClick={() => void handover()}>
             ⬇ Handover file
           </button>
