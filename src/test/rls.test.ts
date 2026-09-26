@@ -632,3 +632,61 @@ describe('what a driver given one event can write', () => {
     await db.close();
   });
 });
+
+describe('the packing assistant’s notes', () => {
+  /** An admin with one note on the server, and crew given every event. */
+  async function withNote() {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await db.query('select public.push_records($1::jsonb)', [
+      JSON.stringify([wireRow({
+        table_name: 'assistantNotes', id: 'note-1',
+        data: { id: 'note-1', text: 'Grand Canyon Carpark has no power.' },
+      })]),
+    ]);
+    await db.addUser(CREW, 'sam@singletrack.com.au');
+    await db.query(
+      `insert into public.memberships (user_id, role, display_name) values ($1, 'crew', 'Sam')`,
+      [CREW],
+    );
+    return db;
+  }
+
+  it('reach the admin', async () => {
+    const db = await withNote();
+    await db.enforceRls();
+    const { rows } = await db.query(`select id from public.records where table_name = 'assistantNotes'`);
+    expect(rows).toHaveLength(1);
+    await db.close();
+  });
+
+  it('are never sent to crew, even crew given every event', async () => {
+    const db = await withNote();
+    await db.actAs(CREW);
+    await db.enforceRls();
+    const { rows } = await db.query(`select id from public.records where table_name = 'assistantNotes'`);
+    expect(rows).toHaveLength(0);
+    // The same crew still read the catalogue, so the refusal is about the table.
+    const items = await db.query(`select id from public.records where table_name = 'items'`);
+    expect(items).toHaveProperty('rows.length', 1);
+    await db.close();
+  });
+
+  it('cannot be written or changed by crew', async () => {
+    const db = await withNote();
+    await db.actAs(CREW);
+    const { rows } = await db.query<{ push_records: Record<string, number> }>(
+      'select public.push_records($1::jsonb) as push_records',
+      [JSON.stringify([
+        wireRow({ table_name: 'assistantNotes', id: 'note-2', data: { id: 'note-2', text: 'Mine' } }),
+        wireRow({
+          table_name: 'assistantNotes', id: 'note-1', rev: 9, updated_at: '2026-05-01T00:00:00.000Z',
+          data: { id: 'note-1', text: 'Rewritten' },
+        }),
+      ])],
+    );
+    expect(rows[0].push_records.refused).toBe(2);
+    expect(rows[0].push_records.accepted).toBe(0);
+    await db.close();
+  });
+});

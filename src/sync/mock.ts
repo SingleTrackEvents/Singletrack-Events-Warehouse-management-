@@ -5,7 +5,7 @@ import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import { shouldReplace } from '../domain/backup';
 import { cleanDisplayName, displayNameFromEmail } from './names';
-import { inScope, writableFields, writableTables } from './permissions';
+import { inScope, readableTable, writableFields, writableTables } from './permissions';
 import type {
   ChangeSet,
   CreateInviteInput,
@@ -228,6 +228,10 @@ export class MockBackend implements SyncBackend {
     saveSession(null);
   }
 
+  async accessToken(): Promise<string | null> {
+    return loadSession()?.token ?? null;
+  }
+
   async setDisplayName(name: string): Promise<Session> {
     const current = loadSession();
     if (!current) throw new SyncError('Not signed in.', 'auth');
@@ -368,6 +372,9 @@ export class MockBackend implements SyncBackend {
 
   /** Scope check for a row being read. */
   private async rowVisible(session: Session, table: TableName, row: SyncMeta): Promise<boolean> {
+    // Table first, scope second: the assistant's notes go to admins and to
+    // nobody else, however wide the account's scope.
+    if (!readableTable(session.role, table)) return false;
     if (!session.scope.eventId && !session.scope.destinationId) return true;
     // Reference data a scoped session still needs to make sense of its
     // packlists: the catalogue and the templates it builds lists from. A

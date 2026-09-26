@@ -1,6 +1,7 @@
 import Dexie from 'dexie';
 import type { Table } from 'dexie';
 import type {
+  AssistantNote,
   Category,
   ConsumptionLine,
   Container,
@@ -91,6 +92,7 @@ export class WarehouseDb extends Dexie {
   races!: Table<Race, string>;
   consumptionLines!: Table<ConsumptionLine, string>;
   settings!: Table<Settings, string>;
+  assistantNotes!: Table<AssistantNote, string>;
 
   constructor(name = 'singletrack-warehouse') {
     super(name);
@@ -119,6 +121,11 @@ export class WarehouseDb extends Dexie {
       races: 'id, eventId, sort, deletedAt, updatedAt',
       consumptionLines: 'id, eventId, destinationId, itemId, sort, deletedAt, updatedAt',
     });
+    // Version 3 adds the packing assistant's memory: short notes, each scoped
+    // to an event, a kind of destination, or neither.
+    this.version(3).stores({
+      assistantNotes: 'id, eventId, destinationType, deletedAt, updatedAt',
+    });
   }
 }
 
@@ -143,6 +150,7 @@ export const ALL_TABLES = [
   'races',
   'consumptionLines',
   'settings',
+  'assistantNotes',
 ] as const;
 
 export type TableName = (typeof ALL_TABLES)[number];
