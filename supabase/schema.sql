@@ -151,11 +151,15 @@ end;
 $$;
 
 -- Which tables a role may write. Mirrors writableTables() in the app.
+--
+-- The packing assistant's notes are admin-only in both directions: they
+-- decide what the assistant tells the crew about every list it checks.
+-- Mirrors ADMIN_TABLES in the app.
 create or replace function public.can_write_table(p_role text, p_table text)
 returns boolean language sql immutable as $$
   select case p_role
     when 'admin' then true
-    when 'crew'  then true
+    when 'crew'  then p_table <> 'assistantNotes'
     when 'driver' then p_table in ('loads', 'loadStops', 'packlists', 'packlistLines')
     when 'volunteer' then p_table in ('packlists', 'packlistLines')
     else false
@@ -196,12 +200,13 @@ $$;
 
 -- Which tables a role may read. A volunteer must never receive the
 -- warehouse catalogue — they only need their own packlist.
+-- Nor may crew or drivers see the assistant's notes; see can_write_table.
 create or replace function public.can_read_table(p_role text, p_table text)
 returns boolean language sql immutable as $$
   select case p_role
     when 'volunteer' then p_table in ('events', 'destinations', 'packlists', 'packlistLines', 'containers')
-    when 'driver' then p_table <> 'settings'
-    when 'crew' then p_table <> 'settings'
+    when 'driver' then p_table not in ('settings', 'assistantNotes')
+    when 'crew' then p_table not in ('settings', 'assistantNotes')
     when 'admin' then p_table <> 'settings'
     else false
   end

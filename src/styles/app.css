@@ -920,3 +920,12 @@ button, input, select, textarea {
   font-size: var(--text-sm);
 }
 .kit-line .muted { color: var(--text-muted); }
+
+/* ------------------------------------------------------------- assistant -- */
+
+.assistant-thinking { display: inline-block; animation: pulse 1.4s ease-in-out infinite; }
+
+.assistant-suggestion { border-left: 4px solid var(--accent); }
+
+.assistant-note { align-items: flex-start; }
+.assistant-note .row-body { white-space: normal; }

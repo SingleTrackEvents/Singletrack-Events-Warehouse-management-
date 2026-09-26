@@ -445,3 +445,32 @@ export interface Settings extends SyncMeta {
   /** Whether the starter catalogue has been loaded on this device. */
   seeded: boolean;
 }
+
+/* -------------------------------------------------------------- assistant -- */
+
+/**
+ * One thing the packing assistant has been told to keep in mind.
+ *
+ * The assistant reads the catalogue, the templates and previous years' lists
+ * for itself; these notes carry what none of that records. "Grand Canyon
+ * Carpark has no power, always a generator." "Never send glass to a walk-in
+ * station." Kept as short, separate sentences rather than one long brief, so
+ * each can be scoped, edited or binned on its own.
+ *
+ * Admin only, on the device and on the server: the notes shape what the
+ * assistant tells the crew, and are the one place a stray edit would quietly
+ * change every list it checks from then on.
+ */
+export interface AssistantNote extends SyncMeta {
+  text: string;
+  /** Applies to one event, or null for every event. */
+  eventId: string | null;
+  /** Applies to one kind of destination, or null for every kind. */
+  destinationType: DestinationType | null;
+  /**
+   * Written by hand, or proposed by the assistant after a check and approved
+   * with a tap. Both read the same to the assistant; the label is for whoever
+   * is tidying the list later.
+   */
+  source: 'written' | 'learned';
+}

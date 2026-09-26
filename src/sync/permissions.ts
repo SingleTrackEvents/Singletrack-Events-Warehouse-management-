@@ -1,3 +1,4 @@
+import { SYNCED_TABLES } from '../db/db';
 import type { TableName } from '../db/db';
 import type { Role, Scope, Session } from './types';
 import { UNSCOPED } from './types';
@@ -39,7 +40,9 @@ export type Action =
   // Administration
   | 'member:manage'
   | 'data:export'
-  | 'data:wipe';
+  | 'data:wipe'
+  // The packing assistant: running checks and editing what it remembers
+  | 'assistant:use';
 
 /**
  * Grants per role.
@@ -56,6 +59,7 @@ const GRANTS: Record<Role, Action[]> = {
     'load:read', 'load:manage', 'load:deliver',
     'stocktake:read', 'stocktake:manage', 'template:manage',
     'member:manage', 'data:export', 'data:wipe',
+    'assistant:use',
   ],
   crew: [
     'item:read', 'item:write', 'stock:adjust',
@@ -93,7 +97,27 @@ const WAREHOUSE_ACTIONS: Action[] = [
   'event:create', 'event:delete',
   'stocktake:read', 'stocktake:manage', 'template:manage',
   'member:manage', 'data:export', 'data:wipe',
+  'assistant:use',
 ];
+
+/**
+ * Tables only an admin may read or write.
+ *
+ * The assistant's notes decide what it tells the crew about every list it
+ * checks, so they belong with inviting people rather than with packing. Crew
+ * never receive them; the server refuses the rows and the mock mirrors it.
+ */
+export const ADMIN_TABLES: TableName[] = ['assistantNotes'];
+
+/** Can this role be sent rows from this table at all? */
+export function readableTable(role: Role, table: TableName): boolean {
+  if (table === 'settings') return false;
+  if (ADMIN_TABLES.includes(table)) return role === 'admin';
+  if (role === 'volunteer') {
+    return ['events', 'destinations', 'packlists', 'packlistLines', 'containers'].includes(table);
+  }
+  return true;
+}
 
 /** A reference to the thing being acted on, for scope checks. */
 export interface Target {
@@ -249,6 +273,13 @@ export const EVENT_TABLES: TableName[] = [
 ];
 
 /**
+ * Everything crew given the whole warehouse may write: every synced table bar
+ * the admin-only ones. Listed rather than 'all' so a note can never ride out
+ * in a crew member's outbox.
+ */
+export const CREW_TABLES: TableName[] = SYNCED_TABLES.filter((table) => !ADMIN_TABLES.includes(table));
+
+/**
  * Narrow a change set down to what a session is actually allowed to write.
  * Used by the mock backend, and by the client to avoid pushing doomed rows.
  *
@@ -262,7 +293,7 @@ export function writableTables(session: Session | null): TableName[] | 'all' {
     case 'admin':
       return 'all';
     case 'crew':
-      return isEventScoped(session) ? EVENT_TABLES : 'all';
+      return isEventScoped(session) ? EVENT_TABLES : CREW_TABLES;
     case 'driver':
       return ['loadStops', 'loads', 'packlists', 'packlistLines'];
     case 'volunteer':
