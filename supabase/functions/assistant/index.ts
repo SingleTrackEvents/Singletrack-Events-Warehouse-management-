@@ -23,7 +23,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.128.0';
  * Which copy of this file is running. Bump it on every change: the app shows
  * it on "Test the connection", so a redeploy that did not take is obvious.
  */
-const VERSION = '2026-09-27d';
+const VERSION = '2026-09-27e';
 
 /** Chosen for judgement about what a remote aid station is missing. */
 const MODEL = 'claude-opus-5';
@@ -238,7 +238,15 @@ function costUsd(usage: Anthropic.Usage): number {
 }
 
 async function check(request: CheckRequest, apiKey: string): Promise<Response> {
-  const client = new Anthropic({ apiKey, maxRetries: 2 });
+  // A key made at the organisation level, rather than inside a workspace,
+  // is refused unless every request names the workspace to bill. An
+  // optional secret carries it; a key made inside a workspace needs nothing.
+  const workspaceId = Deno.env.get('ANTHROPIC_WORKSPACE_ID')?.trim();
+  const client = new Anthropic({
+    apiKey,
+    maxRetries: 2,
+    defaultHeaders: workspaceId ? { 'anthropic-workspace-id': workspaceId } : undefined,
+  });
 
   const response = await client.messages.create({
     model: MODEL,
@@ -340,9 +348,12 @@ Deno.serve(async (request) => {
       return refuse('The assistant is being asked too much at once. Wait a minute and try again.', 429);
     }
     if (cause instanceof Anthropic.APIError) {
-      const message = cause.status === 400 && /credit|billing/i.test(cause.message)
-        ? 'The Claude account is out of credit. Top it up in the Claude Console.'
-        : `Claude returned an error (${cause.status ?? 'unknown'}): ${cause.message}`;
+      const message =
+        cause.status === 400 && /credit|billing/i.test(cause.message)
+          ? 'The Claude account is out of credit. Top it up in the Claude Console.'
+          : cause.status === 400 && /workspace/i.test(cause.message)
+            ? 'The Claude API key is not tied to a workspace. Either make a new key from inside a workspace in the Claude Console, or add a Supabase secret named ANTHROPIC_WORKSPACE_ID with the workspace ID.'
+            : `Claude returned an error (${cause.status ?? 'unknown'}): ${cause.message}`;
       return refuse(message, 502);
     }
     return refuse('Something went wrong while checking the list.', 500);

@@ -371,7 +371,10 @@ sent with a check. Two ways in:
 2. **The key into Supabase.** Project → Edge Functions → Secrets → add
    `ANTHROPIC_API_KEY`. The key never enters this repository, the build or a
    phone. Revoking it in the Console and pasting a new one here is the whole
-   rotation.
+   rotation. Make the key from inside a workspace (the Console's Default
+   workspace is fine): a key made at the organisation level is refused
+   unless a second secret, `ANTHROPIC_WORKSPACE_ID`, names the workspace to
+   bill.
 3. **Deploy the function.** Either paste `supabase/functions/assistant/index.ts`
    into Edge Functions → Deploy a new function, named `assistant`, or from a
    machine with the Supabase CLI:
