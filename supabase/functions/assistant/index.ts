@@ -12,10 +12,18 @@
 // Deploy (see README → The packing assistant):
 //   supabase functions deploy assistant
 //   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-// or paste this file into Edge Functions → New function in the dashboard.
+// or paste this file, on its own, into Edge Functions → Deploy a new
+// function in the dashboard.
 
-import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@supabase/supabase-js';
+// A full package address on purpose: the dashboard's "paste and deploy"
+// editor bundles this one file and never sees an import map beside it.
+import Anthropic from 'npm:@anthropic-ai/sdk@0.128.0';
+
+/**
+ * Which copy of this file is running. Bump it on every change: the app shows
+ * it on "Test the connection", so a redeploy that did not take is obvious.
+ */
+const VERSION = '2026-09-27f';
 
 /** Chosen for judgement about what a remote aid station is missing. */
 const MODEL = 'claude-opus-5';
@@ -49,6 +57,7 @@ What a good check looks like:
 - Kits count for their contents. Do not suggest something a kit on the list already contains.
 - A question is for something you cannot settle from the data, such as whether a station is running a second day. Keep questions few.
 - The admin's notes outrank templates and history. If a note says a station never gets an item, do not suggest it.
+- Answers from the crew are fact. Never ask a question that has been answered; use the answer to add or adjust lines instead, and say in the reason which answer settled it.
 - Keep each reason to one plain sentence in Australian English, the way an experienced crew member would say it standing at the crate. No preamble, no hedging.
 - Suggest at most twelve things. Fewer, well chosen, beats a long list.
 - Under notesToRemember, offer at most three short rules that would make future checks better and that the data supports, such as a pattern across earlier editions. Offer nothing if nothing stands out. Never propose a note that repeats an existing one.`;
@@ -109,6 +118,8 @@ interface CheckRequest {
   foodPlan: string;
   history: string;
   notes: string;
+  /** Question and answer pairs from an earlier round. Absent or empty on a first check. */
+  answers?: string;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -125,44 +136,60 @@ function refuse(error: string, status: number): Response {
 /**
  * Who is calling, and are they an admin?
  *
- * The request carries the account's own token. Asking Supabase who that is,
- * and then reading their membership row under their own credentials, means
- * the same row-level security that guards the sync log guards this: a
- * volunteer's token can read a volunteer's row and nothing else.
+ * Two plain requests to the project's own API, made with the same
+ * publishable key the app signs in with: one to turn the token into a user,
+ * one to read that user's membership row. The second runs under the caller's
+ * token, so the same row-level security that guards the sync log guards
+ * this: a volunteer's token can read a volunteer's row and nothing else.
+ *
+ * No client library here. The one that was here looked up the user without
+ * the token, and then used a key the project had retired; a direct request
+ * has nothing to get wrong and can say exactly what came back when it fails.
  */
 async function callerIsAdmin(request: Request): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
   const authorization = request.headers.get('authorization') ?? '';
   if (!authorization.toLowerCase().startsWith('bearer ')) {
     return { ok: false, error: 'Sign in to use the assistant.', status: 401 };
   }
+  const token = authorization.slice('bearer '.length).trim();
 
   const url = Deno.env.get('SUPABASE_URL');
-  // The project's publishable key: injected into every function, and in any
-  // case the same public value the app sends with each request.
+  // The key the app sends is the project's publishable key, already proven
+  // to work by the sign-in that produced the token. The injected one is a
+  // fallback: on a project that has retired its legacy keys it is refused.
   const key =
-    Deno.env.get('SUPABASE_ANON_KEY') ??
+    request.headers.get('apikey') ??
     Deno.env.get('SUPABASE_PUBLISHABLE_KEY') ??
-    request.headers.get('apikey');
+    Deno.env.get('SUPABASE_ANON_KEY');
   if (!url || !key) {
     return { ok: false, error: 'The function cannot see its own project settings.', status: 500 };
   }
+  const headers = { apikey: key, authorization: `Bearer ${token}` };
 
-  const supabase = createClient(url, key, {
-    global: { headers: { authorization } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) {
-    return { ok: false, error: 'That sign-in has expired. Sign in again and retry.', status: 401 };
+  const who = await fetch(`${url}/auth/v1/user`, { headers });
+  const user = await readJson<{ id?: string }>(who);
+  if (!who.ok || !user?.id) {
+    return {
+      ok: false,
+      error: `The sign-in could not be verified (${VERSION}, auth ${who.status} from ${url}: ${await snippet(who)}). Sign out and in again, then retry.`,
+      status: 401,
+    };
   }
 
-  const { data: membership, error: membershipError } = await supabase
-    .from('memberships')
-    .select('role, expires_at')
-    .eq('user_id', userData.user.id)
-    .maybeSingle();
-  if (membershipError || !membership) {
+  const rows = await fetch(
+    `${url}/rest/v1/memberships?select=role,expires_at&user_id=eq.${encodeURIComponent(user.id)}`,
+    { headers },
+  );
+  const memberships = await readJson<Array<{ role: string; expires_at: string | null }>>(rows);
+  if (!rows.ok || !Array.isArray(memberships)) {
+    return {
+      ok: false,
+      error: `Could not read this account's access (${VERSION}, rest ${rows.status}: ${await snippet(rows)}).`,
+      status: 403,
+    };
+  }
+  const membership = memberships[0];
+  if (!membership) {
     return { ok: false, error: 'This account has no access to the warehouse.', status: 403 };
   }
   const expired = membership.expires_at && new Date(membership.expires_at) <= new Date();
@@ -172,6 +199,26 @@ async function callerIsAdmin(request: Request): Promise<{ ok: true } | { ok: fal
   return { ok: true };
 }
 
+/**
+ * Parse a response as JSON without trusting it to be JSON. A gateway error
+ * page is HTML, and a thrown parse error would turn into a blank 500 rather
+ * than a message that says what came back. The body is cloned so `snippet`
+ * can still read it afterwards.
+ */
+async function readJson<T>(response: Response): Promise<T | null> {
+  try {
+    return (await response.clone().json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** The start of a response, flattened, so an error message can quote it. */
+async function snippet(response: Response): Promise<string> {
+  const text = await response.text().catch(() => '');
+  return text.replace(/\s+/g, ' ').trim().slice(0, 160) || 'empty response';
+}
+
 function isCheck(body: unknown): body is CheckRequest {
   if (!body || typeof body !== 'object') return false;
   const candidate = body as Record<string, unknown>;
@@ -179,7 +226,8 @@ function isCheck(body: unknown): body is CheckRequest {
     candidate.kind === 'check' &&
     ['catalogue', 'station', 'packlist', 'templates', 'foodPlan', 'history', 'notes'].every(
       (field) => typeof candidate[field] === 'string',
-    )
+    ) &&
+    (candidate.answers === undefined || typeof candidate.answers === 'string')
   );
 }
 
@@ -194,7 +242,15 @@ function costUsd(usage: Anthropic.Usage): number {
 }
 
 async function check(request: CheckRequest, apiKey: string): Promise<Response> {
-  const client = new Anthropic({ apiKey, maxRetries: 2 });
+  // A key made at the organisation level, rather than inside a workspace,
+  // is refused unless every request names the workspace to bill. An
+  // optional secret carries it; a key made inside a workspace needs nothing.
+  const workspaceId = Deno.env.get('ANTHROPIC_WORKSPACE_ID')?.trim();
+  const client = new Anthropic({
+    apiKey,
+    maxRetries: 2,
+    defaultHeaders: workspaceId ? { 'anthropic-workspace-id': workspaceId } : undefined,
+  });
 
   const response = await client.messages.create({
     model: MODEL,
@@ -220,6 +276,7 @@ async function check(request: CheckRequest, apiKey: string): Promise<Response> {
           `## The food plan for this destination\n${request.foodPlan}`,
           `## History\n${request.history}`,
           `## Notes from the admin\n${request.notes}`,
+          `## Answers from the crew to earlier questions\n${request.answers?.trim() || 'None yet.'}`,
           'Check this list. What is missing, what quantities look wrong, and what would you ask?',
         ].join('\n\n'),
       },
@@ -282,7 +339,7 @@ Deno.serve(async (request) => {
   }
 
   if (body && typeof body === 'object' && (body as { kind?: unknown }).kind === 'ping') {
-    return json({ ok: true, model: MODEL });
+    return json({ ok: true, model: MODEL, version: VERSION });
   }
   if (!isCheck(body)) return refuse('The request was missing part of the list.', 400);
 
@@ -296,9 +353,12 @@ Deno.serve(async (request) => {
       return refuse('The assistant is being asked too much at once. Wait a minute and try again.', 429);
     }
     if (cause instanceof Anthropic.APIError) {
-      const message = cause.status === 400 && /credit|billing/i.test(cause.message)
-        ? 'The Claude account is out of credit. Top it up in the Claude Console.'
-        : `Claude returned an error (${cause.status ?? 'unknown'}): ${cause.message}`;
+      const message =
+        cause.status === 400 && /credit|billing/i.test(cause.message)
+          ? 'The Claude account is out of credit. Top it up in the Claude Console.'
+          : cause.status === 400 && /workspace/i.test(cause.message)
+            ? 'The Claude API key is not tied to a workspace. Either make a new key from inside a workspace in the Claude Console, or add a Supabase secret named ANTHROPIC_WORKSPACE_ID with the workspace ID.'
+            : `Claude returned an error (${cause.status ?? 'unknown'}): ${cause.message}`;
       return refuse(message, 502);
     }
     return refuse('Something went wrong while checking the list.', 500);

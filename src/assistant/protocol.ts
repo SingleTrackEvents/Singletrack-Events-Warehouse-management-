@@ -23,6 +23,8 @@ export interface PingRequest {
 export interface PingResponse {
   ok: true;
   model: string;
+  /** Which copy of the function answered, so a stale deploy shows itself. */
+  version?: string;
 }
 
 /** Everything the assistant reads to check one packlist. */
@@ -46,6 +48,18 @@ export interface CheckRequest {
   history: string;
   /** Notes the admin has told the assistant to keep in mind here. */
   notes: string;
+  /**
+   * What the crew answered to the assistant's earlier questions, rendered as
+   * question and answer pairs. Empty on a first check. The assistant treats
+   * these as fact and does not ask again.
+   */
+  answers: string;
+}
+
+/** One question the assistant asked, and what the crew said. */
+export interface Answer {
+  question: string;
+  answer: string;
 }
 
 export type SuggestionKind = 'missing' | 'quantity' | 'question';

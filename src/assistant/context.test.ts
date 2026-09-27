@@ -8,6 +8,7 @@ import {
   pickHistory,
   pickSiblings,
   relevantTemplates,
+  renderAnswers,
   renderCatalogue,
   renderPacklist,
   renderStation,
@@ -191,5 +192,28 @@ describe('building the whole request from the database', () => {
 
   it('returns nothing for a list that is not on this phone', async () => {
     expect(await buildCheckRequest('missing')).toBeUndefined();
+  });
+});
+
+describe('sending answers back', () => {
+  it('pairs each question with what the crew said and drops blanks', () => {
+    const text = renderAnswers([
+      { question: 'Is the station open on Sunday?', answer: 'Yes, both days.' },
+      { question: 'Blank answer?', answer: '   ' },
+    ]);
+    expect(text).toBe('Q: Is the station open on Sunday?\nA: Yes, both days.');
+    expect(renderAnswers([])).toBe('No questions have been answered yet.');
+  });
+
+  it('rides along with the request', async () => {
+    const jug = await item('Water jug', { sku: 'WTR-JUG' });
+    const now = await event('Hounslow Classic 2026', '2026-09-12');
+    const dest = await destination(now.id, 'Grand Canyon Carpark');
+    const list = await createPacklist(dest);
+    await addLine(list.id, jug.id, 6);
+
+    const request = await buildCheckRequest(list.id, [{ question: 'Power on site?', answer: 'None, bring the generator.' }]);
+    expect(request?.answers).toContain('Q: Power on site?');
+    expect(request?.answers).toContain('A: None, bring the generator.');
   });
 });

@@ -55,7 +55,9 @@ station, the food plan, earlier editions of the same station and the notes the
 admin has written, then says what looks missing, which quantities look wrong
 and what it would ask. Every suggestion is a button: add the item, set the
 quantity, or dismiss it, and a dismissal can be made permanent with one more
-tap. Its memory is a list of short notes under More → Packing assistant, each
+tap. Its questions can be answered in place: the answers go back with the
+next check, and any answer can be kept as a note for the event so it is never
+asked again. Its memory is a list of short notes under More → Packing assistant, each
 pinned to an event, a kind of destination, or neither, so it stays specific to
 how SingleTrack packs. Nothing it says touches a list until somebody taps. See
 "The packing assistant" below for setup and cost.
@@ -145,7 +147,7 @@ actually read and write. Two SQL bugs reached production before this existed,
 because the only way to run the schema was to deploy it.
 
 ```bash
-npm test    # 499 tests, including the Postgres schema and policies
+npm test    # 501 tests, including the Postgres schema and policies
 ```
 
 ## Design notes
@@ -371,7 +373,10 @@ sent with a check. Two ways in:
 2. **The key into Supabase.** Project → Edge Functions → Secrets → add
    `ANTHROPIC_API_KEY`. The key never enters this repository, the build or a
    phone. Revoking it in the Console and pasting a new one here is the whole
-   rotation.
+   rotation. Make the key from inside a workspace (the Console's Default
+   workspace is fine): a key made at the organisation level is refused
+   unless a second secret, `ANTHROPIC_WORKSPACE_ID`, names the workspace to
+   bill.
 3. **Deploy the function.** Either paste `supabase/functions/assistant/index.ts`
    into Edge Functions → Deploy a new function, named `assistant`, or from a
    machine with the Supabase CLI:
@@ -381,8 +386,8 @@ sent with a check. Two ways in:
    supabase functions deploy assistant
    ```
 
-   The function's own `deno.json` pins the Anthropic SDK; nothing is installed
-   in this repository for it.
+   The file names its one package by full address in the import, so it
+   deploys on its own with nothing installed alongside it.
 4. **Re-run `supabase/schema.sql`.** It is re-runnable, and this version adds
    the notes table to the read and write rules.
 5. **Test it.** In the app, More → Packing assistant → Test the connection. It
