@@ -381,8 +381,8 @@ sent with a check. Two ways in:
    supabase functions deploy assistant
    ```
 
-   The function's own `deno.json` pins the Anthropic SDK; nothing is installed
-   in this repository for it.
+   The file names its two packages by full address in the imports, so it
+   deploys on its own with nothing installed alongside it.
 4. **Re-run `supabase/schema.sql`.** It is re-runnable, and this version adds
    the notes table to the read and write rules.
 5. **Test it.** In the app, More → Packing assistant → Test the connection. It

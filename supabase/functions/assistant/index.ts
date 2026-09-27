@@ -12,10 +12,13 @@
 // Deploy (see README → The packing assistant):
 //   supabase functions deploy assistant
 //   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-// or paste this file into Edge Functions → New function in the dashboard.
+// or paste this file, on its own, into Edge Functions → Deploy a new
+// function in the dashboard.
 
-import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@supabase/supabase-js';
+// Full package addresses on purpose: the dashboard's "paste and deploy"
+// editor bundles this one file and never sees an import map beside it.
+import Anthropic from 'npm:@anthropic-ai/sdk@0.128.0';
+import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 /** Chosen for judgement about what a remote aid station is missing. */
 const MODEL = 'claude-opus-5';
