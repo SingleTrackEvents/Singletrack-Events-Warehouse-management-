@@ -57,7 +57,10 @@ export default function AssistantScreen() {
       }
       const token = (await backend?.accessToken?.()) ?? session.token;
       const result = await pingAssistant(token);
-      setTest({ phase: 'ok', message: `Connected. Checks run on ${result.model}.` });
+      setTest({
+        phase: 'ok',
+        message: `Connected. Checks run on ${result.model}. Function version ${result.version ?? 'unknown'}.`,
+      });
     } catch (cause) {
       setTest({
         phase: 'failed',

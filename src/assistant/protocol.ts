@@ -23,6 +23,8 @@ export interface PingRequest {
 export interface PingResponse {
   ok: true;
   model: string;
+  /** Which copy of the function answered, so a stale deploy shows itself. */
+  version?: string;
 }
 
 /** Everything the assistant reads to check one packlist. */

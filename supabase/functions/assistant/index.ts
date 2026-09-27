@@ -19,6 +19,12 @@
 // editor bundles this one file and never sees an import map beside it.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.128.0';
 
+/**
+ * Which copy of this file is running. Bump it on every change: the app shows
+ * it on "Test the connection", so a redeploy that did not take is obvious.
+ */
+const VERSION = '2026-09-27d';
+
 /** Chosen for judgement about what a remote aid station is missing. */
 const MODEL = 'claude-opus-5';
 
@@ -158,28 +164,27 @@ async function callerIsAdmin(request: Request): Promise<{ ok: true } | { ok: fal
   const headers = { apikey: key, authorization: `Bearer ${token}` };
 
   const who = await fetch(`${url}/auth/v1/user`, { headers });
-  if (!who.ok) {
+  const user = await readJson<{ id?: string }>(who);
+  if (!who.ok || !user?.id) {
     return {
       ok: false,
-      error: `The sign-in could not be verified (auth ${who.status}: ${await snippet(who)}). Sign out and in again, then retry.`,
+      error: `The sign-in could not be verified (${VERSION}, auth ${who.status} from ${url}: ${await snippet(who)}). Sign out and in again, then retry.`,
       status: 401,
     };
   }
-  const user = (await who.json()) as { id?: string };
-  if (!user.id) return { ok: false, error: 'The sign-in could not be verified (no user id).', status: 401 };
 
   const rows = await fetch(
     `${url}/rest/v1/memberships?select=role,expires_at&user_id=eq.${encodeURIComponent(user.id)}`,
     { headers },
   );
-  if (!rows.ok) {
+  const memberships = await readJson<Array<{ role: string; expires_at: string | null }>>(rows);
+  if (!rows.ok || !Array.isArray(memberships)) {
     return {
       ok: false,
-      error: `Could not read this account's access (rest ${rows.status}: ${await snippet(rows)}).`,
+      error: `Could not read this account's access (${VERSION}, rest ${rows.status}: ${await snippet(rows)}).`,
       status: 403,
     };
   }
-  const memberships = (await rows.json()) as Array<{ role: string; expires_at: string | null }>;
   const membership = memberships[0];
   if (!membership) {
     return { ok: false, error: 'This account has no access to the warehouse.', status: 403 };
@@ -191,10 +196,24 @@ async function callerIsAdmin(request: Request): Promise<{ ok: true } | { ok: fal
   return { ok: true };
 }
 
-/** The start of a failed response, flattened, so an error message can quote it. */
+/**
+ * Parse a response as JSON without trusting it to be JSON. A gateway error
+ * page is HTML, and a thrown parse error would turn into a blank 500 rather
+ * than a message that says what came back. The body is cloned so `snippet`
+ * can still read it afterwards.
+ */
+async function readJson<T>(response: Response): Promise<T | null> {
+  try {
+    return (await response.clone().json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** The start of a response, flattened, so an error message can quote it. */
 async function snippet(response: Response): Promise<string> {
   const text = await response.text().catch(() => '');
-  return text.replace(/\s+/g, ' ').trim().slice(0, 140) || 'empty response';
+  return text.replace(/\s+/g, ' ').trim().slice(0, 160) || 'empty response';
 }
 
 function isCheck(body: unknown): body is CheckRequest {
@@ -307,7 +326,7 @@ Deno.serve(async (request) => {
   }
 
   if (body && typeof body === 'object' && (body as { kind?: unknown }).kind === 'ping') {
-    return json({ ok: true, model: MODEL });
+    return json({ ok: true, model: MODEL, version: VERSION });
   }
   if (!isCheck(body)) return refuse('The request was missing part of the list.', 400);
 
