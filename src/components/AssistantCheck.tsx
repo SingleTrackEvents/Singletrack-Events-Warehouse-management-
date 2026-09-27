@@ -61,6 +61,12 @@ export function AssistantCheck({
         if (!session) {
           throw new AssistantError('Sign in as an admin to use the assistant.', 'auth');
         }
+        if (backend && !backend.isReal) {
+          throw new AssistantError(
+            'This phone is on the on-device demo server, which the assistant cannot use. Connect it to the SingleTrack server from More → Accounts & sync.',
+            'setup',
+          );
+        }
         const token = (await backend?.accessToken?.()) ?? session.token;
         const request = await buildCheckRequest(packlist.id);
         if (!request) throw new AssistantError('This list could not be read back from the phone.', 'server');

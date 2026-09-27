@@ -49,6 +49,12 @@ export default function AssistantScreen() {
     setTest({ phase: 'running', message: '' });
     try {
       if (!session) throw new AssistantError('Sign in as an admin first. The assistant needs an account to bill against.', 'auth');
+      if (backend && !backend.isReal) {
+        throw new AssistantError(
+          'This phone is on the on-device demo server, which the assistant cannot use. Connect it to the SingleTrack server from More → Accounts & sync.',
+          'setup',
+        );
+      }
       const token = (await backend?.accessToken?.()) ?? session.token;
       const result = await pingAssistant(token);
       setTest({ phase: 'ok', message: `Connected. Checks run on ${result.model}.` });

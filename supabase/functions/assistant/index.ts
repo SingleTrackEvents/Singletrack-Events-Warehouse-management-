@@ -155,9 +155,16 @@ async function callerIsAdmin(request: Request): Promise<{ ok: true } | { ok: fal
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data: userData, error: userError } = await supabase.auth.getUser();
+  // The token goes in by hand. Without it the client looks for a session of
+  // its own, which a server never has, and every caller reads as signed out.
+  const token = authorization.slice('bearer '.length).trim();
+  const { data: userData, error: userError } = await supabase.auth.getUser(token);
   if (userError || !userData.user) {
-    return { ok: false, error: 'That sign-in has expired. Sign in again and retry.', status: 401 };
+    return {
+      ok: false,
+      error: `The sign-in could not be verified (${userError?.message ?? 'no user'}). Sign out and in again, then retry.`,
+      status: 401,
+    };
   }
 
   const { data: membership, error: membershipError } = await supabase
