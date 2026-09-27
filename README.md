@@ -381,7 +381,7 @@ sent with a check. Two ways in:
    supabase functions deploy assistant
    ```
 
-   The file names its two packages by full address in the imports, so it
+   The file names its one package by full address in the import, so it
    deploys on its own with nothing installed alongside it.
 4. **Re-run `supabase/schema.sql`.** It is re-runnable, and this version adds
    the notes table to the read and write rules.

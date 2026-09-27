@@ -15,10 +15,9 @@
 // or paste this file, on its own, into Edge Functions → Deploy a new
 // function in the dashboard.
 
-// Full package addresses on purpose: the dashboard's "paste and deploy"
+// A full package address on purpose: the dashboard's "paste and deploy"
 // editor bundles this one file and never sees an import map beside it.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.128.0';
-import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 /** Chosen for judgement about what a remote aid station is missing. */
 const MODEL = 'claude-opus-5';
@@ -128,51 +127,61 @@ function refuse(error: string, status: number): Response {
 /**
  * Who is calling, and are they an admin?
  *
- * The request carries the account's own token. Asking Supabase who that is,
- * and then reading their membership row under their own credentials, means
- * the same row-level security that guards the sync log guards this: a
- * volunteer's token can read a volunteer's row and nothing else.
+ * Two plain requests to the project's own API, made with the same
+ * publishable key the app signs in with: one to turn the token into a user,
+ * one to read that user's membership row. The second runs under the caller's
+ * token, so the same row-level security that guards the sync log guards
+ * this: a volunteer's token can read a volunteer's row and nothing else.
+ *
+ * No client library here. The one that was here looked up the user without
+ * the token, and then used a key the project had retired; a direct request
+ * has nothing to get wrong and can say exactly what came back when it fails.
  */
 async function callerIsAdmin(request: Request): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
   const authorization = request.headers.get('authorization') ?? '';
   if (!authorization.toLowerCase().startsWith('bearer ')) {
     return { ok: false, error: 'Sign in to use the assistant.', status: 401 };
   }
+  const token = authorization.slice('bearer '.length).trim();
 
   const url = Deno.env.get('SUPABASE_URL');
-  // The project's publishable key: injected into every function, and in any
-  // case the same public value the app sends with each request.
+  // The key the app sends is the project's publishable key, already proven
+  // to work by the sign-in that produced the token. The injected one is a
+  // fallback: on a project that has retired its legacy keys it is refused.
   const key =
-    Deno.env.get('SUPABASE_ANON_KEY') ??
+    request.headers.get('apikey') ??
     Deno.env.get('SUPABASE_PUBLISHABLE_KEY') ??
-    request.headers.get('apikey');
+    Deno.env.get('SUPABASE_ANON_KEY');
   if (!url || !key) {
     return { ok: false, error: 'The function cannot see its own project settings.', status: 500 };
   }
+  const headers = { apikey: key, authorization: `Bearer ${token}` };
 
-  const supabase = createClient(url, key, {
-    global: { headers: { authorization } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  // The token goes in by hand. Without it the client looks for a session of
-  // its own, which a server never has, and every caller reads as signed out.
-  const token = authorization.slice('bearer '.length).trim();
-  const { data: userData, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !userData.user) {
+  const who = await fetch(`${url}/auth/v1/user`, { headers });
+  if (!who.ok) {
     return {
       ok: false,
-      error: `The sign-in could not be verified (${userError?.message ?? 'no user'}). Sign out and in again, then retry.`,
+      error: `The sign-in could not be verified (auth ${who.status}: ${await snippet(who)}). Sign out and in again, then retry.`,
       status: 401,
     };
   }
+  const user = (await who.json()) as { id?: string };
+  if (!user.id) return { ok: false, error: 'The sign-in could not be verified (no user id).', status: 401 };
 
-  const { data: membership, error: membershipError } = await supabase
-    .from('memberships')
-    .select('role, expires_at')
-    .eq('user_id', userData.user.id)
-    .maybeSingle();
-  if (membershipError || !membership) {
+  const rows = await fetch(
+    `${url}/rest/v1/memberships?select=role,expires_at&user_id=eq.${encodeURIComponent(user.id)}`,
+    { headers },
+  );
+  if (!rows.ok) {
+    return {
+      ok: false,
+      error: `Could not read this account's access (rest ${rows.status}: ${await snippet(rows)}).`,
+      status: 403,
+    };
+  }
+  const memberships = (await rows.json()) as Array<{ role: string; expires_at: string | null }>;
+  const membership = memberships[0];
+  if (!membership) {
     return { ok: false, error: 'This account has no access to the warehouse.', status: 403 };
   }
   const expired = membership.expires_at && new Date(membership.expires_at) <= new Date();
@@ -180,6 +189,12 @@ async function callerIsAdmin(request: Request): Promise<{ ok: true } | { ok: fal
     return { ok: false, error: 'Only an admin can use the packing assistant.', status: 403 };
   }
   return { ok: true };
+}
+
+/** The start of a failed response, flattened, so an error message can quote it. */
+async function snippet(response: Response): Promise<string> {
+  const text = await response.text().catch(() => '');
+  return text.replace(/\s+/g, ' ').trim().slice(0, 140) || 'empty response';
 }
 
 function isCheck(body: unknown): body is CheckRequest {
