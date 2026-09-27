@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
+import { AssistantCheck } from '../components/AssistantCheck';
 import { ItemPicker } from '../components/ItemPicker';
 import { SwipeToDelete } from '../components/SwipeToDelete';
 import { ConfirmSheet, Field, Pill, ProgressBar, Sheet, Stepper } from '../components/ui';
@@ -98,10 +99,15 @@ export default function PacklistScreen() {
   const canManage = can(session, 'packlist:manage');
   const canAdvance = canManage || can(session, 'load:deliver');
   const stationOnly = isStationOnly(session);
+  // The assistant bills a real account, so it wants a signed-in admin, not
+  // the one-phone-on-its-own mode where every check passes for want of anyone
+  // to check.
+  const canAsk = Boolean(session) && can(session, 'assistant:use');
 
   const [filter, setFilter] = useState<Filter>('todo');
   const [picking, setPicking] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [confirmAdvance, setConfirmAdvance] = useState<PacklistStatus>();
   const [notesOpen, setNotesOpen] = useState(false);
   const [removingLine, setRemovingLine] = useState<PacklistLine>();
@@ -285,6 +291,11 @@ export default function PacklistScreen() {
           <button type="button" className="btn btn-outline" onClick={() => setApplying(true)}>
             📋 Apply template
           </button>
+          {canAsk ? (
+            <button type="button" className="btn btn-outline" onClick={() => setChecking(true)}>
+              ✨ Check this list
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -511,6 +522,16 @@ export default function PacklistScreen() {
               setPicking(false);
             })();
           }}
+        />
+      ) : null}
+
+      {checking && destination ? (
+        <AssistantCheck
+          packlist={packlist}
+          destination={destination}
+          lines={lines ?? []}
+          items={items ?? new Map()}
+          onClose={() => setChecking(false)}
         />
       ) : null}
 

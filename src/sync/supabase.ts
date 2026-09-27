@@ -546,6 +546,11 @@ export class SupabaseBackend implements SyncBackend {
     forgetSession();
   }
 
+  async accessToken(): Promise<string | null> {
+    const { data } = await this.client.auth.getSession();
+    return data.session?.access_token ?? null;
+  }
+
   async push(_session: Session, changes: ChangeSet): Promise<PushResult> {
     // Children inherit their packlist's or load's scope; without this the
     // security policies would see a null scope and reject the write.

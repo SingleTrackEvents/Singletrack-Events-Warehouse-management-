@@ -113,6 +113,16 @@ export default function SettingsScreen() {
               <span className="row-chevron">›</span>
             </Link>
           ) : null}
+          {can(session, 'assistant:use') ? (
+            <Link to="/assistant" className="row">
+              <span className="row-icon">✨</span>
+              <span className="row-body">
+                <span className="row-title">Packing assistant</span>
+                <span className="row-sub">What it knows about SingleTrack packing, and whether it is connected</span>
+              </span>
+              <span className="row-chevron">›</span>
+            </Link>
+          ) : null}
           {can(session, 'stocktake:read') ? (
             <Link to="/stocktake" className="row">
               <span className="row-icon">🔢</span>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CREW_TABLES,
   EVENT_TABLES,
   can,
   canEditField,
@@ -120,8 +121,10 @@ describe('crew given one event', () => {
     expect(EVENT_TABLES).not.toContain('movements');
     expect(EVENT_TABLES).not.toContain('stocktakes');
     expect(EVENT_TABLES).not.toContain('templates');
-    // Given every event, crew still write the lot.
-    expect(writableTables(session('crew'))).toBe('all');
+    // Given every event, crew still write the lot, bar the admin-only tables.
+    expect(writableTables(session('crew'))).toEqual(CREW_TABLES);
+    expect(CREW_TABLES).toContain('items');
+    expect(CREW_TABLES).not.toContain('assistantNotes');
   });
 
   it('is described honestly on the access screen', () => {

@@ -209,6 +209,16 @@ export interface SyncBackend {
    */
   setDisplayName?(name: string): Promise<Session>;
 
+  /**
+   * A credential the project's other services will accept right now.
+   *
+   * The token on the session is the one issued at sign-in and goes stale
+   * within the hour; the client library refreshes it quietly in the
+   * background, so anything calling a server function has to ask for the
+   * current one rather than reuse what the session carries.
+   */
+  accessToken?(): Promise<string | null>;
+
   /** Send local changes. Must be safe to call repeatedly with the same rows. */
   push(session: Session, changes: ChangeSet): Promise<PushResult>;
 

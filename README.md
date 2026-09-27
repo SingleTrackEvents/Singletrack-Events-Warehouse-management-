@@ -49,6 +49,17 @@ a new item with a category, and a heading that matches no station can be
 skipped or created. An item lands on a packlist once however many times the
 file mentions it, and importing the same file twice changes nothing.
 
+**Packing assistant** — on any packlist, an admin can tap "Check this list" and
+Claude reads the list against the catalogue, the templates for that kind of
+station, the food plan, earlier editions of the same station and the notes the
+admin has written, then says what looks missing, which quantities look wrong
+and what it would ask. Every suggestion is a button: add the item, set the
+quantity, or dismiss it, and a dismissal can be made permanent with one more
+tap. Its memory is a list of short notes under More → Packing assistant, each
+pinned to an event, a kind of destination, or neither, so it stays specific to
+how SingleTrack packs. Nothing it says touches a list until somebody taps. See
+"The packing assistant" below for setup and cost.
+
 **Codes** — every packlist gets a short code (`AS3-7K2M`) that can be typed into
 the scanner or read out over the radio. Supplier barcodes can be linked to items
 so scanning a carton opens its stock page.
@@ -115,7 +126,9 @@ src/
   components/  Shared UI — sheets, steppers, toasts, scanner, invite QR codes
   screens/     One file per screen, lazily routed
   sync/        Backend contract, role permissions, sync engine, Supabase adapter
+  assistant/   The packing assistant: what it is shown, what comes back, its notes
 supabase/      Database schema and row-level security policies
+  functions/   The one server-side piece: the Edge Function that calls Claude
   styles/      Design tokens and component CSS
 ```
 
@@ -132,7 +145,7 @@ actually read and write. Two SQL bugs reached production before this existed,
 because the only way to run the schema was to deploy it.
 
 ```bash
-npm test    # 432 tests, including the Postgres schema and policies
+npm test    # 499 tests, including the Postgres schema and policies
 ```
 
 ## Design notes
@@ -180,7 +193,7 @@ with no bars.
 
 | Role | Can do |
 | --- | --- |
-| **Admin** | Everything, including the catalogue and who else has access |
+| **Admin** | Everything, including the catalogue, who else has access, and the packing assistant |
 | **Crew, all events** | The warehouse: pack, adjust stock, run stocktakes, keep templates, build loads |
 | **Crew, one event** | Pack, build loads and plan food for that event; read the catalogue |
 | **Driver** | Assigned loads for one event, confirm deliveries |
@@ -315,6 +328,85 @@ Still to do before a real race:
   the server refuses disallowed writes, but individual screens do not yet hide
   every control a limited role cannot use.
 - Realtime updates, so a change appears without waiting for the next sync.
+
+## The packing assistant
+
+The assistant is the only part of the app that needs a server, and it needs one
+for exactly one reason: a Claude API key cannot live in a published web page.
+So the app talks to a small Supabase Edge Function
+(`supabase/functions/assistant/index.ts`) that holds the key, checks that the
+caller is a signed-in admin, adds the instructions and asks Claude. The phone
+assembles everything the assistant reads (`src/assistant/context.ts`) from its
+own local database, so the function never reads the sync log and never sees a
+volunteer's or driver's token as anything but a refusal.
+
+It runs on Claude Opus 5. The catalogue is sent with prompt caching turned on,
+so checks within the same hour reuse it at a tenth of the price. A check costs
+roughly ten to fifteen cents cold and a few cents warm; each result says what it
+cost. The assistant is admin only: only an admin sees the button, only an admin
+receives the notes, and the function refuses everyone else before it spends
+anything.
+
+### Its memory
+
+Notes live in a synced table of their own (`assistantNotes`), admin only in
+both directions: `can_read_table` and `can_write_table` in the schema refuse it
+to crew and drivers, `src/sync/permissions.ts` mirrors that, and
+`src/test/rls.test.ts` proves it against Postgres. A note applies everywhere,
+to one event, or to one kind of destination, and only the ones that apply are
+sent with a check. Two ways in:
+
+- **Written.** More → Packing assistant → +. "Grand Canyon Carpark has no
+  power, always a generator."
+- **Learned.** After a check, the assistant may offer up to three rules it
+  thinks worth keeping; each is saved only if you tap "Remember this".
+  Dismissing a suggestion with "Never for this kind of list" also writes a
+  note, worded so it still reads sensibly a season later.
+
+### Setup, once
+
+1. **A Claude account.** Sign in at platform.claude.com, create the
+   organisation as SingleTrack Events, add prepaid credit and set a monthly
+   spend limit. Under API Keys create one key named for this job.
+2. **The key into Supabase.** Project → Edge Functions → Secrets → add
+   `ANTHROPIC_API_KEY`. The key never enters this repository, the build or a
+   phone. Revoking it in the Console and pasting a new one here is the whole
+   rotation.
+3. **Deploy the function.** Either paste `supabase/functions/assistant/index.ts`
+   into Edge Functions → Deploy a new function, named `assistant`, or from a
+   machine with the Supabase CLI:
+
+   ```bash
+   supabase link --project-ref <your project ref>
+   supabase functions deploy assistant
+   ```
+
+   The function's own `deno.json` pins the Anthropic SDK; nothing is installed
+   in this repository for it.
+4. **Re-run `supabase/schema.sql`.** It is re-runnable, and this version adds
+   the notes table to the read and write rules.
+5. **Test it.** In the app, More → Packing assistant → Test the connection. It
+   names the model when everything is in place, and says plainly which step is
+   missing when it is not.
+
+`VITE_ASSISTANT_URL` overrides where the app looks for the function, for a
+staging project or a local `supabase functions serve`.
+
+### What it is shown
+
+Plain text sections, rendered by small pure functions so the wording is tested
+without a database: the whole catalogue with codes, units and kit contents; the
+destination, its access, hours and the races through it; the list itself; the
+templates for that destination type and access; what the food plan calls for at
+that station; the same-named station at earlier events (the quantities that
+actually left the warehouse, where the list got that far) and its sibling
+stations at this event; and the notes that apply. The answer comes back as a
+fixed JSON shape (`src/assistant/protocol.ts`), and the app re-reads it
+defensively before offering a button off the back of it.
+
+The function does not opt into Anthropic's server-side fallback models. A
+packing list does not trip the safety classifiers, and if one ever did the app
+says so rather than quietly answering from a different model.
 
 ## Possible next steps
 
