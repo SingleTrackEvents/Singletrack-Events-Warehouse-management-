@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
+import { BuildStamp } from '../components/BuildStamp';
 import { ConfirmSheet, Field } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db, getSettings } from '../db/db';
@@ -223,6 +224,7 @@ export default function SettingsScreen() {
         />
       ) : null}
 
+      <BuildStamp />
     </Screen>
   );
 }

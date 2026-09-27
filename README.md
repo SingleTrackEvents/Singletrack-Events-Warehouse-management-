@@ -163,6 +163,10 @@ npm test    # 501 tests, including the Postgres schema and policies
   with no server rewrites.
 - **Scanning degrades.** Native `BarcodeDetector` where it exists, jsQR
   everywhere else (including iOS Safari), and a typed-code fallback under both.
+- **Every build says which one it is.** The foot of the home screen and the
+  More screen show the commit hash and the day it was built, stamped in by
+  `vite.config.ts` from the checkout. A phone that has not picked up a deploy
+  yet shows the old hash; nobody has to remember a version number.
 
 ## Sync and access
 

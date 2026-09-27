@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
+import { BuildStamp } from '../components/BuildStamp';
 import { EmptyState, Pill, ProgressBar } from '../components/ui';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
@@ -231,6 +232,7 @@ export default function HomeScreen() {
           </div>
         </section>
       ) : null}
+      <BuildStamp />
     </Screen>
   );
 }
@@ -253,6 +255,7 @@ function StationHome({
     return (
       <Screen title="Your station">
         <p className="muted">Loading…</p>
+        <BuildStamp />
       </Screen>
     );
   }
@@ -270,6 +273,7 @@ function StationHome({
         <p className="tiny muted center mt-3">
           Signed in as {session?.displayName}. <Link to="/access">Account</Link>
         </p>
+        <BuildStamp />
       </Screen>
     );
   }
@@ -301,6 +305,7 @@ function StationHome({
         Tick off each item as it turns up. What was meant to be sent is set by the warehouse, so a
         short delivery stays visible. <Link to="/access">Account</Link>
       </p>
+      <BuildStamp />
     </Screen>
   );
 }
