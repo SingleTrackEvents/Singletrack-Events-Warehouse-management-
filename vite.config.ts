@@ -1,6 +1,27 @@
+import { execSync } from 'node:child_process';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+
+/**
+ * Which build this is, worked out at build time so nobody has to remember to
+ * bump anything: the short commit hash and the day it was built. Shown at the
+ * foot of the home screen, so "has the phone picked up the update yet" has
+ * an answer rather than a guess. Outside a git checkout it reads "dev".
+ */
+function buildStamp(): { commit: string; builtAt: string } {
+  let commit = 'dev';
+  try {
+    commit = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim() || 'dev';
+  } catch {
+    // Not a git checkout, or git is missing: the stamp still says something.
+  }
+  return { commit, builtAt: new Date().toISOString().slice(0, 10) };
+}
+
+const stamp = buildStamp();
 
 /**
  * Build config.
@@ -11,6 +32,10 @@ import { VitePWA } from 'vite-plugin-pwa';
  */
 export default defineConfig({
   base: './',
+  define: {
+    __APP_COMMIT__: JSON.stringify(stamp.commit),
+    __APP_BUILT_AT__: JSON.stringify(stamp.builtAt),
+  },
   plugins: [
     react(),
     VitePWA({
