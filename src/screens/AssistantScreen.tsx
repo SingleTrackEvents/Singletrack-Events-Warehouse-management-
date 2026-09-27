@@ -6,7 +6,7 @@ import { SwipeToDelete } from '../components/SwipeToDelete';
 import { ConfirmSheet, EmptyState, Field, Pill, Sheet } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { alive, softDelete } from '../db/repo';
+import { alive, softDelete, update } from '../db/repo';
 import { useEvents } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
@@ -34,7 +34,8 @@ export default function AssistantScreen() {
     async () => alive(await db.assistantNotes.toArray()).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [],
   );
-  const [adding, setAdding] = useState(false);
+  // 'new' for a blank sheet, or the rule being changed.
+  const [editing, setEditing] = useState<'new' | AssistantNote>();
   const [removing, setRemoving] = useState<AssistantNote>();
   const [test, setTest] = useState<{ phase: 'idle' | 'running' | 'ok' | 'failed'; message: string }>({
     phase: 'idle',
@@ -74,7 +75,7 @@ export default function AssistantScreen() {
       title="Packing assistant"
       back="/more"
       actions={
-        <button type="button" className="header-btn" aria-label="New note" onClick={() => setAdding(true)}>
+        <button type="button" className="header-btn" aria-label="New rule" onClick={() => setEditing('new')}>
           +
         </button>
       }
@@ -99,16 +100,23 @@ export default function AssistantScreen() {
             title="Nothing written down yet"
             body="Start with the things a new crew member always gets wrong. “Grand Canyon Carpark has no power, always a generator.”"
             action={
-              <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
-                Write the first note
+              <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>
+                Write the first rule
               </button>
             }
           />
-        ) : null}
+        ) : (
+          <div className="btn-row mb-3 no-print">
+            <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>
+              + Add a rule
+            </button>
+          </div>
+        )}
         <div className="list">
           {(notes ?? []).map((note) => (
             <SwipeToDelete key={note.id} label="Delete" onDelete={() => setRemoving(note)}>
-              <div className="row row-static assistant-note">
+              {/* Tapping a rule opens it for editing: the wording, or where it applies. */}
+              <button type="button" className="row assistant-note" onClick={() => setEditing(note)}>
                 <span className="row-icon">{note.source === 'learned' ? '💡' : '📝'}</span>
                 <span className="row-body">
                   <span className="row-title" style={{ fontWeight: 500 }}>
@@ -119,12 +127,15 @@ export default function AssistantScreen() {
                     {note.source === 'learned' ? ' · learned from a check' : ''}
                   </span>
                 </span>
-              </div>
+                <span className="row-chevron">›</span>
+              </button>
             </SwipeToDelete>
           ))}
         </div>
         {notes?.length ? (
-          <p className="tiny muted mt-2">{plural(notes.length, 'note')}. Swipe left to delete one.</p>
+          <p className="tiny muted mt-2">
+            {plural(notes.length, 'rule')}. Tap one to change it, swipe left to delete it.
+          </p>
         ) : null}
       </section>
 
@@ -158,14 +169,28 @@ export default function AssistantScreen() {
         </div>
       </section>
 
-      {adding ? (
-        <NewNoteSheet
+      {editing ? (
+        <NoteSheet
+          initial={editing === 'new' ? undefined : editing}
           events={(events ?? []).map((event) => ({ id: event.id, name: event.name }))}
-          onClose={() => setAdding(false)}
+          onClose={() => setEditing(undefined)}
           onSave={(input) => {
-            void addNote(input).then((saved) => {
-              toast(saved ? 'Note saved' : 'Write something first', saved ? 'ok' : 'warn');
-              if (saved) setAdding(false);
+            const body = input.text.trim();
+            if (!body) {
+              toast('Write something first', 'warn');
+              return;
+            }
+            const saving =
+              editing === 'new'
+                ? addNote(input)
+                : update(db.assistantNotes, editing.id, {
+                    text: body,
+                    eventId: input.eventId,
+                    destinationType: input.destinationType,
+                  });
+            void saving.then(() => {
+              toast(editing === 'new' ? 'Rule saved' : 'Rule updated');
+              setEditing(undefined);
             });
           }}
         />
@@ -173,7 +198,7 @@ export default function AssistantScreen() {
 
       {removing ? (
         <ConfirmSheet
-          title="Delete this note?"
+          title="Delete this rule?"
           body={removing.text}
           confirmLabel="Delete"
           tone="danger"
@@ -181,7 +206,7 @@ export default function AssistantScreen() {
           onConfirm={() => {
             void softDelete(db.assistantNotes, removing.id);
             setRemoving(undefined);
-            toast('Note deleted');
+            toast('Rule deleted');
           }}
         />
       ) : null}
@@ -191,19 +216,33 @@ export default function AssistantScreen() {
 
 type NoteWhere = 'everywhere' | 'event' | 'type';
 
-function NewNoteSheet({
+/**
+ * Write a rule, or change one.
+ *
+ * The same sheet serves both: opened blank for a new rule, or filled from an
+ * existing one so its wording or its scope can be corrected without deleting
+ * and retyping it. A rule the assistant proposed is edited the same way, so
+ * an awkward phrasing can be tidied rather than binned.
+ */
+function NoteSheet({
+  initial,
   events,
   onClose,
   onSave,
 }: {
+  initial?: AssistantNote;
   events: Array<{ id: string; name: string }>;
   onClose: () => void;
   onSave: (input: { text: string; eventId: string | null; destinationType: DestinationType | null }) => void;
 }) {
-  const [text, setText] = useState('');
-  const [where, setWhere] = useState<NoteWhere>('everywhere');
-  const [eventId, setEventId] = useState(events[0]?.id ?? '');
-  const [destinationType, setDestinationType] = useState<DestinationType>('aid_station');
+  const [text, setText] = useState(initial?.text ?? '');
+  const [where, setWhere] = useState<NoteWhere>(
+    initial?.eventId ? 'event' : initial?.destinationType ? 'type' : 'everywhere',
+  );
+  const [eventId, setEventId] = useState(initial?.eventId ?? events[0]?.id ?? '');
+  const [destinationType, setDestinationType] = useState<DestinationType>(
+    initial?.destinationType ?? 'aid_station',
+  );
 
   const save = () =>
     onSave({
@@ -214,7 +253,7 @@ function NewNoteSheet({
 
   return (
     <Sheet
-      title="New note"
+      title={initial ? 'Change this rule' : 'New rule'}
       onClose={onClose}
       footer={
         <>

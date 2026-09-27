@@ -927,5 +927,6 @@ button, input, select, textarea {
 
 .assistant-suggestion { border-left: 4px solid var(--accent); }
 
-.assistant-note { align-items: flex-start; }
+.assistant-note { align-items: flex-start; text-align: left; }
 .assistant-note .row-body { white-space: normal; }
+.assistant-note .row-title { white-space: normal; }
