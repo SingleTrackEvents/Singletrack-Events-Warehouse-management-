@@ -1,16 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pill, Sheet } from './ui';
 import { useToast } from './toastContext';
 import { db } from '../db/db';
 import { update } from '../db/repo';
 import { useSession } from '../hooks/sessionContext';
 import { addLine } from '../domain/packlists';
-import { formatQty } from '../domain/format';
+import { formatQty, plural } from '../domain/format';
 import { buildCheckRequest } from '../assistant/context';
 import { AssistantError, runCheck } from '../assistant/client';
 import { formatCost } from '../assistant/cost';
 import { addNote, dismissalNote, scopeFor } from '../assistant/notes';
-import type { CheckResponse, ProposedNote, Suggestion } from '../assistant/protocol';
+import type { Answer, CheckResponse, ProposedNote, Suggestion } from '../assistant/protocol';
 import type { Destination, Item, Packlist, PacklistLine } from '../db/types';
 
 /**
@@ -21,6 +21,11 @@ import type { Destination, Item, Packlist, PacklistLine } from '../db/types';
  * has an "Add" button, each quantity concern a "Set to N", and anything it
  * gets wrong can be dismissed for good with one more tap. Nothing it says is
  * written to the list until somebody taps.
+ *
+ * Its questions can be answered in place. Answers go back with the next
+ * check, so "is the station open Sunday" plus "yes, both days" becomes a
+ * second day's worth of lines rather than a question left hanging, and an
+ * answer can be kept as a note for the event so it is never asked again.
  */
 export function AssistantCheck({
   packlist,
@@ -47,16 +52,24 @@ export function AssistantCheck({
   const [handled, setHandled] = useState<ReadonlySet<number>>(new Set());
   const [remembered, setRemembered] = useState<ReadonlySet<number>>(new Set());
   const [confirmDismiss, setConfirmDismiss] = useState<number>();
+  // Answers to the assistant's questions, kept across rounds so it never asks
+  // the same thing twice, and a copy of what it has already been sent.
+  const [answers, setAnswers] = useState<Answer[]>([]);
+  const [sent, setSent] = useState<Answer[]>([]);
+  // Questions whose answer has been written down as a note for the event.
+  const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
   const started = useRef(false);
 
   const bySku = new Map<string, Item>();
   for (const item of items.values()) bySku.set(item.sku, item);
   const lineFor = (item: Item) => lines.find((line) => line.itemId === item.id && !line.deletedAt);
 
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    void (async () => {
+  const run = useCallback(
+    async (withAnswers: Answer[]) => {
+      setState({ phase: 'running' });
+      setHandled(new Set());
+      setRemembered(new Set());
+      setConfirmDismiss(undefined);
       try {
         if (!session) {
           throw new AssistantError('Sign in as an admin to use the assistant.', 'auth');
@@ -68,9 +81,10 @@ export function AssistantCheck({
           );
         }
         const token = (await backend?.accessToken?.()) ?? session.token;
-        const request = await buildCheckRequest(packlist.id);
+        const request = await buildCheckRequest(packlist.id, withAnswers);
         if (!request) throw new AssistantError('This list could not be read back from the phone.', 'server');
         const response = await runCheck(request, token);
+        setSent(withAnswers);
         setState({ phase: 'done', response });
       } catch (cause) {
         const failure = cause instanceof AssistantError ? cause : null;
@@ -80,8 +94,15 @@ export function AssistantCheck({
           setup: failure?.kind === 'setup',
         });
       }
-    })();
-  }, [backend, session, packlist.id]);
+    },
+    [backend, session, packlist.id],
+  );
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void run([]);
+  }, [run]);
 
   const act = async (index: number, suggestion: Suggestion) => {
     const item = suggestion.sku ? bySku.get(suggestion.sku) : undefined;
@@ -127,6 +148,25 @@ export function AssistantCheck({
     toast('Remembered');
   };
 
+  /** Record or replace the answer to one question. */
+  const answer = (question: string, text: string) => {
+    setAnswers((current) => [
+      ...current.filter((entry) => entry.question !== question),
+      { question, answer: text.trim() },
+    ]);
+  };
+
+  /** Keep an answer as a note for this event, so the question is settled for good. */
+  const keep = async (question: string, text: string) => {
+    await addNote({ text: `${question} ${text}`.trim(), eventId: packlist.eventId, source: 'learned' });
+    setKept((current) => new Set(current).add(question));
+    toast('Kept for this event');
+  };
+
+  const pending = answers.filter(
+    (entry) => !sent.some((old) => old.question === entry.question && old.answer === entry.answer),
+  );
+
   return (
     <Sheet title="Check this list" onClose={onClose}>
       {state.phase === 'running' ? (
@@ -134,7 +174,7 @@ export function AssistantCheck({
           <span className="glyph assistant-thinking" aria-hidden>
             ✨
           </span>
-          <h3>Reading the list</h3>
+          <h3>{sent.length || answers.length ? 'Checking again with your answers' : 'Reading the list'}</h3>
           <p className="small">
             The catalogue, the templates for this kind of destination, the food plan and earlier
             editions of {destination.name}. Usually under a minute.
@@ -153,9 +193,14 @@ export function AssistantCheck({
               </p>
             ) : null}
           </div>
-          <button type="button" className="btn btn-outline" onClick={onClose}>
-            Close
-          </button>
+          <div className="btn-row">
+            <button type="button" className="btn btn-outline" onClick={() => void run(answers)}>
+              Try again
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -165,6 +210,9 @@ export function AssistantCheck({
           handled={handled}
           remembered={remembered}
           confirmDismiss={confirmDismiss}
+          answers={answers}
+          kept={kept}
+          pending={pending.length}
           itemFor={(suggestion) => (suggestion.sku ? bySku.get(suggestion.sku) : undefined)}
           lineFor={lineFor}
           onAct={act}
@@ -172,6 +220,9 @@ export function AssistantCheck({
           onAskDismiss={setConfirmDismiss}
           onDismissForGood={dismissForGood}
           onRemember={remember}
+          onAnswer={answer}
+          onKeep={keep}
+          onResend={() => void run(answers)}
         />
       ) : null}
     </Sheet>
@@ -195,6 +246,9 @@ function Results({
   handled,
   remembered,
   confirmDismiss,
+  answers,
+  kept,
+  pending,
   itemFor,
   lineFor,
   onAct,
@@ -202,11 +256,17 @@ function Results({
   onAskDismiss,
   onDismissForGood,
   onRemember,
+  onAnswer,
+  onKeep,
+  onResend,
 }: {
   response: CheckResponse;
   handled: ReadonlySet<number>;
   remembered: ReadonlySet<number>;
   confirmDismiss: number | undefined;
+  answers: Answer[];
+  kept: ReadonlySet<string>;
+  pending: number;
   itemFor: (suggestion: Suggestion) => Item | undefined;
   lineFor: (item: Item) => PacklistLine | undefined;
   onAct: (index: number, suggestion: Suggestion) => Promise<void>;
@@ -214,6 +274,9 @@ function Results({
   onAskDismiss: (index: number | undefined) => void;
   onDismissForGood: (index: number, suggestion: Suggestion) => Promise<void>;
   onRemember: (index: number, note: ProposedNote) => Promise<void>;
+  onAnswer: (question: string, text: string) => void;
+  onKeep: (question: string, text: string) => Promise<void>;
+  onResend: () => void;
 }) {
   const { result, usage } = response;
   const open = result.suggestions.map((suggestion, index) => ({ suggestion, index })).filter(
@@ -234,6 +297,7 @@ function Results({
             const item = itemFor(suggestion);
             const line = item ? lineFor(item) : undefined;
             const actionable = item && suggestion.qty !== null && suggestion.kind !== 'question';
+            const answered = answers.find((entry) => entry.question === suggestion.name);
             return (
               <div key={index} className="card card-pad assistant-suggestion">
                 <div className="spread mb-1">
@@ -249,42 +313,56 @@ function Results({
                     Currently {formatQty(line.qtyRequired, item.unit)} required.
                   </p>
                 ) : null}
-                <div className="btn-row mt-2 wrap">
-                  {actionable ? (
-                    <button type="button" className="btn btn-primary btn-sm" onClick={() => void onAct(index, suggestion)}>
-                      {suggestion.kind === 'missing' || !line
-                        ? `+ Add ${formatQty(suggestion.qty!, item!.unit)}`
-                        : `Set to ${formatQty(suggestion.qty!, item!.unit)}`}
-                    </button>
-                  ) : null}
-                  {confirmDismiss === index ? (
-                    <>
-                      <button type="button" className="btn btn-outline btn-sm" onClick={() => onDismiss(index)}>
-                        Just this once
+
+                {suggestion.kind === 'question' ? (
+                  <AnswerBox
+                    question={suggestion.name}
+                    answered={answered?.answer}
+                    kept={kept.has(suggestion.name)}
+                    onAnswer={onAnswer}
+                    onKeep={onKeep}
+                    onDismiss={() => onDismiss(index)}
+                  />
+                ) : (
+                  <div className="btn-row mt-2 wrap">
+                    {actionable ? (
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => void onAct(index, suggestion)}>
+                        {suggestion.kind === 'missing' || !line
+                          ? `+ Add ${formatQty(suggestion.qty!, item!.unit)}`
+                          : `Set to ${formatQty(suggestion.qty!, item!.unit)}`}
                       </button>
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm"
-                        onClick={() => void onDismissForGood(index, suggestion)}
-                      >
-                        Never for this kind of list
+                    ) : null}
+                    {confirmDismiss === index ? (
+                      <>
+                        <button type="button" className="btn btn-outline btn-sm" onClick={() => onDismiss(index)}>
+                          Just this once
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          onClick={() => void onDismissForGood(index, suggestion)}
+                        >
+                          Never for this kind of list
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onAskDismiss(index)}>
+                        Dismiss
                       </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => (suggestion.kind === 'question' ? onDismiss(index) : onAskDismiss(index))}
-                    >
-                      {suggestion.kind === 'question' ? 'Got it' : 'Dismiss'}
-                    </button>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       )}
+
+      {pending ? (
+        <button type="button" className="btn btn-primary btn-block" onClick={onResend}>
+          Send {plural(pending, 'answer')} and check again
+        </button>
+      ) : null}
 
       {result.notesToRemember.length ? (
         <section>
@@ -312,6 +390,85 @@ function Results({
         {response.model} · this check cost about {formatCost(usage.costUsd)}
         {usage.cacheReadTokens ? ' · catalogue read from cache' : ''}
       </p>
+    </div>
+  );
+}
+
+/**
+ * One question, and the place to answer it.
+ *
+ * Typing is the whole interaction: an answer is kept the moment "Answer" is
+ * tapped, and the "check again" button appears once anything is waiting to
+ * go back. "Keep for this event" writes the answer down as a note so the
+ * assistant has it next time without being told.
+ */
+function AnswerBox({
+  question,
+  answered,
+  kept,
+  onAnswer,
+  onKeep,
+  onDismiss,
+}: {
+  question: string;
+  answered: string | undefined;
+  kept: boolean;
+  onAnswer: (question: string, text: string) => void;
+  onKeep: (question: string, text: string) => Promise<void>;
+  onDismiss: () => void;
+}) {
+  const [draft, setDraft] = useState(answered ?? '');
+  const [editing, setEditing] = useState(!answered);
+
+  if (!editing && answered) {
+    return (
+      <div className="mt-2">
+        <p className="small">
+          <span className="muted">Your answer: </span>
+          {answered}
+        </p>
+        <div className="btn-row mt-2 wrap">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
+            Change
+          </button>
+          {kept ? (
+            <Pill tone="ok">Kept for this event</Pill>
+          ) : (
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => void onKeep(question, answered)}>
+              Keep for this event
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2">
+      <textarea
+        className="textarea"
+        style={{ minHeight: 72 }}
+        value={draft}
+        placeholder="Type an answer…"
+        aria-label={`Answer: ${question}`}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <div className="btn-row mt-2 wrap">
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={!draft.trim()}
+          onClick={() => {
+            onAnswer(question, draft);
+            setEditing(false);
+          }}
+        >
+          Answer
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onDismiss}>
+          Got it
+        </button>
+      </div>
     </div>
   );
 }

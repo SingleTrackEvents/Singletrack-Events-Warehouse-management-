@@ -23,7 +23,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.128.0';
  * Which copy of this file is running. Bump it on every change: the app shows
  * it on "Test the connection", so a redeploy that did not take is obvious.
  */
-const VERSION = '2026-09-27e';
+const VERSION = '2026-09-27f';
 
 /** Chosen for judgement about what a remote aid station is missing. */
 const MODEL = 'claude-opus-5';
@@ -57,6 +57,7 @@ What a good check looks like:
 - Kits count for their contents. Do not suggest something a kit on the list already contains.
 - A question is for something you cannot settle from the data, such as whether a station is running a second day. Keep questions few.
 - The admin's notes outrank templates and history. If a note says a station never gets an item, do not suggest it.
+- Answers from the crew are fact. Never ask a question that has been answered; use the answer to add or adjust lines instead, and say in the reason which answer settled it.
 - Keep each reason to one plain sentence in Australian English, the way an experienced crew member would say it standing at the crate. No preamble, no hedging.
 - Suggest at most twelve things. Fewer, well chosen, beats a long list.
 - Under notesToRemember, offer at most three short rules that would make future checks better and that the data supports, such as a pattern across earlier editions. Offer nothing if nothing stands out. Never propose a note that repeats an existing one.`;
@@ -117,6 +118,8 @@ interface CheckRequest {
   foodPlan: string;
   history: string;
   notes: string;
+  /** Question and answer pairs from an earlier round. Absent or empty on a first check. */
+  answers?: string;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -223,7 +226,8 @@ function isCheck(body: unknown): body is CheckRequest {
     candidate.kind === 'check' &&
     ['catalogue', 'station', 'packlist', 'templates', 'foodPlan', 'history', 'notes'].every(
       (field) => typeof candidate[field] === 'string',
-    )
+    ) &&
+    (candidate.answers === undefined || typeof candidate.answers === 'string')
   );
 }
 
@@ -272,6 +276,7 @@ async function check(request: CheckRequest, apiKey: string): Promise<Response> {
           `## The food plan for this destination\n${request.foodPlan}`,
           `## History\n${request.history}`,
           `## Notes from the admin\n${request.notes}`,
+          `## Answers from the crew to earlier questions\n${request.answers?.trim() || 'None yet.'}`,
           'Check this list. What is missing, what quantities look wrong, and what would you ask?',
         ].join('\n\n'),
       },

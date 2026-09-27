@@ -55,7 +55,9 @@ station, the food plan, earlier editions of the same station and the notes the
 admin has written, then says what looks missing, which quantities look wrong
 and what it would ask. Every suggestion is a button: add the item, set the
 quantity, or dismiss it, and a dismissal can be made permanent with one more
-tap. Its memory is a list of short notes under More → Packing assistant, each
+tap. Its questions can be answered in place: the answers go back with the
+next check, and any answer can be kept as a note for the event so it is never
+asked again. Its memory is a list of short notes under More → Packing assistant, each
 pinned to an event, a kind of destination, or neither, so it stays specific to
 how SingleTrack packs. Nothing it says touches a list until somebody taps. See
 "The packing assistant" below for setup and cost.
@@ -145,7 +147,7 @@ actually read and write. Two SQL bugs reached production before this existed,
 because the only way to run the schema was to deploy it.
 
 ```bash
-npm test    # 499 tests, including the Postgres schema and policies
+npm test    # 501 tests, including the Postgres schema and policies
 ```
 
 ## Design notes

@@ -17,7 +17,7 @@ import type {
   Template,
   TemplateLine,
 } from '../db/types';
-import type { CheckRequest } from './protocol';
+import type { Answer, CheckRequest } from './protocol';
 
 /**
  * What the assistant gets to read before it says anything.
@@ -325,6 +325,20 @@ export function renderNotes(notes: AssistantNote[], eventName: string): string {
     .join('\n');
 }
 
+/* ---------------------------------------------------------------- answers -- */
+
+/**
+ * The crew's answers to earlier questions, for a second pass.
+ *
+ * Sent as plain question and answer pairs so the assistant can settle what
+ * it could not before, and so it does not ask the same thing twice.
+ */
+export function renderAnswers(answers: Answer[]): string {
+  const live = answers.filter((entry) => entry.question.trim() && entry.answer.trim());
+  if (!live.length) return 'No questions have been answered yet.';
+  return live.map((entry) => `Q: ${entry.question.trim()}\nA: ${entry.answer.trim()}`).join('\n');
+}
+
 /* ------------------------------------------------------------------ build -- */
 
 /**
@@ -334,7 +348,10 @@ export function renderNotes(notes: AssistantNote[], eventName: string): string {
  * found, which on a phone means the record has not synced yet or has been
  * deleted under it.
  */
-export async function buildCheckRequest(packlistId: string): Promise<CheckRequest | undefined> {
+export async function buildCheckRequest(
+  packlistId: string,
+  answers: Answer[] = [],
+): Promise<CheckRequest | undefined> {
   const packlist = await db.packlists.get(packlistId);
   if (!packlist || packlist.deletedAt) return undefined;
   const [destination, event] = await Promise.all([
@@ -375,6 +392,7 @@ export async function buildCheckRequest(packlistId: string): Promise<CheckReques
       itemMap,
     ),
     notes: renderNotes(notesFor(notes, { eventId: event.id, destinationType: destination.type }), event.name),
+    answers: renderAnswers(answers),
   };
 }
 
