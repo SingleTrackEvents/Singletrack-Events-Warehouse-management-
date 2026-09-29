@@ -104,6 +104,16 @@ export default function SettingsScreen() {
               <span className="row-chevron">›</span>
             </Link>
           ) : null}
+          {can(session, 'shopping:manage') ? (
+            <Link to="/shopping" className="row">
+              <span className="row-icon">🛒</span>
+              <span className="row-body">
+                <span className="row-title">Shopping list</span>
+                <span className="row-sub">What to buy, where, and booking it into stock once home</span>
+              </span>
+              <span className="row-chevron">›</span>
+            </Link>
+          ) : null}
           {can(session, 'template:manage') ? (
             <Link to="/templates" className="row">
               <span className="row-icon">📋</span>

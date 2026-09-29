@@ -10,8 +10,9 @@ import { useToast } from '../components/toastContext';
 import { useSearch } from '../hooks/useSearch';
 import { db } from '../db/db';
 import { create, update } from '../db/repo';
-import { useCategories, useItems } from '../hooks/useDb';
+import { useCategories, useCrewName, useItems } from '../hooks/useDb';
 import { isLowStock, isUncounted, countedItemIds, stockCsv } from '../domain/stock';
+import { addLowStock } from '../domain/shopping';
 import { formatQtyDetail, plural } from '../domain/format';
 import { downloadCsv } from '../domain/backup';
 import { suggestSku } from '../domain/skus';
@@ -37,9 +38,13 @@ export default function StockScreen() {
   const [adding, setAdding] = useState(false);
   const [archiving, setArchiving] = useState<Item>();
   const { session } = useSession();
+  const crew = useCrewName();
   const canEdit = can(session, 'item:write');
   const canArchive = can(session, 'item:archive');
   const canCount = can(session, 'stocktake:read');
+  // Restocking goes with adjusting stock: crew given one event read the
+  // catalogue but do not buy for the warehouse.
+  const canShop = can(session, 'stock:adjust') && can(session, 'shopping:manage');
 
   const categoryFilter = params.get('category') ?? '';
   const lowOnly = params.get('filter') === 'low';
@@ -240,6 +245,25 @@ export default function StockScreen() {
           >
             ⬇ CSV{filtered ? ' (this view)' : ''}
           </button>
+          {lowOnly && canShop ? (
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() => {
+                // The low view is the reorder run; the shopping list is where
+                // it gets done. Enough of each to get back to its reorder point.
+                void addLowStock(matches, crew).then((result) => {
+                  const changed = result.added + result.updated;
+                  toast(
+                    changed ? `${plural(changed, 'item')} put on the shopping list` : 'Already on the shopping list',
+                    changed ? 'ok' : 'warn',
+                  );
+                });
+              }}
+            >
+              🛒 Shopping list
+            </button>
+          ) : null}
         </div>
       ) : null}
 

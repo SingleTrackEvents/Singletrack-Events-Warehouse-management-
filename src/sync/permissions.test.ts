@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CREW_ONLY_TABLES,
   CREW_TABLES,
   EVENT_TABLES,
   can,
@@ -10,6 +11,7 @@ import {
   isExpired,
   isStationOnly,
   reachable,
+  readableTable,
   roleAtLeast,
   scrubChanges,
   writableTables,
@@ -350,5 +352,31 @@ describe('a volunteer pinned to one aid station', () => {
     const done = station({ expiresAt: '2020-01-01T00:00:00.000Z' });
     expect(can(done, 'packlist:read', { eventId: 'event-1', destinationId: 'dest-3' })).toBe(false);
     expect(canEditField(done, 'packlistLines', 'qtyReturned')).toBe(false);
+  });
+});
+
+describe('the shopping list', () => {
+  it('belongs to the admin and the crew', () => {
+    expect(can(session('admin'), 'shopping:manage')).toBe(true);
+    expect(can(session('crew'), 'shopping:manage')).toBe(true);
+    expect(can(session('driver'), 'shopping:manage')).toBe(false);
+    expect(can(session('volunteer'), 'shopping:manage')).toBe(false);
+    expect(describeRole('crew')).toContain('Keep the shopping list');
+    expect(describeRole('driver')).not.toContain('Keep the shopping list');
+  });
+
+  it('goes with crew given one event, for that event', () => {
+    const crew = session('crew', { scope: { eventId: 'event-1', destinationId: null } });
+    expect(can(crew, 'shopping:manage', { eventId: 'event-1' })).toBe(true);
+    expect(can(crew, 'shopping:manage', { eventId: 'event-2' })).toBe(false);
+    expect(writableTables(crew)).toContain('shoppingLines');
+  });
+
+  it('is a table drivers and volunteers are never sent', () => {
+    expect(CREW_ONLY_TABLES).toEqual(['shoppingLines']);
+    expect(readableTable('crew', 'shoppingLines')).toBe(true);
+    expect(readableTable('driver', 'shoppingLines')).toBe(false);
+    expect(readableTable('volunteer', 'shoppingLines')).toBe(false);
+    expect(writableTables(session('driver'))).not.toContain('shoppingLines');
   });
 });

@@ -15,6 +15,7 @@ import type {
   Race,
   RaceEvent,
   Settings,
+  ShoppingLine,
   Stocktake,
   StocktakeCount,
   SyncMeta,
@@ -93,6 +94,7 @@ export class WarehouseDb extends Dexie {
   consumptionLines!: Table<ConsumptionLine, string>;
   settings!: Table<Settings, string>;
   assistantNotes!: Table<AssistantNote, string>;
+  shoppingLines!: Table<ShoppingLine, string>;
 
   constructor(name = 'singletrack-warehouse') {
     super(name);
@@ -126,6 +128,11 @@ export class WarehouseDb extends Dexie {
     this.version(3).stores({
       assistantNotes: 'id, eventId, destinationType, deletedAt, updatedAt',
     });
+    // Version 4 adds the shopping list: one line per thing to buy, fed by the
+    // food plan, low stock and packing, or typed in by hand.
+    this.version(4).stores({
+      shoppingLines: 'id, itemId, eventId, sort, deletedAt, updatedAt',
+    });
   }
 }
 
@@ -151,6 +158,7 @@ export const ALL_TABLES = [
   'consumptionLines',
   'settings',
   'assistantNotes',
+  'shoppingLines',
 ] as const;
 
 export type TableName = (typeof ALL_TABLES)[number];

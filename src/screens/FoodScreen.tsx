@@ -10,11 +10,14 @@ import { FOOD_CATEGORY } from '../db/foodCatalogue';
 import { seedId } from '../db/seed';
 import {
   useConsumptionLines,
+  useCrewName,
   useDestinations,
   useEvent,
   useItems,
   useRaces,
 } from '../hooks/useDb';
+import { useSession } from '../hooks/sessionContext';
+import { can } from '../sync/permissions';
 import {
   applyPlanToPacklists,
   addPlanItems,
@@ -30,6 +33,7 @@ import {
   totalsToOrder,
 } from '../domain/consumption';
 import { downloadCsv, slugify } from '../domain/backup';
+import { addShortfalls } from '../domain/shopping';
 import { DESTINATION_ICONS, formatQty, plural } from '../domain/format';
 import type { ConsumptionLine, Destination, Race, RaceEvent, RaceVisit } from '../db/types';
 
@@ -45,6 +49,8 @@ import type { ConsumptionLine, Destination, Race, RaceEvent, RaceVisit } from '.
 export default function FoodScreen() {
   const { eventId } = useParams();
   const toast = useToast();
+  const crew = useCrewName();
+  const { session } = useSession();
   const event = useEvent(eventId);
   const destinations = useDestinations(eventId);
   const races = useRaces(eventId);
@@ -58,6 +64,7 @@ export default function FoodScreen() {
   const [editingLine, setEditingLine] = useState<ConsumptionLine>();
   const [applying, setApplying] = useState(false);
   const [working, setWorking] = useState(false);
+  const [listing, setListing] = useState(false);
 
   const itemById = useMemo(() => byId(items ?? []), [items]);
   const totals = useMemo(
@@ -137,6 +144,25 @@ export default function FoodScreen() {
   };
 
   const dayOptions = eventDays(event);
+  const canShop = can(session, 'shopping:manage', { eventId: event.id });
+
+  /**
+   * Send the shortfalls to the shopping list, tagged with this event. Safe to
+   * tap again after a projection moves: the plan's lines are set to today's
+   * figures rather than topped up.
+   */
+  const toShoppingList = async () => {
+    setListing(true);
+    const result = await addShortfalls(event.id, totals, crew);
+    setListing(false);
+    const changed = result.added + result.updated;
+    toast(
+      changed
+        ? `${plural(changed, 'item')} on the shopping list${result.added ? ` · ${result.added} new` : ''}`
+        : 'The shopping list already has these figures',
+      changed ? 'ok' : 'warn',
+    );
+  };
 
   return (
     <Screen title="Food plan" subtitle={event.name} back={`/events/${event.id}`}>
@@ -348,10 +374,24 @@ export default function FoodScreen() {
             ))}
           </div>
           {shortfalls.length ? (
-            <p className="tiny muted mt-2">
-              {plural(shortfalls.length, 'item')} short of the plan. The CSV is the list to take to
-              the supplier{hasDays ? ', with a column per day' : ''}.
-            </p>
+            <>
+              {canShop ? (
+                <div className="btn-row mt-3 no-print">
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    disabled={listing}
+                    onClick={() => void toShoppingList()}
+                  >
+                    🛒 Put {plural(shortfalls.length, 'shortfall')} on the shopping list
+                  </button>
+                </div>
+              ) : null}
+              <p className="tiny muted mt-2">
+                {plural(shortfalls.length, 'item')} short of the plan. The shopping list is where the
+                supplier run is worked; the CSV is the same figures as a file{hasDays ? ', with a column per day' : ''}.
+              </p>
+            </>
           ) : null}
         </section>
       ) : null}
