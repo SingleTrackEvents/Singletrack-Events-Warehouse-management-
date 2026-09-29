@@ -37,6 +37,20 @@ onto each station's packlist, and it's safe to tap again whenever projections
 change — planned items are set to today's numbers, hand-added lines are never
 touched.
 
+**Shopping list** — one list for the supplier run, under More and on the home
+screen, for admin and crew only. Lines arrive from three places besides being
+typed in: the food plan's shortfalls (one tap on the plan, safe to repeat after
+a projection moves), stock below its reorder point (from Home, the Low view of
+Stock, or an item's page) and packlist lines the shelf could not fill (from the
+"of 4" control on the line). Typing a name searches the catalogue as you go, so
+most lines name a real item; anything the warehouse does not track goes in as
+plain text. Each line carries a quantity, a shop or supplier, a note and the
+event it is for, and the list reads one shop at a time. In the aisle it works
+like packing mode: tap a line to tick it off. Back at the warehouse, one tap
+books every bought catalogue item into stock as a receipt, so the low-stock
+alarm clears itself, and the ledger says where the stock came from. Share as
+text or export as CSV.
+
 **Import a pack list** — the crew's lists already exist as spreadsheets and PDF
 run sheets, so the app reads them rather than asking for them again. Pick an
 event, pick a file (Excel, CSV or PDF), and the sheet is read on the device:
@@ -147,7 +161,7 @@ actually read and write. Two SQL bugs reached production before this existed,
 because the only way to run the schema was to deploy it.
 
 ```bash
-npm test    # 501 tests, including the Postgres schema and policies
+npm test    # 534 tests, including the Postgres schema and policies
 ```
 
 ## Design notes
@@ -200,8 +214,8 @@ with no bars.
 | Role | Can do |
 | --- | --- |
 | **Admin** | Everything, including the catalogue, who else has access, and the packing assistant |
-| **Crew, all events** | The warehouse: pack, adjust stock, run stocktakes, keep templates, build loads |
-| **Crew, one event** | Pack, build loads and plan food for that event; read the catalogue |
+| **Crew, all events** | The warehouse: pack, adjust stock, run stocktakes, keep templates, build loads, keep the shopping list |
+| **Crew, one event** | Pack, build loads, plan food and keep the shopping list for that event; read the catalogue |
 | **Driver** | Assigned loads for one event, confirm deliveries |
 | **Volunteer** | One aid station's packlist; record what arrived |
 
@@ -212,6 +226,9 @@ and starting a new event belong to the warehouse crew, who are invited with
 "All events". Typing another event's address, or opening another event's
 packlist or load, sends them home; the server never sends those rows in the
 first place.
+
+The shopping list is the crew's and the admin's. Drivers and volunteers are
+never sent its rows, in the same way crew are never sent the assistant's notes.
 
 Volunteers are pinned to a single destination for a single event, and may only
 change what *arrived* — never what was supposed to be sent, since that would

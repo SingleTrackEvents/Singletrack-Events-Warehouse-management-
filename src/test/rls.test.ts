@@ -690,3 +690,113 @@ describe('the packing assistant’s notes', () => {
     await db.close();
   });
 });
+
+describe('the shopping list', () => {
+  /** An admin with a restock line and an event's line on the server, plus crew and a driver. */
+  async function withList() {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await db.query('select public.push_records($1::jsonb)', [
+      JSON.stringify([
+        wireRow({
+          table_name: 'shoppingLines', id: 'shop-restock',
+          data: { id: 'shop-restock', name: 'Zip ties', qty: 2 },
+        }),
+        wireRow({
+          table_name: 'shoppingLines', id: 'shop-buffalo', event_id: EVENT,
+          data: { id: 'shop-buffalo', name: 'Coke cans', qty: 12, eventId: EVENT },
+        }),
+      ]),
+    ]);
+    await db.addUser(CREW, 'sam@singletrack.com.au');
+    await db.query(
+      `insert into public.memberships (user_id, role, display_name) values ($1, 'crew', 'Sam')`,
+      [CREW],
+    );
+    await db.addUser(DRIVER, null);
+    await db.query(
+      `insert into public.memberships (user_id, role, event_id, display_name) values ($1, 'driver', $2, 'Dee')`,
+      [DRIVER, EVENT],
+    );
+    return db;
+  }
+
+  it('reaches the admin and crew given every event, and they may write it', async () => {
+    const db = await withList();
+    await db.actAs(CREW);
+    await db.enforceRls();
+    const { rows } = await db.query<{ id: string }>(
+      `select id from public.records where table_name = 'shoppingLines' order by id`,
+    );
+    expect(rows.map((r) => r.id)).toEqual(['shop-buffalo', 'shop-restock']);
+
+    const pushed = await push(db, {
+      table_name: 'shoppingLines', id: 'shop-restock',
+      data: { id: 'shop-restock', name: 'Zip ties', qty: 4, boughtAt: '2026-05-01T00:00:00.000Z' },
+    });
+    expect(pushed.rows[0].push_records.accepted).toBe(1);
+    await db.close();
+  });
+
+  it('is never sent to a driver, even on their own event', async () => {
+    const db = await withList();
+    await db.actAs(DRIVER);
+    await db.enforceRls();
+    const { rows } = await db.query(`select id from public.records where table_name = 'shoppingLines'`);
+    expect(rows).toHaveLength(0);
+    // The same driver still reads the event, so the refusal is about the table.
+    const events = await db.query(`select id from public.records where table_name = 'events'`);
+    expect(events.rows).toHaveLength(1);
+
+    const refused = await push(db, {
+      table_name: 'shoppingLines', id: 'shop-driver', event_id: EVENT,
+      data: { id: 'shop-driver', name: 'Diesel', qty: 1 },
+    });
+    expect(refused.rows[0].push_records.refused).toBe(1);
+    await db.close();
+  });
+
+  it('is never sent to a volunteer', async () => {
+    const db = await withList();
+    await db.actAs(VOLUNTEER);
+    await db.enforceRls();
+    const { rows } = await db.query(`select id from public.records where table_name = 'shoppingLines'`);
+    expect(rows).toHaveLength(0);
+    await db.close();
+  });
+
+  it('lets crew given one event see and write that event\'s lines, and not the restock', async () => {
+    const db = await eventCrew();
+    await db.actAs(ADMIN);
+    await db.query('select public.push_records($1::jsonb)', [
+      JSON.stringify([
+        wireRow({ table_name: 'shoppingLines', id: 'shop-restock', data: { id: 'shop-restock', name: 'Zip ties' } }),
+        wireRow({ table_name: 'shoppingLines', id: 'shop-buffalo', event_id: EVENT, data: { id: 'shop-buffalo', name: 'Coke' } }),
+        wireRow({ table_name: 'shoppingLines', id: 'shop-hounslow', event_id: OTHER_EVENT, data: { id: 'shop-hounslow', name: 'Ice' } }),
+      ]),
+    ]);
+    await db.actAs(CREW);
+    await db.enforceRls();
+    const { rows } = await db.query<{ id: string }>(
+      `select id from public.records where table_name = 'shoppingLines' order by id`,
+    );
+    expect(rows.map((r) => r.id)).toEqual(['shop-buffalo']);
+
+    const mine = await push(db, {
+      table_name: 'shoppingLines', id: 'shop-new', event_id: EVENT,
+      data: { id: 'shop-new', name: 'Ice', qty: 3, eventId: EVENT },
+    });
+    expect(mine.rows[0].push_records.accepted).toBe(1);
+    const restock = await push(db, {
+      table_name: 'shoppingLines', id: 'shop-restock-2',
+      data: { id: 'shop-restock-2', name: 'Zip ties', qty: 1 },
+    });
+    expect(restock.rows[0].push_records.refused).toBe(1);
+    const theirs = await push(db, {
+      table_name: 'shoppingLines', id: 'shop-hounslow', event_id: OTHER_EVENT,
+      data: { id: 'shop-hounslow', name: 'Ice', qty: 9 },
+    });
+    expect(theirs.rows[0].push_records.refused).toBe(1);
+    await db.close();
+  });
+});

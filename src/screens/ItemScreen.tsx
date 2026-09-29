@@ -21,6 +21,8 @@ import {
   setQuantity,
 } from '../domain/stock';
 import { formatDateTime, formatQty, formatQtyDetail } from '../domain/format';
+import { addShoppingLine, inputForItem, restockQty, shopsUsed } from '../domain/shopping';
+import { useShoppingLines } from '../hooks/useDb';
 import type { MovementReason, Unit } from '../db/types';
 import { UNITS, unitHasPackSize } from '../db/types';
 import { PackSizeField } from '../components/PackSizeField';
@@ -47,7 +49,9 @@ export default function ItemScreen() {
   const [scanning, setScanning] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [addingContents, setAddingContents] = useState(false);
+  const [shopping, setShopping] = useState(false);
   const allItems = useItems();
+  const shoppingLines = useShoppingLines();
   const itemsById = useMemo(() => byId(allItems ?? []), [allItems]);
   const { session } = useSession();
   // Crew given one event, and drivers, read the catalogue to make sense of
@@ -55,6 +59,11 @@ export default function ItemScreen() {
   const canEdit = can(session, 'item:write');
   const canAdjust = can(session, 'stock:adjust');
   const canArchive = can(session, 'item:archive');
+  // Putting an item on the list is restocking, so it goes with adjusting
+  // stock: crew given one event read the catalogue but do not buy for the
+  // warehouse, and a restock line carries no event to scope to.
+  const canShop = canAdjust && can(session, 'shopping:manage');
+  const onList = (shoppingLines ?? []).filter((line) => line.itemId === item?.id && !line.boughtAt);
 
   if (!item) {
     return (
@@ -118,6 +127,14 @@ export default function ItemScreen() {
           </button>
           <button type="button" className="btn btn-outline" onClick={() => setCounting(true)}>
             🔢 Set count
+          </button>
+        </div>
+      ) : null}
+
+      {canShop ? (
+        <div className="btn-row mb-3">
+          <button type="button" className="btn btn-outline" onClick={() => setShopping(true)}>
+            🛒 {onList.length ? 'On the shopping list' : 'Add to shopping list'}
           </button>
         </div>
       ) : null}
@@ -264,6 +281,29 @@ export default function ItemScreen() {
       ) : null}
 
       {editing ? <EditItemSheet itemId={item.id} onClose={() => setEditing(false)} /> : null}
+
+      {shopping ? (
+        <ShopSheet
+          itemName={item.name}
+          unit={item.unit}
+          suggested={restockQty(item)}
+          alreadyListed={onList.reduce((sum, line) => sum + line.qty, 0)}
+          shops={shopsUsed(shoppingLines ?? [])}
+          onClose={() => setShopping(false)}
+          onSave={(qty, shop) => {
+            void addShoppingLine(inputForItem(item, qty, { shop, source: 'low_stock', by: crew })).then(
+              ({ line, merged }) => {
+                toast(
+                  merged
+                    ? `Shopping list now says ${formatQty(line.qty, line.unit)}`
+                    : `${item.name} put on the shopping list`,
+                );
+              },
+            );
+            setShopping(false);
+          }}
+        />
+      ) : null}
 
       {scanning ? (
         <Sheet title="Link a barcode" onClose={() => setScanning(false)}>
@@ -417,6 +457,96 @@ function AdjustSheet({
           />
         )}
       </Field>
+    </Sheet>
+  );
+}
+
+/**
+ * Put this item on the shopping list.
+ *
+ * Opens on enough to get back above the reorder point, which is the usual
+ * reason for standing on this screen; the shop is optional and offered from
+ * the ones the list already uses. Adding again tops the open line up.
+ */
+function ShopSheet({
+  itemName,
+  unit,
+  suggested,
+  alreadyListed,
+  shops,
+  onClose,
+  onSave,
+}: {
+  itemName: string;
+  unit: Unit;
+  suggested: number;
+  alreadyListed: number;
+  shops: string[];
+  onClose: () => void;
+  onSave: (qty: number, shop: string) => void;
+}) {
+  const [qty, setQty] = useState(suggested);
+  const [shop, setShop] = useState('');
+
+  return (
+    <Sheet
+      title="Add to the shopping list"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" disabled={qty <= 0} onClick={() => onSave(qty, shop.trim())}>
+            Add {formatQty(qty, unit)}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="small">
+          <span className="strong">{itemName}</span>
+          {alreadyListed ? (
+            <span className="muted"> · {formatQty(alreadyListed, unit)} already on the list, this tops it up</span>
+          ) : null}
+        </p>
+        <Field label="How many" hint={`Counted in ${unit}. Opens on enough to get back to the reorder point.`}>
+          {(id) => (
+            <span id={id}>
+              <Stepper label="quantity to buy" value={qty} min={0} onChange={setQty} />
+            </span>
+          )}
+        </Field>
+        <Field label="Shop or supplier" hint="Leave blank for anywhere.">
+          {(id) => (
+            <>
+              <input
+                id={id}
+                className="input"
+                value={shop}
+                placeholder="Costco"
+                autoComplete="off"
+                onChange={(event) => setShop(event.target.value)}
+              />
+              {shops.length ? (
+                <div className="chip-row-inline mt-2">
+                  {shops.slice(0, 6).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className="chip"
+                      aria-pressed={shop.trim().toLowerCase() === option.toLowerCase()}
+                      onClick={() => setShop(option)}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          )}
+        </Field>
+      </div>
     </Sheet>
   );
 }

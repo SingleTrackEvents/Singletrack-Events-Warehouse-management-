@@ -42,7 +42,9 @@ export type Action =
   | 'data:export'
   | 'data:wipe'
   // The packing assistant: running checks and editing what it remembers
-  | 'assistant:use';
+  | 'assistant:use'
+  // The shopping list: adding lines, ticking them off, booking them into stock
+  | 'shopping:manage';
 
 /**
  * Grants per role.
@@ -59,7 +61,7 @@ const GRANTS: Record<Role, Action[]> = {
     'load:read', 'load:manage', 'load:deliver',
     'stocktake:read', 'stocktake:manage', 'template:manage',
     'member:manage', 'data:export', 'data:wipe',
-    'assistant:use',
+    'assistant:use', 'shopping:manage',
   ],
   crew: [
     'item:read', 'item:write', 'stock:adjust',
@@ -67,7 +69,7 @@ const GRANTS: Record<Role, Action[]> = {
     'packlist:read', 'packlist:pack', 'packlist:receive', 'packlist:manage',
     'load:read', 'load:manage', 'load:deliver',
     'stocktake:read', 'stocktake:manage', 'template:manage',
-    'data:export',
+    'data:export', 'shopping:manage',
   ],
   driver: [
     'item:read',
@@ -109,10 +111,21 @@ const WAREHOUSE_ACTIONS: Action[] = [
  */
 export const ADMIN_TABLES: TableName[] = ['assistantNotes'];
 
+/**
+ * Tables for the people who run the warehouse and nobody else.
+ *
+ * The shopping list is what the crew are short of and where they buy it.
+ * Drivers and volunteers have no part in that, and a list of the warehouse's
+ * gaps is not something to hand to every phone at an aid station. The server
+ * refuses the rows to those roles and the mock mirrors it.
+ */
+export const CREW_ONLY_TABLES: TableName[] = ['shoppingLines'];
+
 /** Can this role be sent rows from this table at all? */
 export function readableTable(role: Role, table: TableName): boolean {
   if (table === 'settings') return false;
   if (ADMIN_TABLES.includes(table)) return role === 'admin';
+  if (CREW_ONLY_TABLES.includes(table)) return role === 'admin' || role === 'crew';
   if (role === 'volunteer') {
     return ['events', 'destinations', 'packlists', 'packlistLines', 'containers'].includes(table);
   }
@@ -265,11 +278,16 @@ export function scrubChanges<T extends object>(
  * Tables that belong to one event: the row carries the event, directly or
  * through its packlist or load. Everything else — the catalogue, the ledger,
  * stocktakes, templates — is the warehouse's, shared by every event.
+ *
+ * A shopping line may carry an event or none. Crew given one event write the
+ * lines for that event, since buying for it is part of planning its food;
+ * a line with no event is a warehouse restock, which the scope check on the
+ * server refuses them, the same as any other warehouse-wide row.
  */
 export const EVENT_TABLES: TableName[] = [
   'events', 'destinations', 'races', 'consumptionLines',
   'packlists', 'packlistLines', 'containers',
-  'loads', 'loadStops',
+  'loads', 'loadStops', 'shoppingLines',
 ];
 
 /**
@@ -322,6 +340,7 @@ export function describeRole(role: Role, scope: Scope = UNSCOPED): string[] {
   if (has('load:manage')) lines.push('Plan transport loads');
   else if (has('load:deliver')) lines.push('Confirm deliveries');
   if (has('stocktake:manage')) lines.push('Run stocktakes');
+  if (has('shopping:manage')) lines.push('Keep the shopping list');
   if (has('member:manage')) lines.push('Invite people and set their access');
   return lines;
 }

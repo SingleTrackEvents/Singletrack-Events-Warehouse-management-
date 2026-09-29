@@ -48,6 +48,7 @@ const ScanScreen = lazy(() => import('./screens/ScanScreen'));
 const AccessScreen = lazy(() => import('./screens/AccessScreen'));
 const JoinScreen = lazy(() => import('./screens/JoinScreen'));
 const AssistantScreen = lazy(() => import('./screens/AssistantScreen'));
+const ShoppingScreen = lazy(() => import('./screens/ShoppingScreen'));
 
 /**
  * Bottom tabs, each gated by the permission its screen needs. A volunteer with
@@ -190,6 +191,7 @@ export default function App() {
               <Route path="/templates/:templateId" element={<Guard needs="template:manage"><TemplateDetailScreen /></Guard>} />
               <Route path="/more" element={<SettingsScreen />} />
               <Route path="/assistant" element={<Guard needs="assistant:use"><AssistantScreen /></Guard>} />
+              <Route path="/shopping" element={<Guard needs="shopping:manage"><ShoppingScreen /></Guard>} />
               <Route path="/scan" element={<ScanScreen />} />
               <Route path="/scan/:code" element={<ScanScreen />} />
               <Route path="/access" element={<AccessScreen />} />

@@ -31,6 +31,7 @@ import {
 } from '../domain/packlists';
 import { formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
+import { addShoppingLine, inputForItem } from '../domain/shopping';
 import { isKit, kitLines } from '../domain/kits';
 import type { PacklistLine, PacklistStatus, Unit } from '../db/types';
 
@@ -562,6 +563,30 @@ export default function PacklistScreen() {
           line={editingRequired}
           itemName={items?.get(editingRequired.itemId)?.name ?? 'this item'}
           unit={items?.get(editingRequired.itemId)?.unit ?? 'each'}
+          onShop={
+            can(session, 'shopping:manage', { eventId: packlist.eventId })
+              ? (qty) => {
+                  const item = items?.get(editingRequired.itemId);
+                  if (!item) return;
+                  void addShoppingLine(
+                    inputForItem(item, qty, {
+                      eventId: packlist.eventId,
+                      source: 'packlist',
+                      refId: packlist.id,
+                      note: packlist.name,
+                      by: crew,
+                    }),
+                  ).then(({ line, merged }) => {
+                    toast(
+                      merged
+                        ? `Shopping list now says ${formatQty(line.qty, line.unit)} for ${item.name}`
+                        : `${formatQty(qty, item.unit)} ${item.name} put on the shopping list`,
+                    );
+                    setEditingRequired(undefined);
+                  });
+                }
+              : undefined
+          }
           onClose={() => setEditingRequired(undefined)}
           onSave={(qtyRequired) => {
             void update(db.packlistLines, editingRequired.id, { qtyRequired }).then(() => {
@@ -770,16 +795,21 @@ function RequiredSheet({
   line,
   itemName,
   unit,
+  onShop,
   onClose,
   onSave,
 }: {
   line: PacklistLine;
   itemName: string;
   unit: Unit;
+  /** Put the shortfall on the shopping list. Absent when this account cannot. */
+  onShop?: (qty: number) => void;
   onClose: () => void;
   onSave: (qtyRequired: number) => void;
 }) {
   const [qty, setQty] = useState(line.qtyRequired);
+  // What the shelf could not supply: the requirement less what is in the crate.
+  const missing = Math.max(0, qty - line.qtyPacked);
 
   return (
     <Sheet
@@ -833,6 +863,18 @@ function RequiredSheet({
             {formatQty(line.qtyPacked, unit)} already packed, which is more than this. The extra
             stays in the crate — nothing is taken out.
           </p>
+        ) : null}
+        {onShop && missing > 0 ? (
+          <div className="card card-pad">
+            <p className="small strong">Nothing left on the shelf?</p>
+            <p className="tiny muted mb-2">
+              Put the {formatQty(missing, unit)} still to pack on the shopping list for this event.
+              The line here is left as it is.
+            </p>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => onShop(missing)}>
+              🛒 Add {formatQty(missing, unit)} to the shopping list
+            </button>
+          </div>
         ) : null}
       </div>
     </Sheet>

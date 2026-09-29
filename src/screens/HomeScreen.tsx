@@ -5,10 +5,12 @@ import { BuildStamp } from '../components/BuildStamp';
 import { EmptyState, Pill, ProgressBar } from '../components/ui';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
-import { useEvents, useItems } from '../hooks/useDb';
+import { useCrewName, useEvents, useItems, useShoppingLines } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
+import { useToast } from '../components/toastContext';
 import { can, isStationOnly, reachable } from '../sync/permissions';
 import { countedItemIds, lowStockItems } from '../domain/stock';
+import { addLowStock, groupByShop, toBuy } from '../domain/shopping';
 import { packlistForDestination, progressFor, receiptFor } from '../domain/packlists';
 import { daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
 import { LOAD_STATUS_LABELS } from '../domain/transport';
@@ -23,6 +25,8 @@ import logo from '../assets/logo-white.png';
  */
 export default function HomeScreen() {
   const navigate = useNavigate();
+  const toast = useToast();
+  const crew = useCrewName();
   const { session } = useSession();
   const stationOnly = isStationOnly(session);
   const station = useLiveQuery(
@@ -82,6 +86,18 @@ export default function HomeScreen() {
         ),
     [session],
   );
+
+  // The shopping list is the crew's; its hook already narrows the lines to
+  // what this account may see, so only the card needs gating.
+  const canShop = can(session, 'shopping:manage');
+  const shopping = useShoppingLines();
+  const shoppingOpen = shopping ? toBuy(shopping) : [];
+  const shoppingShops = groupByShop(shoppingOpen)
+    .map(([shop]) => shop)
+    .filter(Boolean);
+  // Low stock is a warehouse matter: crew given one event read the catalogue
+  // but do not restock it, and a restock line carries no event to scope to.
+  const canRestock = canShop && can(session, 'stock:adjust');
 
   const canCount = can(session, 'stocktake:read');
   const openStocktakes = useLiveQuery(
@@ -208,6 +224,26 @@ export default function HomeScreen() {
         </section>
       ) : null}
 
+      {canShop && shoppingOpen.length ? (
+        <section className="section">
+          <div className="section-head">
+            <h2>Shopping list</h2>
+          </div>
+          <div className="list">
+            <Link to="/shopping" className="row">
+              <span className="row-icon">🛒</span>
+              <span className="row-body">
+                <span className="row-title">{plural(shoppingOpen.length, 'line')} to buy</span>
+                <span className="row-sub">
+                  {shoppingShops.length ? `At ${shoppingShops.join(', ')}` : 'Tap to open the list'}
+                </span>
+              </span>
+              <span className="row-chevron">›</span>
+            </Link>
+          </div>
+        </section>
+      ) : null}
+
       {low.length ? (
         <section className="section">
           <div className="section-head">
@@ -216,6 +252,27 @@ export default function HomeScreen() {
               {plural(low.length, 'item')}
             </Link>
           </div>
+          {canRestock ? (
+            <div className="btn-row mb-2 no-print">
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={() => {
+                  void addLowStock(low, crew).then((result) => {
+                    const added = result.added + result.updated;
+                    toast(
+                      added
+                        ? `${plural(added, 'item')} put on the shopping list`
+                        : 'Already on the shopping list',
+                      added ? 'ok' : 'warn',
+                    );
+                  });
+                }}
+              >
+                🛒 Put all {low.length} on the shopping list
+              </button>
+            </div>
+          ) : null}
           <div className="list">
             {low.slice(0, 5).map((item) => (
               <Link key={item.id} to={`/stock/${item.id}`} className="row">

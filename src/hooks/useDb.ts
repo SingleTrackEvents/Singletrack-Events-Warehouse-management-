@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { db, getSettings } from '../db/db';
 import { alive, sortBySort } from '../db/repo';
 import { useSession } from './sessionContext';
-import { reachable } from '../sync/permissions';
+import { isEventScoped, reachable } from '../sync/permissions';
 import type {
   Category,
   ConsumptionLine,
@@ -14,6 +14,7 @@ import type {
   Race,
   RaceEvent,
   Settings,
+  ShoppingLine,
   SyncMeta,
 } from '../db/types';
 
@@ -141,6 +142,28 @@ export function useConsumptionLines(eventId: string | undefined): ConsumptionLin
     [eventId],
   );
   return useMemo(() => (rows ? sortBySort(alive(rows)) : undefined), [rows]);
+}
+
+/**
+ * Every shopping line this account may see, in list order.
+ *
+ * Crew given one event see the lines for that event and nothing else: not
+ * another race's, and not the warehouse restock, which carries no event and
+ * which the server never sends them.
+ */
+export function useShoppingLines(): ShoppingLine[] | undefined {
+  const { session } = useSession();
+  const rows = useLiveQuery(() => db.shoppingLines.toArray(), []);
+  return useMemo(
+    () =>
+      rows
+        ? sortBySort(alive(rows)).filter((line) => {
+            if (!line.eventId) return !isEventScoped(session);
+            return reachable(session, { eventId: line.eventId });
+          })
+        : undefined,
+    [rows, session],
+  );
 }
 
 /** The settings singleton, created on first read. */

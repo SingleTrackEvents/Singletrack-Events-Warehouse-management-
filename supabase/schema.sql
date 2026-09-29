@@ -201,11 +201,14 @@ $$;
 -- Which tables a role may read. A volunteer must never receive the
 -- warehouse catalogue — they only need their own packlist.
 -- Nor may crew or drivers see the assistant's notes; see can_write_table.
+-- The shopping list is the crew's and the admin's: a driver has no part in
+-- buying, and the write rules above already keep them out of it. Mirrors
+-- CREW_ONLY_TABLES in the app.
 create or replace function public.can_read_table(p_role text, p_table text)
 returns boolean language sql immutable as $$
   select case p_role
     when 'volunteer' then p_table in ('events', 'destinations', 'packlists', 'packlistLines', 'containers')
-    when 'driver' then p_table not in ('settings', 'assistantNotes')
+    when 'driver' then p_table not in ('settings', 'assistantNotes', 'shoppingLines')
     when 'crew' then p_table not in ('settings', 'assistantNotes')
     when 'admin' then p_table <> 'settings'
     else false

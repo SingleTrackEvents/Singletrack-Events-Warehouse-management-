@@ -113,8 +113,8 @@ export interface Movement extends SyncMeta {
   reason: MovementReason;
   /** Quantity on hand after this movement was applied. */
   balanceAfter: number;
-  /** What caused it — packlist, stocktake, load. */
-  refType: 'packlist' | 'stocktake' | 'load' | 'manual' | 'seed';
+  /** What caused it — packlist, stocktake, load, or a shopping run booked in. */
+  refType: 'packlist' | 'stocktake' | 'load' | 'manual' | 'seed' | 'shopping';
   refId: string | null;
   note: string;
   /** Crew member who made the movement. */
@@ -444,6 +444,57 @@ export interface Settings extends SyncMeta {
   crewName: string;
   /** Whether the starter catalogue has been loaded on this device. */
   seeded: boolean;
+}
+
+/* --------------------------------------------------------------- shopping -- */
+
+/**
+ * How a line got onto the shopping list.
+ *
+ * Kept so the list can say why something is on it: a shortfall the food plan
+ * worked out reads differently from a thing somebody remembered in the ute,
+ * and a line the plan put there is the one the plan is allowed to correct.
+ */
+export type ShoppingSource = 'hand' | 'food_plan' | 'low_stock' | 'packlist';
+
+export const SHOPPING_SOURCES: ShoppingSource[] = ['hand', 'food_plan', 'low_stock', 'packlist'];
+
+/**
+ * One thing to buy.
+ *
+ * The list is the one place a supplier run is written down: the food plan's
+ * shortfalls, stock that has dropped below its reorder point and lines the
+ * crew could not fill while packing all land here, alongside whatever is
+ * typed in by hand. A line usually names a catalogue item so the purchase can
+ * be booked straight into stock once it is home; a free-text line is for the
+ * things the warehouse does not track (a gas bottle refill, a birthday cake).
+ *
+ * Admin and crew only, on the device and on the server. Drivers and
+ * volunteers have no part in buying, and a list of what the warehouse is
+ * short of is not something to hand to every phone at an aid station.
+ */
+export interface ShoppingLine extends SyncMeta {
+  /** The catalogue item, or null for a free-text line. */
+  itemId: string | null;
+  /** What to buy, as it reads on the list. Copied from the item where there is one. */
+  name: string;
+  qty: number;
+  unit: Unit;
+  /** Where to buy it: "Costco", "Bunnings". Blank means anywhere. */
+  shop: string;
+  note: string;
+  /** The event it is for, or null for a warehouse restock. */
+  eventId: string | null;
+  source: ShoppingSource;
+  /** The packlist the line was flagged short on, when it came from packing. */
+  refId: string | null;
+  addedBy: string;
+  /** When it was ticked off in the shop. Null while still to buy. */
+  boughtAt: string | null;
+  boughtBy: string;
+  /** When the bought quantity was written to the stock ledger. Null until booked. */
+  bookedAt: string | null;
+  sort: number;
 }
 
 /* -------------------------------------------------------------- assistant -- */
