@@ -62,7 +62,7 @@ describe('the pack rules', () => {
 
   it('follows a chain: generator to power board to cover', () => {
     expect(asked(list([['PWR-06', 1]]), 'checkpoint')).toEqual({
-      'PWR-11': 1, 'PWR-04': 1, 'PWR-01': 1, 'PWR-10': 1, 'PWR-90': 1,
+      'PWR-91': 1, 'PWR-11': 1, 'PWR-04': 1, 'PWR-01': 1, 'PWR-10': 1, 'PWR-90': 1,
     });
   });
 

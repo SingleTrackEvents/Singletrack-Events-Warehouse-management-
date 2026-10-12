@@ -143,6 +143,7 @@ export const RCR_PACKLISTS: HounslowPacklist[] = [
       { item: 'IBC Water Container (1000L)', qty: 1 },
       { item: 'IBC Pipe', qty: 1 },
       { item: 'Generator', qty: 1 },
+      { item: 'RCD (Portable Safety Switch)', qty: 1, note: 'Not on the v1.5 card: every generator gets one' },
       { item: 'Jerry Can (Fuel)', qty: 1, note: 'Full' },
       { item: 'Power Board', qty: 1 },
       { item: 'Electrical Power Cable (2-3m)', qty: 1 },

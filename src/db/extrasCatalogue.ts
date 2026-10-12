@@ -104,6 +104,16 @@ export const EXTRA_ITEMS: ExtraItem[] = [
     consumable: false,
     note: 'Colin provides',
   },
+  {
+    name: 'RCD (Portable Safety Switch)',
+    sku: 'PWR-91',
+    category: 'Power & Cabling',
+    unit: 'each',
+    packSize: 1,
+    hold: 1,
+    consumable: false,
+    note: 'One between every generator and its leads',
+  },
   // From the RCR26 Aid Station Cards: sponsor gear on the village pack list.
   {
     name: 'PURE Flags',

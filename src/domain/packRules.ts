@@ -84,8 +84,9 @@ export const PACK_RULES: PackRule[] = [
     when: { sku: 'PWR-06' }, // Generator
     // Village generators are hired and run by the site crew.
     notAt: ['event_village'],
-    why: 'a generator needs a full jerry can, a power board and a 2m and 5m lead',
+    why: 'a generator needs an RCD, a full jerry can, a power board and a 2m and 5m lead',
     add: [
+      { sku: 'PWR-91', per: 1 }, // RCD (Portable Safety Switch)
       { sku: 'PWR-11', per: 1 }, // Jerry Can (Fuel)
       { sku: 'PWR-04', per: 1 }, // Power Board
       { sku: 'PWR-01', per: 1 }, // Electrical Power Cable (2-3m)
