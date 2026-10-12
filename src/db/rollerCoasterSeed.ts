@@ -3,7 +3,7 @@ import type { HounslowFoodLine, HounslowPacklist } from './hounslowSeed';
 /**
  * Roller Coaster Run 2026: starting packlists.
  *
- * From the RCR26 Aid Station Cards (v1.5): the Event Village pack list and
+ * From the RCR26 Aid Station Cards (v2.1): the Event Village pack list and
  * the station kit on each aid station card, translated onto the warehouse
  * catalogue by item name. Where the card pairs two things on one row
  * ("IBC and IBC pipe 2 / 2") they become two lines; where it splits one
@@ -11,6 +11,10 @@ import type { HounslowFoodLine, HounslowPacklist } from './hounslowSeed';
  * become one line with the split in the note.
  *
  * Seeded as drafts, like Hounslow: quantities to pack against, nothing packed.
+ *
+ * v2.1 moved the stations off IBCs onto 20 L water containers and doubled
+ * up on eskies. Lists first seeded from v1.5 are brought up to date where
+ * nobody has touched them (see `RCR_RETIRED` and the seed).
  */
 
 const WEIGHTS_NOTE = '1 per leg, 2 if windy';
@@ -98,9 +102,10 @@ export const RCR_PACKLISTS: HounslowPacklist[] = [
       { item: 'Marquee Walls - 3x3 (or equivalent)', qty: 6, note: 'Marquees from the village build' },
       { item: 'Trestle Tables', qty: 6 },
       { item: 'Table Cloths', qty: 6 },
-      { item: 'Esky / Cooler', qty: 2, note: 'For ice' },
+      { item: 'Esky / Cooler', qty: 6, note: 'For ice' },
       { item: 'Bins - Large Round Black', qty: 2 },
-      { item: 'Hose & Fittings / Spray Nozzle', qty: 1 },
+      { item: 'Hose & Fittings / Spray Nozzle', qty: 1, note: 'Only if the forecast is hot' },
+      { item: 'Water Containers (20L equiv)', qty: 8 },
       { item: 'Electrical Power Cable (2-3m)', qty: 1 },
       { item: 'Extension Cable (5m+)', qty: 1 },
       { item: 'Power Board', qty: 1 },
@@ -118,10 +123,11 @@ export const RCR_PACKLISTS: HounslowPacklist[] = [
       { item: 'Weights - Steel 20kg', qty: 24, note: WEIGHTS_NOTE },
       { item: 'Ratchet Straps', qty: 12 },
       { item: 'Tarps', qty: 2 },
-      { item: 'Esky / Cooler', qty: 2, note: 'For ice' },
+      { item: 'Esky / Cooler', qty: 6, note: 'For ice. Drinks ice and cooling ice separate' },
       { item: 'Bins - Large Round Black', qty: 2 },
-      { item: 'IBC Water Container (1000L)', qty: 2 },
-      { item: 'IBC Pipe', qty: 2 },
+      { item: 'IBC Water Container (1000L)', qty: 1 },
+      { item: 'IBC Pipe', qty: 1 },
+      { item: 'Water Containers (20L equiv)', qty: 8 },
       { item: 'Starlink', qty: 1, note: 'Starlink Mini and battery' },
       { item: 'Bluetooth Speaker', qty: 1, note: 'Aid Station Manager brings' },
       { item: 'Primary Aid Station Kit (3 x Black Tubs)', qty: 1, note: 'Aid Station Box' },
@@ -138,12 +144,11 @@ export const RCR_PACKLISTS: HounslowPacklist[] = [
       { item: 'Weights - Steel 20kg', qty: 16, note: WEIGHTS_NOTE },
       { item: 'Ratchet Straps', qty: 8 },
       { item: 'Tarps', qty: 2 },
-      { item: 'Esky / Cooler', qty: 3 },
+      { item: 'Esky / Cooler', qty: 4 },
       { item: 'Bins - Large Round Black', qty: 2 },
-      { item: 'IBC Water Container (1000L)', qty: 1 },
-      { item: 'IBC Pipe', qty: 1 },
+      { item: 'Water Containers (20L equiv)', qty: 15, note: 'Water in containers, no IBC' },
       { item: 'Generator', qty: 1 },
-      { item: 'RCD (Portable Safety Switch)', qty: 1, note: 'Not on the v1.5 card: every generator gets one' },
+      { item: 'RCD (Portable Safety Switch)', qty: 1, note: 'Not on the v2.1 card: every generator gets one' },
       { item: 'Jerry Can (Fuel)', qty: 1, note: 'Full' },
       { item: 'Power Board', qty: 1 },
       { item: 'Electrical Power Cable (2-3m)', qty: 1 },
@@ -155,6 +160,12 @@ export const RCR_PACKLISTS: HounslowPacklist[] = [
       { item: 'Primary Aid Station Kit (3 x Black Tubs)', qty: 1, note: 'Aid Station Box' },
     ],
   },
+];
+
+/** Lines v1.5 had and v2.1 dropped: Singleton Terrace runs on water containers. */
+export const RCR_RETIRED: Array<{ station: string; item: string }> = [
+  { station: 'Singleton Terrace', item: 'IBC Water Container (1000L)' },
+  { station: 'Singleton Terrace', item: 'IBC Pipe' },
 ];
 
 const DOONGALLA = 'Doongalla Picnic Grounds';
