@@ -104,4 +104,25 @@ export const EXTRA_ITEMS: ExtraItem[] = [
     consumable: false,
     note: 'Colin provides',
   },
+  // From the RCR26 Aid Station Cards: sponsor gear on the village pack list.
+  {
+    name: 'PURE Flags',
+    sku: 'VIL-91',
+    category: 'Event Village & Branding',
+    unit: 'each',
+    packSize: 1,
+    hold: 5,
+    consumable: false,
+    note: '',
+  },
+  {
+    name: 'PURE Retail Products',
+    sku: 'REG-91',
+    category: 'Registration, Merch & Timing',
+    unit: 'each',
+    packSize: 1,
+    hold: 1,
+    consumable: false,
+    note: 'One lot',
+  },
 ];

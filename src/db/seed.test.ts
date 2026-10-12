@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { db, getSettings } from './db';
 import { alive, softDelete, update } from './repo';
-import { ensureSeeded, seedStarterData } from './seed';
+import { ensureSeeded, seedId, seedStarterData } from './seed';
 import { lineQtyByDay } from '../domain/consumption';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { EVENT_SEED } from './eventSeed';
@@ -9,6 +9,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
+import { RCR_PACKLISTS } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import type { AccessType, DestinationType, SyncMeta, Template } from './types';
 
@@ -108,10 +109,11 @@ describe('the starting catalogue', () => {
     await seedStarterData();
 
     expect(alive(await db.events.toArray())).toHaveLength(EVENT_SEED.length);
-    // Hounslow's five stations arrive with last year's run sheets as drafts;
+    // Hounslow's five stations arrive with last year's run sheets and the
+    // Roller Coaster Run's four with its aid station cards, all as drafts;
     // nothing is marked packed and no stock has moved.
     const packlists = alive(await db.packlists.toArray());
-    expect(packlists).toHaveLength(HOUNSLOW_PACKLISTS.length);
+    expect(packlists).toHaveLength(HOUNSLOW_PACKLISTS.length + RCR_PACKLISTS.length);
     expect(packlists.every((packlist) => packlist.status === 'draft')).toBe(true);
     expect(await db.movements.count()).toBe(0);
   });
@@ -801,5 +803,36 @@ describe('topping up a device that has already seeded', () => {
     expect(items.some((item) => item.sku === 'FRN-01')).toBe(true);
     // And the demo row is untouched — removing it is a separate, deliberate act.
     expect(items.some((item) => item.sku === 'HYD-CUBE20')).toBe(true);
+  });
+});
+
+describe('the Roller Coaster Run starting packlists', () => {
+  it('names only items the catalogue actually has', () => {
+    const known = new Set([
+      ...CATALOGUE.flatMap((group) => group.items.map((item) => item.name)),
+      ...FOOD_CATALOGUE.map((item) => item.name),
+      ...EXTRA_ITEMS.map((item) => item.name),
+    ]);
+    const missing = RCR_PACKLISTS.flatMap((list) =>
+      list.lines.map((line) => line.item).filter((name) => !known.has(name)),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('puts each card on its own station, one line per item', async () => {
+    await seedStarterData();
+
+    const rcr = seedId('event', 'rcr26');
+    const destinations = alive(await db.destinations.toArray()).filter((entry) => entry.eventId === rcr);
+    const packlists = alive(await db.packlists.toArray()).filter((entry) => entry.eventId === rcr);
+    const lines = alive(await db.packlistLines.toArray());
+    expect(packlists).toHaveLength(RCR_PACKLISTS.length);
+    for (const spec of RCR_PACKLISTS) {
+      const packlist = packlists.find((entry) => entry.name === spec.station);
+      expect(packlist, spec.station).toBeDefined();
+      expect(destinations.some((entry) => entry.id === packlist!.destinationId), spec.station).toBe(true);
+      expect(new Set(spec.lines.map((line) => line.item)).size, spec.station).toBe(spec.lines.length);
+      expect(lines.filter((line) => line.packlistId === packlist!.id), spec.station).toHaveLength(spec.lines.length);
+    }
   });
 });

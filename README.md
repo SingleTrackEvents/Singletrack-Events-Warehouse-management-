@@ -25,6 +25,13 @@ is a full-width tap target per line so a list can be worked one-handed, with a
 stepper for partial packs. Must-have items are flagged and warned about before a
 list is marked packed.
 
+**Pack rules**: what usually travels with what, for every event. Put 3 marquees
+on an aid station list and the app offers 12 ratchet straps, 24 steel weights
+and 6 walls; a trestle table brings its table cloth, an IBC its pipe, a
+generator its jerry can, power board and leads, and every aid station its Aid
+Station Box, bins, chairs, tarps and speaker. Nothing is added without a tap:
+"Add", "Add all" or "Not needed". The rules live in `src/domain/packRules.ts`.
+
 **Food plan** — race projections in, shopping list and aid station quantities
 out. Each event carries its races and their projected fields; each aid station
 names the races passing through it (twice, where the course doubles back) and a

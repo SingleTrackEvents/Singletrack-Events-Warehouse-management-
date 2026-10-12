@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { AssistantCheck } from '../components/AssistantCheck';
 import { ItemPicker } from '../components/ItemPicker';
+import { PackRuleSuggestions } from '../components/PackRuleSuggestions';
 import { SwipeToDelete } from '../components/SwipeToDelete';
 import { ConfirmSheet, Field, Pill, ProgressBar, Sheet, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
@@ -298,6 +299,16 @@ export default function PacklistScreen() {
             </button>
           ) : null}
         </div>
+      ) : null}
+
+      {/* The pack rules, while the list can still change before stock leaves. */}
+      {canManage && !hasIssued(packlist.status) && items ? (
+        <PackRuleSuggestions
+          packlistId={packlist.id}
+          lines={lines ?? []}
+          items={items}
+          destinationType={destination?.type}
+        />
       ) : null}
 
       {visible.length ? (
