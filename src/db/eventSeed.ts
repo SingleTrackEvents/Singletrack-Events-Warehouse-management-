@@ -121,6 +121,13 @@ export const EVENT_SEED: SeedEvent[] = [
     startDate: '2026-10-17',
     endDate: '2026-10-17',
     notes: '46 km, 23 km, 12 km twilight and kids, out of Kalorama Memorial Reserve.',
+    // Projections from the RCR 2026 Aid Station Consumptions sheet.
+    races: [
+      { name: '46k', projection: 225, day: '2026-10-17' },
+      { name: '23k', projection: 620, day: '2026-10-17' },
+      { name: '12k', projection: 440, day: '2026-10-17' },
+      { name: 'Kids', projection: 130, day: '2026-10-17' },
+    ],
     destinations: [
       {
         name: 'Kalorama Event Village',
@@ -133,6 +140,7 @@ export const EVENT_SEED: SeedEvent[] = [
         notes:
           'Passed twice on the 23 km and four times on the 46 km (4th pass 37 km, cutoff 5:00 pm). ' +
           'Stocked: electrolyte, water, Coke, ginger beer, lollies, chips, fruit, sunscreen.',
+        visits: [['46k', 4], ['23k', 2]],
       },
       {
         name: 'Kalorama Halfway and Finish Recovery',
@@ -140,6 +148,7 @@ export const EVENT_SEED: SeedEvent[] = [
         notes:
           'Aid Station 0 on the RCR26 cards: the 46k halfway table (10:45 am to 1:45 pm) and the ' +
           'finish recovery area. Marquees come from the village build.',
+        visits: [['46k', 2], ['23k', 1], ['12k', 1], ['Kids', 1]],
       },
       {
         name: 'Singleton Terrace',
@@ -147,6 +156,7 @@ export const EVENT_SEED: SeedEvent[] = [
         access: '4wd',
         accessNotes: '4WD with the Parks Victoria key for the fire access track. Do not promote to spectators.',
         notes: '12k Twilight Mad Mouse only, one pass at 7.8 km. Set-up from 4:00 pm, lit by 5:30 pm.',
+        visits: [['12k', 1]],
       },
     ],
   },

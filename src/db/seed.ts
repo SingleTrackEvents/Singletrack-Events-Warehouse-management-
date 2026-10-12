@@ -6,7 +6,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
-import { RCR_PACKLISTS } from './rollerCoasterSeed';
+import { RCR_CONSUMPTION, RCR_PACKLISTS } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import { makeCode } from '../domain/codes';
 import type { Item, RaceVisit, SyncMeta, Unit } from './types';
@@ -324,10 +324,19 @@ export async function seedStarterData(
 
     for (const [index, destination] of spec.destinations.entries()) {
       const destinationId = seedId('dest', `${spec.code}-${destination.name}`);
-      if (!isNew(destinationId)) continue;
       const raceVisits: RaceVisit[] = (destination.visits ?? [])
         .filter(([race]) => raceIds.has(race))
         .map(([race, passes]) => ({ raceId: raceIds.get(race)!, passes }));
+      if (!isNew(destinationId)) {
+        // A station seeded before its races were known gets them once:
+        // `raceVisits` absent is "never set", while a list, even an empty
+        // one, is the crew's and stays.
+        const existing = await db.destinations.get(destinationId);
+        if (existing && !existing.deletedAt && existing.raceVisits === undefined && raceVisits.length) {
+          await update(db.destinations, destinationId, { raceVisits });
+        }
+        continue;
+      }
       await create(db.destinations, {
         id: destinationId,
         eventId,
@@ -357,7 +366,6 @@ export async function seedStarterData(
   for (const item of (await db.items.toArray()) as Item[]) {
     if (!item.deletedAt) byName.set(item.name, item);
   }
-  const hounslowId = seedId('event', 'hc26');
 
   // A kit seeded before contents existed is topped up here, once: `contents`
   // absent is "never set", while an empty list is the crew's decision. A fresh
@@ -432,24 +440,31 @@ export async function seedStarterData(
     }
   }
 
-  let consumptionSort = 10;
-  for (const line of HOUNSLOW_CONSUMPTION) {
-    const lineId = seedId('cline', `hc26-${line.station}-${line.race}-${line.sku}`);
-    const item = bySku.get(line.sku);
-    if (item && isNew(lineId)) {
-      await create(db.consumptionLines, {
-        id: lineId,
-        eventId: hounslowId,
-        destinationId: seedId('dest', `hc26-${line.station}`),
-        itemId: item.id,
-        perRunner: line.perRunner,
-        flatQty: line.flatQty,
-        note: '',
-        sort: consumptionSort,
-        raceId: seedId('race', `hc26-${line.race}`),
-      });
+  // The Roller Coaster Run's food plan comes from its own consumptions sheet.
+  const foodPlans = [
+    { code: 'hc26', lines: HOUNSLOW_CONSUMPTION },
+    { code: 'rcr26', lines: RCR_CONSUMPTION },
+  ];
+  for (const { code, lines } of foodPlans) {
+    let consumptionSort = 10;
+    for (const line of lines) {
+      const lineId = seedId('cline', `${code}-${line.station}-${line.race}-${line.sku}`);
+      const item = bySku.get(line.sku);
+      if (item && isNew(lineId)) {
+        await create(db.consumptionLines, {
+          id: lineId,
+          eventId: seedId('event', code),
+          destinationId: seedId('dest', `${code}-${line.station}`),
+          itemId: item.id,
+          perRunner: line.perRunner,
+          flatQty: line.flatQty,
+          note: '',
+          sort: consumptionSort,
+          raceId: seedId('race', `${code}-${line.race}`),
+        });
+      }
+      consumptionSort += 10;
     }
-    consumptionSort += 10;
   }
 
   if (!options.onlyMissing) await liftSeedRevisions(previous);

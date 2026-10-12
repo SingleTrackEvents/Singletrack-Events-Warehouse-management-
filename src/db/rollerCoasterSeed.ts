@@ -1,4 +1,4 @@
-import type { HounslowPacklist } from './hounslowSeed';
+import type { HounslowFoodLine, HounslowPacklist } from './hounslowSeed';
 
 /**
  * Roller Coaster Run 2026: starting packlists.
@@ -155,4 +155,114 @@ export const RCR_PACKLISTS: HounslowPacklist[] = [
       { item: 'Primary Aid Station Kit (3 x Black Tubs)', qty: 1, note: 'Aid Station Box' },
     ],
   },
+];
+
+const DOONGALLA = 'Doongalla Picnic Grounds';
+const KALORAMA = 'Kalorama Halfway and Finish Recovery';
+const SINGLETON = 'Singleton Terrace';
+
+/*
+ * The RCR 2026 Aid Station Consumptions sheet, one rule per station per race.
+ *
+ * Where a race passes a station more than once with different ratios (the
+ * 46k at Doongalla eats more lollies on passes 3 and 4, and at Kalorama it
+ * takes the halfway table then the finish recovery), the pass ratios are
+ * averaged and applied to every pass's runners, which gives the sheet's
+ * total. Flat amounts (salt, sugar) are summed across passes.
+ *
+ * The sheet measures Coke and ginger beer in litres; the catalogue counts
+ * cans, so those ratios are converted: 375 ml Coke cans, 200 ml ginger beer.
+ *
+ * One correction: the sheet's 12k block works out its totals against 620
+ * runners (the 23k field) instead of the 440 projected. These ratios are the
+ * sheet's own, so with the 12k at 440 the plan is the right size; set the 12k
+ * projection to 620 to reproduce the sheet.
+ */
+export const RCR_CONSUMPTION: HounslowFoodLine[] = [
+  { station: DOONGALLA, race: '46k', sku: 'FD-01', perRunner: 0.5, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-02', perRunner: 0.02, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-03', perRunner: 0.007022, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-04', perRunner: 0.5, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-05', perRunner: 0.25, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-23', perRunner: 0.25, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-06', perRunner: 0.075, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-07', perRunner: 0.0375, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-08', perRunner: 0.006, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-09', perRunner: 0, flatQty: 1 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-10', perRunner: 0, flatQty: 1 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-11', perRunner: 0.016667, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-12', perRunner: 0.01, flatQty: 0 },
+  { station: DOONGALLA, race: '46k', sku: 'FD-13', perRunner: 0.005, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-01', perRunner: 0.5, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-02', perRunner: 0.02, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-03', perRunner: 0.007022, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-04', perRunner: 0.8, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-05', perRunner: 0.25, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-23', perRunner: 0.25, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-06', perRunner: 0.075, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-07', perRunner: 0.0375, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-08', perRunner: 0.006, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-11', perRunner: 0.016667, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-12', perRunner: 0.01, flatQty: 0 },
+  { station: DOONGALLA, race: '23k', sku: 'FD-13', perRunner: 0.005, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-01', perRunner: 1.25, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-02', perRunner: 0.06, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-03', perRunner: 0.009129, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-04', perRunner: 0.4, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-05', perRunner: 0.375, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-23', perRunner: 0.375, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-06', perRunner: 0.075, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-07', perRunner: 0.04375, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-08', perRunner: 0.0075, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-09', perRunner: 0, flatQty: 1 },
+  { station: KALORAMA, race: '46k', sku: 'FD-10', perRunner: 0, flatQty: 1 },
+  { station: KALORAMA, race: '46k', sku: 'FD-11', perRunner: 0.035833, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-12', perRunner: 0.01325, flatQty: 0 },
+  { station: KALORAMA, race: '46k', sku: 'FD-13', perRunner: 0.005, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-01', perRunner: 2, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-02', perRunner: 0.1, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-03', perRunner: 0.011236, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-05', perRunner: 0.5, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-23', perRunner: 0.5, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-06', perRunner: 0.075, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-07', perRunner: 0.05, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-08', perRunner: 0.009, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-11', perRunner: 0.055, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-12', perRunner: 0.0165, flatQty: 0 },
+  { station: KALORAMA, race: '23k', sku: 'FD-13', perRunner: 0.006, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-01', perRunner: 0.3, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-03', perRunner: 0.007022, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-04', perRunner: 0.5, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-05', perRunner: 0.2, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-23', perRunner: 0.2, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-06', perRunner: 0.075, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-07', perRunner: 0.025, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-08', perRunner: 0.006, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-09', perRunner: 0, flatQty: 1 },
+  { station: SINGLETON, race: '12k', sku: 'FD-10', perRunner: 0, flatQty: 1 },
+  { station: SINGLETON, race: '12k', sku: 'FD-11', perRunner: 0.016667, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-12', perRunner: 0.01, flatQty: 0 },
+  { station: SINGLETON, race: '12k', sku: 'FD-13', perRunner: 0.003, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-01', perRunner: 2, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-02', perRunner: 0.1, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-03', perRunner: 0.008427, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-05', perRunner: 0.5, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-23', perRunner: 0.5, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-06', perRunner: 0.075, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-07', perRunner: 0.05, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-08', perRunner: 0.009, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-11', perRunner: 0.055, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-12', perRunner: 0.0165, flatQty: 0 },
+  { station: KALORAMA, race: '12k', sku: 'FD-13', perRunner: 0.008, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-01', perRunner: 1.5, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-02', perRunner: 0.1, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-03', perRunner: 0.007022, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-05', perRunner: 0.5, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-23', perRunner: 0.5, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-06', perRunner: 0.075, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-07', perRunner: 0.05, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-08', perRunner: 0.012, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-11', perRunner: 0.055, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-12', perRunner: 0.0165, flatQty: 0 },
+  { station: KALORAMA, race: 'Kids', sku: 'FD-13', perRunner: 0.008, flatQty: 0 },
 ];
