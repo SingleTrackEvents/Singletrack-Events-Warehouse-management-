@@ -134,6 +134,20 @@ export const EVENT_SEED: SeedEvent[] = [
           'Passed twice on the 23 km and four times on the 46 km (4th pass 37 km, cutoff 5:00 pm). ' +
           'Stocked: electrolyte, water, Coke, ginger beer, lollies, chips, fruit, sunscreen.',
       },
+      {
+        name: 'Kalorama Halfway and Finish Recovery',
+        type: 'finish',
+        notes:
+          'Aid Station 0 on the RCR26 cards: the 46k halfway table (10:45 am to 1:45 pm) and the ' +
+          'finish recovery area. Marquees come from the village build.',
+      },
+      {
+        name: 'Singleton Terrace',
+        type: 'aid_station',
+        access: '4wd',
+        accessNotes: '4WD with the Parks Victoria key for the fire access track. Do not promote to spectators.',
+        notes: '12k Twilight Mad Mouse only, one pass at 7.8 km. Set-up from 4:00 pm, lit by 5:30 pm.',
+      },
     ],
   },
   {

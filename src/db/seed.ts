@@ -6,6 +6,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
+import { RCR_PACKLISTS } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import { makeCode } from '../domain/codes';
 import type { Item, RaceVisit, SyncMeta, Unit } from './types';
@@ -370,42 +371,49 @@ export async function seedStarterData(
     await update(db.items, kit.id, { contents });
   }
 
-  for (const list of HOUNSLOW_PACKLISTS) {
-    const packlistId = seedId('plist', `hc26-${list.station}`);
-    if (isNew(packlistId)) {
-      await create(db.packlists, {
-        id: packlistId,
-        eventId: hounslowId,
-        destinationId: seedId('dest', `hc26-${list.station}`),
-        name: list.station,
-        code: makeCode(list.station),
-        status: 'draft',
-        packedBy: '',
-        packedAt: null,
-        deliveredAt: null,
-        receivedBy: '',
-        notes: 'Starting quantities from the 2025 aid station run sheets.',
-      });
-    }
-    let sort = 10;
-    for (const line of list.lines) {
-      const lineId = seedId('pline', `hc26-${list.station}-${line.item}`);
-      const item = byName.get(line.item);
-      if (item && isNew(lineId)) {
-        await create(db.packlistLines, {
-          id: lineId,
-          packlistId,
-          itemId: item.id,
-          qtyRequired: line.qty,
-          qtyPacked: 0,
-          qtyReturned: 0,
-          mandatory: false,
-          containerId: null,
-          note: line.note ?? '',
-          sort,
+  // Roller Coaster Run 2026 starts from its own aid station cards the same way.
+  const startingLists = [
+    { code: 'hc26', lists: HOUNSLOW_PACKLISTS, notes: 'Starting quantities from the 2025 aid station run sheets.' },
+    { code: 'rcr26', lists: RCR_PACKLISTS, notes: 'Starting quantities from the RCR26 Aid Station Cards v1.5.' },
+  ];
+  for (const { code, lists, notes } of startingLists) {
+    for (const list of lists) {
+      const packlistId = seedId('plist', `${code}-${list.station}`);
+      if (isNew(packlistId)) {
+        await create(db.packlists, {
+          id: packlistId,
+          eventId: seedId('event', code),
+          destinationId: seedId('dest', `${code}-${list.station}`),
+          name: list.station,
+          code: makeCode(list.station),
+          status: 'draft',
+          packedBy: '',
+          packedAt: null,
+          deliveredAt: null,
+          receivedBy: '',
+          notes,
         });
       }
-      sort += 10;
+      let sort = 10;
+      for (const line of list.lines) {
+        const lineId = seedId('pline', `${code}-${list.station}-${line.item}`);
+        const item = byName.get(line.item);
+        if (item && isNew(lineId)) {
+          await create(db.packlistLines, {
+            id: lineId,
+            packlistId,
+            itemId: item.id,
+            qtyRequired: line.qty,
+            qtyPacked: 0,
+            qtyReturned: 0,
+            mandatory: false,
+            containerId: null,
+            note: line.note ?? '',
+            sort,
+          });
+        }
+        sort += 10;
+      }
     }
   }
 
