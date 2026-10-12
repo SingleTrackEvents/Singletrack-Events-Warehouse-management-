@@ -9,7 +9,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
-import { RCR_PACKLISTS } from './rollerCoasterSeed';
+import { RCR_CONSUMPTION, RCR_PACKLISTS } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import type { AccessType, DestinationType, SyncMeta, Template } from './types';
 
@@ -463,7 +463,7 @@ describe('the Hounslow starting packlists and food plan', () => {
     await seedStarterData();
 
     const lines = alive(await db.consumptionLines.toArray());
-    expect(lines).toHaveLength(HOUNSLOW_CONSUMPTION.length);
+    expect(lines).toHaveLength(HOUNSLOW_CONSUMPTION.length + RCR_CONSUMPTION.length);
     // Blue Gum has a food plan but no run-sheet packlist — the walk-in station
     // gets its list when quantities are sent from the food plan.
     const packlists = alive(await db.packlists.toArray());
@@ -834,5 +834,55 @@ describe('the Roller Coaster Run starting packlists', () => {
       expect(new Set(spec.lines.map((line) => line.item)).size, spec.station).toBe(spec.lines.length);
       expect(lines.filter((line) => line.packlistId === packlist!.id), spec.station).toHaveLength(spec.lines.length);
     }
+  });
+});
+
+describe('the Roller Coaster Run food plan', () => {
+  it('names only food the catalogue has, at stations and races the event has', () => {
+    const skus = new Set(FOOD_CATALOGUE.map((item) => item.sku));
+    const rcr = EVENT_SEED.find((spec) => spec.code === 'rcr26')!;
+    const stations = new Set(rcr.destinations.map((entry) => entry.name));
+    const races = new Set((rcr.races ?? []).map((race) => race.name));
+    expect(RCR_CONSUMPTION.filter((line) => !skus.has(line.sku))).toEqual([]);
+    expect(RCR_CONSUMPTION.filter((line) => !stations.has(line.station))).toEqual([]);
+    expect(RCR_CONSUMPTION.filter((line) => !races.has(line.race))).toEqual([]);
+  });
+
+  it('works out the sheet’s station totals, with the 12k at its projected 440', async () => {
+    await seedStarterData();
+
+    const rcr = seedId('event', 'rcr26');
+    const destinations = alive(await db.destinations.toArray()).filter((entry) => entry.eventId === rcr);
+    const races = alive(await db.races.toArray()).filter((race) => race.eventId === rcr);
+    const lines = alive(await db.consumptionLines.toArray());
+    const bySku = new Map(alive(await db.items.toArray()).map((item) => [item.id, item.sku]));
+    const total = (station: string, sku: string) => {
+      const destination = destinations.find((entry) => entry.name === station)!;
+      return lines
+        .filter((line) => line.destinationId === destination.id && bySku.get(line.itemId) === sku)
+        .flatMap((line) => lineQtyByDay(line, destination, races))
+        .reduce((sum, [, qty]) => sum + qty, 0);
+    };
+
+    expect(total('Doongalla Picnic Grounds', 'FD-01')).toBe(1070); // 225 × 4 × 0.5 + 620 × 2 × 0.5
+    expect(total('Doongalla Picnic Grounds', 'FD-04')).toBe(1442); // gels
+    expect(total('Singleton Terrace', 'FD-01')).toBe(132); // 440 × 0.3
+    expect(total('Kalorama Halfway and Finish Recovery', 'FD-01')).toBe(2878);
+    expect(total('Kalorama Halfway and Finish Recovery', 'FD-09')).toBe(1); // salt, halfway table
+  });
+
+  it('gives a station seeded before its races were known its race visits, once', async () => {
+    await seedStarterData();
+    const id = seedId('dest', 'rcr26-Singleton Terrace');
+    // As an earlier build left it: no visits at all.
+    await db.destinations.update(id, { raceVisits: undefined });
+
+    await ensureSeeded();
+    expect((await db.destinations.get(id))?.raceVisits).toHaveLength(1);
+
+    // The crew clearing it is a decision, and stays.
+    await update(db.destinations, id, { raceVisits: [] });
+    await ensureSeeded();
+    expect((await db.destinations.get(id))?.raceVisits).toEqual([]);
   });
 });
