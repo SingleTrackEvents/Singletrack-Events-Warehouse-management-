@@ -6,7 +6,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
-import { RCR_CONSUMPTION, RCR_PACKLISTS } from './rollerCoasterSeed';
+import { RCR_CONSUMPTION, RCR_PACKLISTS, RCR_RETIRED } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import { makeCode } from '../domain/codes';
 import type { Item, RaceVisit, SyncMeta, Unit } from './types';
@@ -381,12 +381,46 @@ export async function seedStarterData(
 
   // Roller Coaster Run 2026 starts from its own aid station cards the same way.
   const startingLists = [
-    { code: 'hc26', lists: HOUNSLOW_PACKLISTS, notes: 'Starting quantities from the 2025 aid station run sheets.' },
-    { code: 'rcr26', lists: RCR_PACKLISTS, notes: 'Starting quantities from the RCR26 Aid Station Cards v1.5.' },
+    {
+      code: 'hc26',
+      lists: HOUNSLOW_PACKLISTS,
+      retired: [],
+      notes: 'Starting quantities from the 2025 aid station run sheets.',
+    },
+    {
+      code: 'rcr26',
+      lists: RCR_PACKLISTS,
+      retired: RCR_RETIRED,
+      notes: 'Starting quantities from the RCR26 Aid Station Cards v2.1.',
+    },
   ];
-  for (const { code, lists, notes } of startingLists) {
+  /*
+   * A newer version of the cards reaches a list already seeded from an older
+   * one, but only where nobody has touched it: the list still a draft, the
+   * line still at revision 1 and nothing packed against it. A line the crew
+   * has edited, or a list already being picked, is theirs.
+   */
+  const untouched = async (packlistId: string, lineId: string) => {
+    const list = await db.packlists.get(packlistId);
+    const line = await db.packlistLines.get(lineId);
+    if (!list || list.deletedAt || list.status !== 'draft') return undefined;
+    if (!line || line.deletedAt || line.rev !== 1 || line.qtyPacked !== 0) return undefined;
+    return line;
+  };
+  for (const { code, lists, retired, notes } of startingLists) {
+    for (const gone of retired) {
+      const packlistId = seedId('plist', `${code}-${gone.station}`);
+      const lineId = seedId('pline', `${code}-${gone.station}-${gone.item}`);
+      if (await untouched(packlistId, lineId)) await softDelete(db.packlistLines, lineId);
+    }
     for (const list of lists) {
       const packlistId = seedId('plist', `${code}-${list.station}`);
+      if (!isNew(packlistId)) {
+        const existing = await db.packlists.get(packlistId);
+        if (existing && !existing.deletedAt && existing.rev === 1 && existing.notes !== notes) {
+          await update(db.packlists, packlistId, { notes });
+        }
+      }
       if (isNew(packlistId)) {
         await create(db.packlists, {
           id: packlistId,
@@ -419,6 +453,11 @@ export async function seedStarterData(
             note: line.note ?? '',
             sort,
           });
+        } else if (item) {
+          const existing = await untouched(packlistId, lineId);
+          if (existing && (existing.qtyRequired !== line.qty || existing.note !== (line.note ?? ''))) {
+            await update(db.packlistLines, lineId, { qtyRequired: line.qty, note: line.note ?? '' });
+          }
         }
         sort += 10;
       }

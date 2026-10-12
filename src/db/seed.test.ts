@@ -837,6 +837,38 @@ describe('the Roller Coaster Run starting packlists', () => {
   });
 });
 
+describe('the Roller Coaster Run lists moving from the v1.5 cards to v2.1', () => {
+  it('updates untouched lines, retires the dropped ones, and leaves the crew’s edits alone', async () => {
+    await seedStarterData();
+    const lineId = (station: string, item: string) => seedId('pline', `rcr26-${station}-${item}`);
+    const doongallaEsky = lineId('Doongalla Picnic Grounds', 'Esky / Cooler');
+    const doongallaIbc = lineId('Doongalla Picnic Grounds', 'IBC Water Container (1000L)');
+    const singletonIbc = lineId('Singleton Terrace', 'IBC Water Container (1000L)');
+    const singletonEsky = lineId('Singleton Terrace', 'Esky / Cooler');
+
+    // As a phone holds them after the v1.5 seed: raw writes keep revision 1.
+    await db.packlistLines.update(doongallaEsky, { qtyRequired: 2 });
+    await db.packlistLines.update(doongallaIbc, { qtyRequired: 2 });
+    const ibc = alive(await db.items.toArray()).find((item) => item.name === 'IBC Water Container (1000L)')!;
+    await db.packlistLines.put({
+      ...(await db.packlistLines.get(doongallaIbc))!,
+      id: singletonIbc,
+      packlistId: seedId('plist', 'rcr26-Singleton Terrace'),
+      itemId: ibc.id,
+      qtyRequired: 1,
+    });
+    // The crew already changed Singleton's eskies by hand.
+    await update(db.packlistLines, singletonEsky, { qtyRequired: 5 });
+
+    await ensureSeeded();
+
+    expect((await db.packlistLines.get(doongallaEsky))?.qtyRequired).toBe(6);
+    expect((await db.packlistLines.get(doongallaIbc))?.qtyRequired).toBe(1);
+    expect((await db.packlistLines.get(singletonIbc))?.deletedAt).not.toBeNull();
+    expect((await db.packlistLines.get(singletonEsky))?.qtyRequired).toBe(5);
+  });
+});
+
 describe('the Roller Coaster Run food plan', () => {
   it('names only food the catalogue has, at stations and races the event has', () => {
     const skus = new Set(FOOD_CATALOGUE.map((item) => item.sku));
