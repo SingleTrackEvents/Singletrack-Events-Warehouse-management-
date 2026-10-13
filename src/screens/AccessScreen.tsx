@@ -395,7 +395,6 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
                   // Supabase lets a project set 6 to 10 digits, so accept the
                   // longest rather than assuming the default.
                   maxLength={10}
-                  autoFocus
                   value={code}
                   onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ''))}
                 />
@@ -435,17 +434,24 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
       ) : (
         <div className="stack">
           <LinkFailureNotice />
-          <Field label="Email" hint="We send a short numeric code — no password to set or share.">
+          <Field
+            label="Email"
+            hint="Any email you can check on this phone. We send a short numeric code: no password to set or share."
+          >
             {(id) => (
+              // No autoFocus on the sign-in fields: an iPhone focuses a field
+              // that grabs focus on its own but often never raises the
+              // keyboard, which left people with a box they could not type
+              // in. Their own tap brings the keyboard up every time.
               <input
                 id={id}
                 className="input"
                 type="email"
                 inputMode="email"
                 autoCapitalize="none"
-                autoFocus
+                autoComplete="email"
                 value={email}
-                placeholder="jess@singletrackevents.com.au"
+                placeholder="name@example.com"
                 onChange={(event) => setEmail(event.target.value)}
               />
             )}
@@ -510,7 +516,6 @@ function RenameSheet({ onClose }: { onClose: () => void }) {
           <input
             id={id}
             className="input"
-            autoFocus
             autoCapitalize="words"
             value={name}
             onChange={(event) => setName(event.target.value)}
