@@ -1,5 +1,6 @@
 import { db } from '../db/db';
-import { alive } from '../db/repo';
+import { alive, update } from '../db/repo';
+import { hasIssued } from './packlists';
 import { countedItemIds, round2 } from './stock';
 import type { Destination, Item, Load, Packlist } from '../db/types';
 
@@ -24,6 +25,10 @@ export interface PullDestination {
   qtyRequired: number;
   qtyPacked: number;
   packlistId: string;
+  /** The packlist line behind this share, for ticking it off from here. */
+  lineId: string;
+  /** False once the list has been loaded: stock has left, so the count is fixed. */
+  canPack: boolean;
   /** The run carrying this destination, if it is on one yet. */
   load: Load | undefined;
 }
@@ -112,6 +117,8 @@ export async function pullListFor(eventId: string): Promise<PullList> {
       qtyRequired: line.qtyRequired,
       qtyPacked: line.qtyPacked,
       packlistId: packlist.id,
+      lineId: line.id,
+      canPack: !hasIssued(packlist.status),
       load: carriedBy.get(destination.id),
     });
   }
@@ -226,4 +233,28 @@ export function pullListCsv(list: PullList): string[][] {
         .join('; '),
     ]),
   ];
+}
+
+/** True when every share of this item has been packed. */
+export function isPulled(line: PullLine): boolean {
+  return line.qtyRequired > 0 && line.qtyPacked >= line.qtyRequired;
+}
+
+/**
+ * Tick an item off the warehouse list: pack it, or unpack it, on every
+ * station's list at once. The warehouse list has no records of its own, so
+ * the tick lands on the packlist lines it is totalled from and every station
+ * list, progress bar and load step sees it. Lists already loaded are left
+ * alone, since stock has left the shed against what they say.
+ */
+export async function setPulled(shares: PullDestination[], packed: boolean): Promise<number> {
+  let changed = 0;
+  for (const share of shares) {
+    if (!share.canPack) continue;
+    const qty = packed ? share.qtyRequired : 0;
+    if (share.qtyPacked === qty) continue;
+    await update(db.packlistLines, share.lineId, { qtyPacked: qty });
+    changed += 1;
+  }
+  return changed;
 }

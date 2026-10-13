@@ -6,16 +6,19 @@ import { EmptyState, Pill, ProgressBar } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { useSearch } from '../hooks/useSearch';
 import { useCategories, useEvent } from '../hooks/useDb';
-import { byVehicle, pullListCsv, pullListFor } from '../domain/warehouse';
+import { useSession } from '../hooks/sessionContext';
+import { can } from '../sync/permissions';
+import { byVehicle, isPulled, pullListCsv, pullListFor, setPulled } from '../domain/warehouse';
 import { downloadCsv, slugify } from '../domain/backup';
 import { formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
-import type { PullLine } from '../domain/warehouse';
+import type { PullDestination, PullLine } from '../domain/warehouse';
 
-type Filter = 'all' | 'short' | 'noRun';
+type Filter = 'all' | 'todo' | 'short' | 'noRun';
 
 const FILTER_LABELS: Record<Filter, string> = {
   all: 'Everything',
+  todo: 'To pack',
   short: 'Short in the shed',
   noRun: 'No run yet',
 };
@@ -36,6 +39,10 @@ export default function WarehouseScreen() {
   const toast = useToast();
   const list = useLiveQuery(async () => (eventId ? pullListFor(eventId) : undefined), [eventId]);
   const categories = useCategories();
+  const { session } = useSession();
+  // Ticking packs the station lists, so it takes packing rights, not just
+  // the right to read the list.
+  const canTick = can(session, 'packlist:pack');
 
   const [grouping, setGrouping] = useState<'item' | 'vehicle'>('item');
   const [filter, setFilter] = useState<Filter>('all');
@@ -52,6 +59,7 @@ export default function WarehouseScreen() {
 
   const filtered = useMemo(() => {
     const lines = list?.lines ?? [];
+    if (filter === 'todo') return lines.filter((line) => !isPulled(line));
     if (filter === 'short') return lines.filter((line) => line.shortfall > 0);
     if (filter === 'noRun') return lines.filter((line) => line.going.some((entry) => !entry.load));
     return lines;
@@ -208,6 +216,7 @@ export default function WarehouseScreen() {
                         line={line}
                         open={open.has(line.itemId)}
                         onToggle={() => toggle(line.itemId)}
+                        canTick={canTick}
                       />
                     ))}
                   </div>
@@ -278,14 +287,36 @@ function PullRow({
   line,
   open,
   onToggle,
+  canTick,
 }: {
   line: PullLine;
   open: boolean;
   onToggle: () => void;
+  canTick: boolean;
 }) {
   const unit = line.item?.unit ?? 'each';
+  const done = isPulled(line);
+  // A loaded list's count is fixed, so a line that is all loaded cannot be ticked.
+  const tickable = canTick && line.going.some((going) => going.canPack);
+  const tick = (shares: PullDestination[], packed: boolean) => {
+    void setPulled(shares, packed);
+    if (packed && navigator.vibrate) navigator.vibrate(15);
+  };
   return (
-    <div className="pull-row">
+    <div className={`pull-row${done ? ' done' : line.qtyPacked > 0 ? ' short' : ''}`}>
+      <div className="pull-head">
+      {canTick ? (
+        <button
+          type="button"
+          className="pull-tick"
+          aria-pressed={done}
+          disabled={!tickable}
+          aria-label={`${done ? 'Unpack' : 'Pack'} ${line.item?.name ?? 'item'} for every stop`}
+          onClick={() => tick(line.going, !done)}
+        >
+          ✓
+        </button>
+      ) : null}
       <button type="button" className="row" onClick={onToggle} aria-expanded={open}>
         <span className="row-body">
           <span className="row-title truncate">{line.item?.name ?? 'Unknown item'}</span>
@@ -298,6 +329,9 @@ function PullRow({
           <span className="strong" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {formatQty(line.qtyRequired, unit)}
           </span>
+          {line.qtyPacked > 0 && !done ? (
+            <span className="tiny muted">{line.qtyPacked} packed</span>
+          ) : null}
           {line.shortfall > 0 ? (
             <Pill tone="danger">short {line.shortfall}</Pill>
           ) : line.uncounted ? (
@@ -307,12 +341,25 @@ function PullRow({
           )}
         </span>
       </button>
+      </div>
 
       {open ? (
         <div className="pull-breakdown">
           {line.going.map((going) => (
+            <div key={going.lineId} className="pull-going-row">
+            {canTick ? (
+              <button
+                type="button"
+                className="pull-tick pull-tick-sm"
+                aria-pressed={going.qtyPacked >= going.qtyRequired}
+                disabled={!going.canPack}
+                aria-label={`${going.qtyPacked >= going.qtyRequired ? 'Unpack' : 'Pack'} for ${going.destination.name}`}
+                onClick={() => tick([going], going.qtyPacked < going.qtyRequired)}
+              >
+                ✓
+              </button>
+            ) : null}
             <Link
-              key={going.packlistId}
               className="pull-going"
               to={`/packlists/${going.packlistId}`}
             >
@@ -327,6 +374,7 @@ function PullRow({
                 {going.qtyPacked}/{going.qtyRequired}
               </span>
             </Link>
+            </div>
           ))}
         </div>
       ) : null}

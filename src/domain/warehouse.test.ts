@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../db/db';
-import { create, liveWhere } from '../db/repo';
-import { byVehicle, pullListCsv, pullListFor } from './warehouse';
+import { alive, create, liveWhere, update } from '../db/repo';
+import { byVehicle, isPulled, pullListCsv, pullListFor, setPulled } from './warehouse';
 import { recordMovements } from './stock';
 import { recordCount, startStocktake } from './stocktake';
 import type { Destination, Item, RaceEvent } from '../db/types';
@@ -244,5 +244,38 @@ describe('exporting the pull list', () => {
     const row = csv.find((entry) => entry[0] === 'Starlink')!;
     expect(row[5]).toBe('not counted');
     expect(row[6]).toBe('');
+  });
+});
+
+describe('ticking the warehouse list', () => {
+  const water = async () => (await pullListFor(event.id)).lines.find((line) => line.item?.name === 'Water Containers')!;
+
+  it('packs the item on every stop’s list, and unticking unpacks it', async () => {
+    await setPulled((await water()).going, true);
+    let line = await water();
+    expect(isPulled(line)).toBe(true);
+    expect(line.going.map((entry) => entry.qtyPacked)).toEqual([4, 8, 10]);
+
+    await setPulled(line.going, false);
+    line = await water();
+    expect(line.qtyPacked).toBe(0);
+  });
+
+  it('ticks one stop on its own', async () => {
+    const line = await water();
+    await setPulled([line.going[0]], true);
+    const after = await water();
+    expect(after.going.map((entry) => entry.qtyPacked)).toEqual([4, 0, 0]);
+    expect(isPulled(after)).toBe(false);
+  });
+
+  it('leaves a list that has already been loaded alone', async () => {
+    const list = alive(await db.packlists.toArray()).find((entry) => entry.destinationId === aid3.id)!;
+    await update(db.packlists, list.id, { status: 'loaded' });
+
+    const line = await water();
+    expect(line.going.find((entry) => entry.destination.id === aid3.id)?.canPack).toBe(false);
+    await setPulled(line.going, true);
+    expect((await water()).going.map((entry) => entry.qtyPacked)).toEqual([4, 0, 10]);
   });
 });
