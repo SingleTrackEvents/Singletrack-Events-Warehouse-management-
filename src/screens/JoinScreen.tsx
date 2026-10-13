@@ -33,6 +33,16 @@ export default function JoinScreen() {
    */
   const [code, setCode] = useState(() => (token ? decodeURIComponent(token) : ''));
 
+  /*
+   * An iPhone keeps the home-screen app's storage apart from Safari's, so
+   * joining here in the browser does not sign in the app added to the home
+   * screen afterwards. Said up front, with the code to use there.
+   */
+  const inIosBrowser =
+    typeof navigator !== 'undefined' &&
+    /iPhone|iPad|iPod/.test(navigator.userAgent) &&
+    !(navigator as Navigator & { standalone?: boolean }).standalone;
+
   const join = async () => {
     if (!backend || !code.trim()) return;
     setBusy(true);
@@ -105,6 +115,17 @@ export default function JoinScreen() {
         </p>
         <p className="tiny muted mt-2">{ROLE_BLURBS.volunteer}</p>
       </div>
+
+      {inIosBrowser ? (
+        <div className="card card-pad mb-4" style={{ background: 'var(--warn-bg)' }}>
+          <p className="small strong">Adding this app to your home screen?</p>
+          <p className="tiny mt-2">
+            On an iPhone the home-screen app signs in separately from Safari. Add it to your home
+            screen first, open it from there, tap "Have an invite code?" and enter{' '}
+            {code ? <span className="mono strong">{code}</span> : 'the code from your card'}.
+          </p>
+        </div>
+      ) : null}
 
       <form
         onSubmit={(event) => {

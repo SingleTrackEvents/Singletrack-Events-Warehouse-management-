@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Screen } from '../App';
 import { QrCode } from '../components/QrCode';
 import { ConfirmSheet, Field, Pill, Sheet } from '../components/ui';
@@ -177,8 +178,17 @@ export default function AccessScreen() {
         )}
 
         <p className="small muted center">
-          Volunteers do not sign in — scan the QR the crew give you at your aid station.
+          Volunteers do not sign in: scan the QR the crew give you at your aid station.
         </p>
+        {/*
+          The way back in for anyone who joined by invite in the browser and
+          then opened the app from their home screen. On an iPhone the two
+          keep separate storage, so the home-screen app starts signed out and
+          the invite has to be used again here.
+        */}
+        <Link className="btn btn-outline btn-block mt-3" to="/join">
+          🎟 Have an invite code? Enter it
+        </Link>
         {backend.isReal ? null : (
           <button type="button" className="btn btn-ghost btn-block mt-4" onClick={() => void disconnect()}>
             Go back to this device only
