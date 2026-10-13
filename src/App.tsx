@@ -142,7 +142,7 @@ function isSignedOut(backend: SyncBackend | null, session: Session | null): bool
  * Where a signed-out device may go: the sign-in page, and the invite page a
  * scanned QR lands on. Nothing else.
  */
-const SIGNED_OUT_ROUTES = [/^\/access$/, /^\/join\//];
+const SIGNED_OUT_ROUTES = [/^\/access$/, /^\/join(\/|$)/];
 
 /**
  * Signed out means signed out.
@@ -195,6 +195,7 @@ export default function App() {
               <Route path="/scan" element={<ScanScreen />} />
               <Route path="/scan/:code" element={<ScanScreen />} />
               <Route path="/access" element={<AccessScreen />} />
+              <Route path="/join" element={<JoinScreen />} />
               <Route path="/join/:token" element={<JoinScreen />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
