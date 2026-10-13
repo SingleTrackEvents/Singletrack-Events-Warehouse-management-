@@ -865,6 +865,50 @@ button, input, select, textarea {
 
 .pull-going:last-child { border-bottom: none; }
 
+/* Ticking the warehouse list packs the item on every stop's list, the way the
+   crew works through a paper list in the shed. The tick sits outside the row
+   button so a tap on the name still opens the breakdown. */
+.pull-head,
+.pull-going-row {
+  display: flex;
+  align-items: center;
+}
+
+.pull-head { padding-left: var(--space-4); gap: var(--space-1); }
+.pull-head .row { flex: 1 1 auto; min-width: 0; padding-left: var(--space-2); }
+.pull-going-row { gap: var(--space-3); border-bottom: 1px solid var(--border); }
+.pull-going-row:last-child { border-bottom: none; }
+.pull-going-row .pull-going { flex: 1 1 auto; min-width: 0; border-bottom: none; }
+
+.pull-row.done { background: var(--ok-bg); }
+.pull-row.short { background: var(--warn-bg); }
+
+.pull-tick {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  font-size: 1rem;
+  font-weight: 800;
+  color: transparent;
+  cursor: pointer;
+}
+
+.pull-tick-sm { width: 28px; height: 28px; font-size: 0.85rem; }
+
+.pull-tick[aria-pressed='true'] {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #fff;
+}
+
+.pull-tick:disabled { opacity: 0.4; cursor: default; }
+
 /* An invite is a card in its own right rather than a row inside a list, so the
    panel revealed behind it needs the card's corners — square ones read as a
    stray red block rather than part of the row. */
