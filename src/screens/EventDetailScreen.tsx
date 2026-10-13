@@ -55,7 +55,7 @@ export default function EventDetailScreen() {
 
   // Packlists and their line progress, keyed by destination for the list below.
   const summaries = useLiveQuery(async () => {
-    if (!eventId) return new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number }>();
+    if (!eventId) return new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number; lists: number }>();
     const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray());
     const allLines = alive(await db.packlistLines.toArray());
     const linesOf = (packlist: Packlist) => allLines.filter((line) => line.packlistId === packlist.id);
@@ -63,7 +63,7 @@ export default function EventDetailScreen() {
     for (const packlist of packlists) {
       byDestination.set(packlist.destinationId, [...(byDestination.get(packlist.destinationId) ?? []), packlist]);
     }
-    const map = new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number }>();
+    const map = new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number; lists: number }>();
     for (const [destinationId, candidates] of byDestination) {
       const packlist = primaryPacklist(candidates, (entry) => linesOf(entry).length);
       if (!packlist) continue;
@@ -73,6 +73,7 @@ export default function EventDetailScreen() {
         status: packlist.status,
         percent: progress.percent,
         blocking: progress.blocking.length,
+        lists: candidates.length,
       });
     }
     return map;
@@ -178,6 +179,13 @@ export default function EventDetailScreen() {
                       {summary.blocking ? (
                         <div className="tiny" style={{ color: 'var(--danger)', marginTop: 4 }}>
                           {summary.blocking} short
+                        </div>
+                      ) : null}
+                      {/* Only one list opens from here, so a second one would
+                          otherwise show up only as doubled warehouse totals. */}
+                      {summary.lists > 1 ? (
+                        <div className="tiny" style={{ color: 'var(--warn)', marginTop: 4 }}>
+                          {summary.lists} lists
                         </div>
                       ) : null}
                     </>

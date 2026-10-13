@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { AssistantCheck } from '../components/AssistantCheck';
@@ -27,6 +27,7 @@ import {
   receiptFor,
   received,
   removeLine,
+  removePacklist,
   setStatus,
   statusIndex,
 } from '../domain/packlists';
@@ -115,6 +116,19 @@ export default function PacklistScreen() {
   const [removingLine, setRemovingLine] = useState<PacklistLine>();
   const [editingRequired, setEditingRequired] = useState<PacklistLine>();
   const [clearing, setClearing] = useState<'confirmations' | 'notes'>();
+  const [deleting, setDeleting] = useState(false);
+  const navigate = useNavigate();
+  // Other lists for the same station. The event screen only ever opens one,
+  // so a second list is otherwise invisible except as doubled totals.
+  const siblings = useLiveQuery(
+    async () =>
+      packlist
+        ? alive(await db.packlists.where('destinationId').equals(packlist.destinationId).toArray()).filter(
+            (entry) => entry.id !== packlist.id,
+          )
+        : [],
+    [packlist?.id, packlist?.destinationId],
+  );
   // Kits whose contents are unfolded. A kit packs as one line; this is the
   // laminated list inside the lid, for whoever is filling the tubs.
   const [kitsOpen, setKitsOpen] = useState<ReadonlySet<string>>(new Set());
@@ -269,6 +283,18 @@ export default function PacklistScreen() {
           <p className="tiny muted mt-2">🚙 {destination.accessNotes}</p>
         ) : null}
         {packlist.notes ? <p className="tiny muted mt-2">📝 {packlist.notes}</p> : null}
+        {siblings?.length ? (
+          <p className="tiny mt-2" style={{ color: 'var(--warn)' }}>
+            ⚠ This station has {plural(siblings.length + 1, 'list')}:{' '}
+            {siblings.map((entry, index) => (
+              <span key={entry.id}>
+                {index ? ', ' : ''}
+                <Link to={`/packlists/${entry.id}`}>{entry.code}</Link>
+              </span>
+            ))}{' '}
+            and this one. The warehouse list counts them all.
+          </p>
+        ) : null}
       </div>
 
       <div className="chip-row mb-3">
@@ -475,7 +501,7 @@ export default function PacklistScreen() {
 
       {canManage ? (
         <details className="card card-pad mt-3 no-print">
-          <summary className="small strong">Start this list again</summary>
+          <summary className="small strong">Start this list again, or delete it</summary>
           <p className="tiny muted mt-2">
             For a list confirmed against the wrong station, or a dry run somebody ticked through
             before the crates were real. What was required and what was packed are left alone.
@@ -498,6 +524,19 @@ export default function PacklistScreen() {
               Clear notes{notedLines ? ` (${notedLines})` : ''}
             </button>
           </div>
+          {!hasIssued(packlist.status) ? (
+            <>
+              <p className="tiny muted mt-3">
+                For a second list this station should not have. Nothing has left the warehouse
+                against it yet, so no stock moves.
+              </p>
+              <div className="btn-row mt-2">
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setDeleting(true)}>
+                  🗑 Delete this list
+                </button>
+              </div>
+            </>
+          ) : null}
         </details>
       ) : null}
 
@@ -619,6 +658,29 @@ export default function PacklistScreen() {
             void removeLine(removingLine.id);
             setRemovingLine(undefined);
             toast('Line removed');
+          }}
+        />
+      ) : null}
+
+      {deleting ? (
+        <ConfirmSheet
+          title={`Delete ${packlist.code}?`}
+          body={
+            <>
+              {packlist.name} ({packlist.code}) and its {plural(lines?.length ?? 0, 'line')} will be
+              deleted{progress.qtyPacked ? `, including ${plural(progress.qtyPacked, 'unit')} already packed` : ''}.
+              There is no undo.
+            </>
+          }
+          confirmLabel="Delete list"
+          tone="danger"
+          onCancel={() => setDeleting(false)}
+          onConfirm={() => {
+            setDeleting(false);
+            void removePacklist(packlist.id).then((done) => {
+              toast(done ? `${packlist.code} deleted` : 'This list has been loaded and cannot be deleted');
+              if (done) navigate(`/events/${packlist.eventId}`, { replace: true });
+            });
           }}
         />
       ) : null}

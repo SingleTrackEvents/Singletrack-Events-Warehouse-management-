@@ -247,6 +247,26 @@ export async function addLine(
   });
 }
 
+/**
+ * Delete a whole packlist, its lines and crates with it.
+ *
+ * For the second list a station should never have had. Only before anything
+ * has left the warehouse: once a list is loaded, stock has moved against it
+ * and it is part of the record. Returns false when the list cannot go.
+ */
+export async function removePacklist(packlistId: string): Promise<boolean> {
+  const packlist = await db.packlists.get(packlistId);
+  if (!packlist || packlist.deletedAt || hasIssued(packlist.status)) return false;
+  for (const line of await liveWhere(db.packlistLines, 'packlistId', packlistId)) {
+    await softDelete(db.packlistLines, line.id);
+  }
+  for (const container of await liveWhere(db.containers, 'packlistId', packlistId)) {
+    await softDelete(db.containers, container.id);
+  }
+  await softDelete(db.packlists, packlistId);
+  return true;
+}
+
 export async function removeLine(lineId: string): Promise<void> {
   await softDelete(db.packlistLines, lineId);
 }
