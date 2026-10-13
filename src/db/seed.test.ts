@@ -918,6 +918,73 @@ describe('a seeded line for an item the crew already has on the list', () => {
   });
 });
 
+describe('a seeded list for a station the crew already keeps a list for', () => {
+  const station = 'Doongalla Picnic Grounds';
+  const seeded = seedId('plist', `rcr26-${station}`);
+  const destinationId = seedId('dest', `rcr26-${station}`);
+
+  /** The crew's own list for the station, with as many lines as given. */
+  const crewList = async (lines: number) => {
+    const list = await create(db.packlists, {
+      eventId: seedId('event', 'rcr26'), destinationId, name: station, code: 'DPG-XB36',
+      status: 'draft' as const, packedBy: '', packedAt: null, deliveredAt: null, receivedBy: '', notes: '',
+    });
+    const items = alive(await db.items.toArray()).slice(0, lines);
+    for (const item of items) {
+      await create(db.packlistLines, {
+        packlistId: list.id, itemId: item.id, qtyRequired: 1, qtyPacked: 0, qtyReturned: 0,
+        mandatory: false, containerId: null, note: '', sort: 10,
+      });
+    }
+    return list;
+  };
+  const listsAtStation = async () =>
+    alive(await db.packlists.toArray()).filter((list) => list.destinationId === destinationId);
+
+  it('goes, lines and all, when the crew’s list is the working one', async () => {
+    await seedStarterData();
+    const mine = await crewList(48);
+
+    await ensureSeeded();
+
+    expect((await listsAtStation()).map((list) => list.id)).toEqual([mine.id]);
+    expect(alive(await db.packlistLines.toArray()).some((line) => line.packlistId === seeded)).toBe(false);
+  });
+
+  it('is never created beside a working list in the first place', async () => {
+    await seedStarterData();
+    await db.packlists.delete(seeded);
+    for (const line of await db.packlistLines.where('packlistId').equals(seeded).toArray()) {
+      await db.packlistLines.delete(line.id);
+    }
+    const mine = await crewList(48);
+
+    await ensureSeeded();
+
+    expect((await listsAtStation()).map((list) => list.id)).toEqual([mine.id]);
+  });
+
+  it('stays when the other list is an empty one', async () => {
+    await seedStarterData();
+    await crewList(0);
+
+    await ensureSeeded();
+
+    expect((await listsAtStation()).map((list) => list.id)).toContain(seeded);
+  });
+
+  it('stays when anything has been packed on it', async () => {
+    await seedStarterData();
+    const line = alive(await db.packlistLines.toArray()).find((entry) => entry.packlistId === seeded)!;
+    await update(db.packlistLines, line.id, { qtyPacked: 1 });
+    await crewList(48);
+
+    await ensureSeeded();
+
+    expect((await listsAtStation()).map((list) => list.id)).toContain(seeded);
+  });
+});
+
 describe('the Roller Coaster Run food plan', () => {
   it('names only food the catalogue has, at stations and races the event has', () => {
     const skus = new Set(FOOD_CATALOGUE.map((item) => item.sku));

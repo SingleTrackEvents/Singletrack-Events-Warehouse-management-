@@ -9,6 +9,7 @@ import { KIT_CONTENTS } from './kitContents';
 import { RCR_CONSUMPTION, RCR_PACKLISTS, RCR_RETIRED } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import { makeCode } from '../domain/codes';
+import { packlistForDestination } from '../domain/packlists';
 import type { Item, RaceVisit, SyncMeta, Unit } from './types';
 
 /**
@@ -416,6 +417,27 @@ export async function seedStarterData(
     }
     for (const list of lists) {
       const packlistId = seedId('plist', `${code}-${list.station}`);
+      const destinationId = seedId('dest', `${code}-${list.station}`);
+      /*
+       * A station the crew already keeps its own list for does not get a
+       * second one from the seed: the warehouse list would count both, and
+       * the event screen only ever opens one. Where the seeded copy already
+       * exists beside the crew's working list, it goes, as long as it is
+       * still a draft with nothing packed or confirmed against it.
+       */
+      const working = await packlistForDestination(destinationId);
+      if (working && working.id !== packlistId) {
+        const seeded = await db.packlists.get(packlistId);
+        if (seeded && !seeded.deletedAt && seeded.status === 'draft') {
+          const seededLines = await liveWhere(db.packlistLines, 'packlistId', packlistId);
+          const worked = seededLines.some((line) => line.qtyPacked > 0 || (line.qtyReceived ?? 0) > 0);
+          if (!worked) {
+            for (const line of seededLines) await softDelete(db.packlistLines, line.id);
+            await softDelete(db.packlists, packlistId);
+          }
+        }
+        continue;
+      }
       if (!isNew(packlistId)) {
         const existing = await db.packlists.get(packlistId);
         if (existing && !existing.deletedAt && existing.rev === 1 && existing.notes !== notes) {
@@ -426,7 +448,7 @@ export async function seedStarterData(
         await create(db.packlists, {
           id: packlistId,
           eventId: seedId('event', code),
-          destinationId: seedId('dest', `${code}-${list.station}`),
+          destinationId,
           name: list.station,
           code: makeCode(list.station),
           status: 'draft',
