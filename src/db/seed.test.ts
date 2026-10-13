@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { db, getSettings } from './db';
-import { alive, softDelete, update } from './repo';
+import { alive, create, softDelete, update } from './repo';
 import { ensureSeeded, seedId, seedStarterData } from './seed';
 import { lineQtyByDay } from '../domain/consumption';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
@@ -866,6 +866,55 @@ describe('the Roller Coaster Run lists moving from the v1.5 cards to v2.1', () =
     expect((await db.packlistLines.get(doongallaIbc))?.qtyRequired).toBe(1);
     expect((await db.packlistLines.get(singletonIbc))?.deletedAt).not.toBeNull();
     expect((await db.packlistLines.get(singletonEsky))?.qtyRequired).toBe(5);
+  });
+});
+
+describe('a seeded line for an item the crew already has on the list', () => {
+  const doongalla = seedId('plist', 'rcr26-Doongalla Picnic Grounds');
+  const seededWater = seedId('pline', 'rcr26-Doongalla Picnic Grounds-Water Containers (20L equiv)');
+  const waterLines = async () => {
+    const water = alive(await db.items.toArray()).find((item) => item.name === 'Water Containers (20L equiv)')!;
+    return alive(await db.packlistLines.toArray()).filter(
+      (line) => line.packlistId === doongalla && line.itemId === water.id,
+    );
+  };
+  const crewLine = async (qtyRequired: number) => {
+    const water = alive(await db.items.toArray()).find((item) => item.name === 'Water Containers (20L equiv)')!;
+    return create(db.packlistLines, {
+      packlistId: doongalla, itemId: water.id, qtyRequired, qtyPacked: 0, qtyReturned: 0,
+      mandatory: false, containerId: null, note: '', sort: 999,
+    });
+  };
+
+  it('is not added when the crew typed the item in first', async () => {
+    await seedStarterData();
+    // As a phone on the v1.5 build: no seeded water line, and the crew adds one by hand.
+    await db.packlistLines.delete(seededWater);
+    const mine = await crewLine(8);
+
+    await ensureSeeded();
+
+    expect((await waterLines()).map((line) => line.id)).toEqual([mine.id]);
+  });
+
+  it('is cleared away where both already exist, leaving the crew’s line', async () => {
+    await seedStarterData();
+    const mine = await crewLine(10);
+
+    await ensureSeeded();
+
+    expect((await waterLines()).map((line) => line.id)).toEqual([mine.id]);
+    expect((await db.packlistLines.get(seededWater))?.deletedAt).not.toBeNull();
+  });
+
+  it('stays when somebody has worked on the seeded line, for the crew to sort out', async () => {
+    await seedStarterData();
+    await update(db.packlistLines, seededWater, { qtyPacked: 3 });
+    await crewLine(8);
+
+    await ensureSeeded();
+
+    expect(await waterLines()).toHaveLength(2);
   });
 });
 
