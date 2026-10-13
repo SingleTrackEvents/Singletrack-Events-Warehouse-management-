@@ -1,5 +1,5 @@
 import { db, getSettings, SYNCED_TABLES } from './db';
-import { create, createMany, softDelete, update } from './repo';
+import { create, createMany, liveWhere, softDelete, update } from './repo';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { EVENT_SEED } from './eventSeed';
 import { EXTRA_ITEMS } from './extrasCatalogue';
@@ -400,11 +400,12 @@ export async function seedStarterData(
    * line still at revision 1 and nothing packed against it. A line the crew
    * has edited, or a list already being picked, is theirs.
    */
-  const untouched = async (packlistId: string, lineId: string) => {
+  const untouched = async (packlistId: string, lineId: string, anyRevision = false) => {
     const list = await db.packlists.get(packlistId);
     const line = await db.packlistLines.get(lineId);
     if (!list || list.deletedAt || list.status !== 'draft') return undefined;
-    if (!line || line.deletedAt || line.rev !== 1 || line.qtyPacked !== 0) return undefined;
+    if (!line || line.deletedAt || line.qtyPacked !== 0) return undefined;
+    if (!anyRevision && line.rev !== 1) return undefined;
     return line;
   };
   for (const { code, lists, retired, notes } of startingLists) {
@@ -436,11 +437,27 @@ export async function seedStarterData(
           notes,
         });
       }
+      // What the list already carries, by item. A seeded line for an item the
+      // crew has already put on the list by hand would be a second line for
+      // the same thing, counted twice on the warehouse list.
+      const onList = new Map<string, string[]>();
+      for (const existing of await liveWhere(db.packlistLines, 'packlistId', packlistId)) {
+        onList.set(existing.itemId, [...(onList.get(existing.itemId) ?? []), existing.id]);
+      }
       let sort = 10;
       for (const line of list.lines) {
         const lineId = seedId('pline', `${code}-${list.station}-${line.item}`);
         const item = byName.get(line.item);
-        if (item && isNew(lineId)) {
+        const others = item ? (onList.get(item.id) ?? []).filter((id) => id !== lineId) : [];
+        if (item && others.length) {
+          // The crew's line wins. A seeded copy of it that is still exactly
+          // as seeded, with nothing packed, is the duplicate and goes; one
+          // somebody has worked on stays, for the crew to sort out.
+          const seeded = await untouched(packlistId, lineId, true);
+          if (seeded && seeded.qtyRequired === line.qty && seeded.note === (line.note ?? '')) {
+            await softDelete(db.packlistLines, lineId);
+          }
+        } else if (item && isNew(lineId)) {
           await create(db.packlistLines, {
             id: lineId,
             packlistId,
