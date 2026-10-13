@@ -132,7 +132,6 @@ export default function JoinScreen() {
             <input
               id={id}
               className="input"
-              autoFocus
               autoCapitalize="words"
               value={name}
               placeholder="Tom Reilly"
