@@ -16,6 +16,7 @@ import { daysUntil, formatDateRange, plural, relativeDays } from '../domain/form
 import { LOAD_STATUS_LABELS } from '../domain/transport';
 import type { Destination, Packlist, PacklistLine } from '../db/types';
 import logo from '../assets/logo-white.png';
+import { openIntro } from '../domain/intro';
 
 /**
  * The screen the crew lands on. It answers the three questions asked most often
@@ -360,7 +361,11 @@ function StationHome({
 
       <p className="tiny muted center mt-4">
         Tick off each item as it turns up. What was meant to be sent is set by the warehouse, so a
-        short delivery stays visible. <Link to="/access">Account</Link>
+        short delivery stays visible.{' '}
+        <button type="button" className="link-btn" onClick={openIntro}>
+          How this works
+        </button>{' '}
+        · <Link to="/access">Account</Link>
       </p>
       <BuildStamp />
     </Screen>

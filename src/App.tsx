@@ -10,6 +10,7 @@ import {
   useNavigate,
   useParams,
 } from 'react-router-dom';
+import { IntroTour } from './components/IntroTour';
 import { AccountChip } from './components/AccountChip';
 import { ToastProvider } from './components/ui';
 import { SessionProvider } from './hooks/useSession';
@@ -62,6 +63,13 @@ const NAV: Array<{ to: string; icon: string; label: string; end: boolean; needs?
   { to: '/transport', icon: '🚚', label: 'Transport', end: false, needs: 'load:read' },
   { to: '/more', icon: '⚙️', label: 'More', end: false },
 ];
+
+/** The welcome tour, once someone is in: never over the sign-in page. */
+function WelcomeTour() {
+  const { backend, session, ready } = useSession();
+  if (!ready || isSignedOut(backend, session)) return null;
+  return <IntroTour />;
+}
 
 function BottomNav() {
   const { backend, session } = useSession();
@@ -203,6 +211,7 @@ export default function App() {
             </SignedOutGate>
           </Suspense>
           <BottomNav />
+          <WelcomeTour />
         </div>
         </SessionProvider>
       </ToastProvider>

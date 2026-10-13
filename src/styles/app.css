@@ -604,6 +604,33 @@ button, input, select, textarea {
 
 .sheet-head h2 { flex: 1; font-size: var(--text-xl); }
 
+/* The welcome tour: one idea per step, a big glyph to anchor it, and dots
+   that show how far there is to go and let anyone jump back. */
+.intro-step { padding-top: var(--space-2); }
+
+/* A text-sized button that reads as a link, for actions inside a sentence. */
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--link, var(--accent));
+  text-decoration: underline;
+  cursor: pointer;
+}
+.intro-glyph { font-size: 2.5rem; line-height: 1; margin-bottom: var(--space-3); }
+.intro-dots { display: flex; justify-content: center; gap: var(--space-2); margin-top: var(--space-2); }
+.intro-dot {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+  cursor: pointer;
+}
+.intro-dot[aria-current='true'] { background: var(--accent); width: 22px; }
+
 .sheet-body {
   flex: 1;
   overflow-y: auto;
