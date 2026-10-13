@@ -11,6 +11,7 @@ import { useSettings } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
 import { downloadJson, exportAll, importBackup, isBackup, wipeAll } from '../domain/backup';
+import { openIntro } from '../domain/intro';
 import { plural } from '../domain/format';
 import type { Settings } from '../db/types';
 
@@ -86,6 +87,14 @@ export default function SettingsScreen() {
           <h2>Set up</h2>
         </div>
         <div className="list">
+          <button type="button" className="row" onClick={openIntro}>
+            <span className="row-icon">👋</span>
+            <span className="row-body">
+              <span className="row-title">How to use the app</span>
+              <span className="row-sub">A quick tour of what your account can do</span>
+            </span>
+            <span className="row-chevron">›</span>
+          </button>
           <Link to="/access" className="row">
             <span className="row-icon">👥</span>
             <span className="row-body">
