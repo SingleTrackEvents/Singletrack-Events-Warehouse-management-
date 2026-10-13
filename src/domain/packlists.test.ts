@@ -10,6 +10,7 @@ import {
   hasIssued,
   nextStatus,
   outstanding,
+  removePacklist,
   packlistForDestination,
   primaryPacklist,
   progressFor,
@@ -487,5 +488,26 @@ describe('the list a station is run from', () => {
     await softDelete(db.packlists, worked.id);
     expect((await packlistForDestination(destination.id))?.id).toBe(stray.id);
     expect(await packlistForDestination('nowhere')).toBeUndefined();
+  });
+});
+
+describe('deleting a whole list', () => {
+  it('takes the list and its lines with it', async () => {
+    const { packlist } = await makePacklist();
+    const item = await makeItem('TARPS');
+    await addLine(packlist.id, item.id, 6);
+
+    expect(await removePacklist(packlist.id)).toBe(true);
+
+    expect((await db.packlists.get(packlist.id))?.deletedAt).not.toBeNull();
+    expect(await liveWhere(db.packlistLines, 'packlistId', packlist.id)).toEqual([]);
+  });
+
+  it('refuses a list that has already been loaded', async () => {
+    const { packlist } = await makePacklist();
+    await update(db.packlists, packlist.id, { status: 'loaded' });
+
+    expect(await removePacklist(packlist.id)).toBe(false);
+    expect((await db.packlists.get(packlist.id))?.deletedAt).toBeNull();
   });
 });
