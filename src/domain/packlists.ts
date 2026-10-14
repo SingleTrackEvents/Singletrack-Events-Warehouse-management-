@@ -326,21 +326,25 @@ export async function setStatus(
     if (options.receivedBy) changes.receivedBy = options.receivedBy;
   }
 
-  // Crossing into `loaded` for the first time takes stock off the shelf.
+  // Crossing into `loaded` for the first time takes stock off the shelf. On a
+  // two-stage event the truck already took it, so only what was packed beyond
+  // that leaves now: nothing goes out of the count twice.
   if (from < statusIndex('loaded') && to >= statusIndex('loaded')) {
+    const owed = lines
+      .map((line) => ({ line, qty: round2(line.qtyPacked - (line.qtyIssued ?? 0)) }))
+      .filter(({ qty }) => qty > 0);
     await recordMovements(
-      lines
-        .filter((line) => line.qtyPacked > 0)
-        .map((line) => ({
-          itemId: line.itemId,
-          qty: -line.qtyPacked,
-          reason: 'issue' as const,
-          refType: 'packlist' as const,
-          refId: packlist.id,
-          note: packlist.name,
-          by: options.by ?? '',
-        })),
+      owed.map(({ line, qty }) => ({
+        itemId: line.itemId,
+        qty: -qty,
+        reason: 'issue' as const,
+        refType: 'packlist' as const,
+        refId: packlist.id,
+        note: packlist.name,
+        by: options.by ?? '',
+      })),
     );
+    for (const { line } of owed) await update(db.packlistLines, line.id, { qtyIssued: line.qtyPacked });
   }
 
   // Reconciling books back whatever physically came home.

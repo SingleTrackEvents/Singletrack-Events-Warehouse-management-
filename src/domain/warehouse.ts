@@ -24,6 +24,8 @@ export interface PullDestination {
   destination: Destination;
   qtyRequired: number;
   qtyPacked: number;
+  /** Two-stage events: how much of this share is on the truck. */
+  qtyOnTruck: number;
   packlistId: string;
   /** The packlist line behind this share, for ticking it off from here. */
   lineId: string;
@@ -38,6 +40,8 @@ export interface PullLine {
   itemId: string;
   qtyRequired: number;
   qtyPacked: number;
+  /** Two-stage events: how much of the total is on the truck. */
+  qtyOnTruck: number;
   /** On hand in the warehouse right now. */
   qtyOnHand: number;
   /** How far short the warehouse is of the total. Zero when it covers it. */
@@ -102,6 +106,7 @@ export async function pullListFor(eventId: string): Promise<PullList> {
         itemId: line.itemId,
         qtyRequired: 0,
         qtyPacked: 0,
+        qtyOnTruck: 0,
         qtyOnHand: item?.qtyOnHand ?? 0,
         shortfall: 0,
         uncounted: Boolean(item) && item!.qtyOnHand === 0 && !counted.has(line.itemId),
@@ -112,10 +117,12 @@ export async function pullListFor(eventId: string): Promise<PullList> {
 
     row.qtyRequired = round2(row.qtyRequired + line.qtyRequired);
     row.qtyPacked = round2(row.qtyPacked + line.qtyPacked);
+    row.qtyOnTruck = round2(row.qtyOnTruck + (line.qtyOnTruck ?? 0));
     row.going.push({
       destination,
       qtyRequired: line.qtyRequired,
       qtyPacked: line.qtyPacked,
+      qtyOnTruck: line.qtyOnTruck ?? 0,
       packlistId: packlist.id,
       lineId: line.id,
       canPack: !hasIssued(packlist.status),
@@ -235,9 +242,12 @@ export function pullListCsv(list: PullList): string[][] {
   ];
 }
 
-/** True when every share of this item has been packed. */
-export function isPulled(line: PullLine): boolean {
-  return line.qtyRequired > 0 && line.qtyPacked >= line.qtyRequired;
+/**
+ * True when every share of this item has been ticked off: onto the truck on
+ * a two-stage event, packed for its station otherwise.
+ */
+export function isPulled(line: PullLine, truck = false): boolean {
+  return line.qtyRequired > 0 && (truck ? line.qtyOnTruck : line.qtyPacked) >= line.qtyRequired;
 }
 
 /**

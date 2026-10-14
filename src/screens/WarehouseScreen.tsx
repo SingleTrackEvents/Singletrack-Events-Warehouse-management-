@@ -2,15 +2,16 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
-import { EmptyState, Pill, ProgressBar } from '../components/ui';
+import { ConfirmSheet, EmptyState, Pill, ProgressBar } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { useSearch } from '../hooks/useSearch';
 import { useCategories, useEvent } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
 import { byVehicle, isPulled, pullListCsv, pullListFor, setPulled } from '../domain/warehouse';
+import { loadTruck, setOnTruck } from '../domain/truck';
 import { downloadCsv, slugify } from '../domain/backup';
-import { formatQty, plural } from '../domain/format';
+import { formatDateTime, formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
 import type { PullDestination, PullLine } from '../domain/warehouse';
 
@@ -43,6 +44,10 @@ export default function WarehouseScreen() {
   // Ticking packs the station lists, so it takes packing rights, not just
   // the right to read the list.
   const canTick = can(session, 'packlist:pack');
+  // A two-stage event ticks gear onto the truck here; the stations' own lists
+  // are then the van packs at the event.
+  const truck = Boolean(event?.truckStage);
+  const [loadingTruck, setLoadingTruck] = useState(false);
 
   const [grouping, setGrouping] = useState<'item' | 'vehicle'>('item');
   const [filter, setFilter] = useState<Filter>('all');
@@ -59,11 +64,11 @@ export default function WarehouseScreen() {
 
   const filtered = useMemo(() => {
     const lines = list?.lines ?? [];
-    if (filter === 'todo') return lines.filter((line) => !isPulled(line));
+    if (filter === 'todo') return lines.filter((line) => !isPulled(line, truck));
     if (filter === 'short') return lines.filter((line) => line.shortfall > 0);
     if (filter === 'noRun') return lines.filter((line) => line.going.some((entry) => !entry.load));
     return lines;
-  }, [list, filter]);
+  }, [list, filter, truck]);
 
   const searched = useSearch(filtered, query, (line) => [
     line.item?.name ?? '',
@@ -94,7 +99,7 @@ export default function WarehouseScreen() {
 
   const shortCount = list.lines.filter((line) => line.shortfall > 0).length;
   const uncounted = list.lines.filter((line) => line.uncounted).length;
-  const totalPacked = list.lines.reduce((sum, line) => sum + line.qtyPacked, 0);
+  const totalPacked = list.lines.reduce((sum, line) => sum + (truck ? line.qtyOnTruck : line.qtyPacked), 0);
   const totalNeeded = list.lines.reduce((sum, line) => sum + line.qtyRequired, 0);
   const percent = totalNeeded ? Math.round((totalPacked / totalNeeded) * 100) : 0;
 
@@ -141,8 +146,27 @@ export default function WarehouseScreen() {
         </div>
         <ProgressBar percent={percent} done={percent === 100} />
         <p className="tiny muted mt-2">
-          {formatQty(totalPacked, 'each')} of {formatQty(totalNeeded, 'each')} packed
+          {formatQty(totalPacked, 'each')} of {formatQty(totalNeeded, 'each')} {truck ? 'on the truck' : 'packed'}
         </p>
+        {truck ? (
+          <>
+            <p className="tiny muted mt-2">
+              🚛 Two-stage event: tick gear onto the truck here. Each station's own list is its van
+              pack at the event.
+              {event.truckLoadedAt ? ` Truck last marked loaded ${formatDateTime(event.truckLoadedAt)}.` : ''}
+            </p>
+            {canTick ? (
+              <button
+                type="button"
+                className="btn btn-primary btn-block mt-3"
+                disabled={!totalPacked}
+                onClick={() => setLoadingTruck(true)}
+              >
+                {event.truckLoadedAt ? 'Truck loaded again (take out the rest)' : 'Truck loaded'}
+              </button>
+            ) : null}
+          </>
+        ) : null}
         {list.unassigned.length ? (
           <p className="tiny mt-2" style={{ color: 'var(--warn)' }}>
             ⚠ {plural(list.unassigned.length, 'destination')} packed with no run yet:{' '}
@@ -217,6 +241,7 @@ export default function WarehouseScreen() {
                         open={open.has(line.itemId)}
                         onToggle={() => toggle(line.itemId)}
                         canTick={canTick}
+                        truck={truck}
                       />
                     ))}
                   </div>
@@ -278,6 +303,26 @@ export default function WarehouseScreen() {
           🖨 Print
         </button>
       </div>
+      {loadingTruck ? (
+        <ConfirmSheet
+          title="Mark the truck loaded?"
+          body={
+            <>
+              Everything ticked onto the truck comes out of the warehouse count now. The stations' van
+              packs at the event will not take it out again. If more goes on the truck later, mark it
+              loaded again and only the extra comes out.
+            </>
+          }
+          confirmLabel="Truck loaded"
+          onCancel={() => setLoadingTruck(false)}
+          onConfirm={() => {
+            setLoadingTruck(false);
+            void loadTruck(event.id, session?.displayName ?? '').then(({ lines, units }) =>
+              toast(lines ? `Truck loaded: ${formatQty(units, 'each')} out of the warehouse` : 'Nothing new on the truck'),
+            );
+          }}
+        />
+      ) : null}
     </Screen>
   );
 }
@@ -288,22 +333,27 @@ function PullRow({
   open,
   onToggle,
   canTick,
+  truck,
 }: {
   line: PullLine;
   open: boolean;
   onToggle: () => void;
   canTick: boolean;
+  /** Two-stage event: ticks put gear on the truck rather than packing each station. */
+  truck: boolean;
 }) {
   const unit = line.item?.unit ?? 'each';
-  const done = isPulled(line);
+  const done = isPulled(line, truck);
+  const counted = (entry: { qtyPacked: number; qtyOnTruck: number }) => (truck ? entry.qtyOnTruck : entry.qtyPacked);
+  const verb = truck ? 'on the truck' : 'packed';
   // A loaded list's count is fixed, so a line that is all loaded cannot be ticked.
   const tickable = canTick && line.going.some((going) => going.canPack);
   const tick = (shares: PullDestination[], packed: boolean) => {
-    void setPulled(shares, packed);
+    void (truck ? setOnTruck(shares, packed) : setPulled(shares, packed));
     if (packed && navigator.vibrate) navigator.vibrate(15);
   };
   return (
-    <div className={`pull-row${done ? ' done' : line.qtyPacked > 0 ? ' short' : ''}`}>
+    <div className={`pull-row${done ? ' done' : counted(line) > 0 ? ' short' : ''}`}>
       <div className="pull-head">
       {canTick ? (
         <button
@@ -311,7 +361,7 @@ function PullRow({
           className="pull-tick"
           aria-pressed={done}
           disabled={!tickable}
-          aria-label={`${done ? 'Unpack' : 'Pack'} ${line.item?.name ?? 'item'} for every stop`}
+          aria-label={`${done ? 'Untick' : 'Tick'} ${line.item?.name ?? 'item'} ${verb} for every stop`}
           onClick={() => tick(line.going, !done)}
         >
           ✓
@@ -329,8 +379,8 @@ function PullRow({
           <span className="strong" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {formatQty(line.qtyRequired, unit)}
           </span>
-          {line.qtyPacked > 0 && !done ? (
-            <span className="tiny muted">{line.qtyPacked} packed</span>
+          {counted(line) > 0 && !done ? (
+            <span className="tiny muted">{counted(line)} {verb}</span>
           ) : null}
           {line.shortfall > 0 ? (
             <Pill tone="danger">short {line.shortfall}</Pill>
@@ -351,10 +401,10 @@ function PullRow({
               <button
                 type="button"
                 className="pull-tick pull-tick-sm"
-                aria-pressed={going.qtyPacked >= going.qtyRequired}
+                aria-pressed={counted(going) >= going.qtyRequired}
                 disabled={!going.canPack}
-                aria-label={`${going.qtyPacked >= going.qtyRequired ? 'Unpack' : 'Pack'} for ${going.destination.name}`}
-                onClick={() => tick([going], going.qtyPacked < going.qtyRequired)}
+                aria-label={`${counted(going) >= going.qtyRequired ? 'Untick' : 'Tick'} ${verb} for ${going.destination.name}`}
+                onClick={() => tick([going], counted(going) < going.qtyRequired)}
               >
                 ✓
               </button>
@@ -371,7 +421,7 @@ function PullRow({
                 </span>
               </span>
               <span className="strong" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {going.qtyPacked}/{going.qtyRequired}
+                {counted(going)}/{going.qtyRequired}
               </span>
             </Link>
             </div>
