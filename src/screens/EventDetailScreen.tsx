@@ -483,6 +483,7 @@ function EditEventSheet({ eventId, onClose }: { eventId: string; onClose: () => 
       endDate: endDate && endDate >= startDate ? endDate : startDate,
       status: field('status'),
       notes: String(field('notes')),
+      truckStage: Boolean(field('truckStage')),
     });
     toast('Event updated');
     onClose();
@@ -583,6 +584,20 @@ function EditEventSheet({ eventId, onClose }: { eventId: string; onClose: () => 
             />
           )}
         </Field>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={Boolean(field('truckStage'))}
+            onChange={(changed) => set('truckStage', changed.target.checked)}
+          />
+          <span>
+            <span className="strong">Truck stage</span>
+            <span className="small muted" style={{ display: 'block' }}>
+              Everything goes out in one truck, then into a van per station at the event. The
+              warehouse list ticks gear onto the truck; each station's list is its van pack.
+            </span>
+          </span>
+        </label>
       </div>
     </Sheet>
   );

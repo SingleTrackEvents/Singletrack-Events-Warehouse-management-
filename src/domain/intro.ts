@@ -40,6 +40,7 @@ const WAREHOUSE: IntroStep = {
   body: [
     'From an event, Warehouse list totals every item across every station, in shelf order, so the racks get walked once.',
     'Tick an item and it is packed on every station\'s list at once. Open the item to tick one station at a time. "To pack" hides what is done.',
+    'Going out in one big truck? Turn on Truck stage in Edit event. The warehouse list then ticks gear onto the truck, Truck loaded takes it out of stock, and each station\'s list becomes its van pack at the event, in van order: first in at the back, so what the station needs first comes out first.',
   ],
 };
 

@@ -10,7 +10,8 @@ import { ConfirmSheet, Field, Pill, ProgressBar, Sheet, Stepper } from '../compo
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, byId, update } from '../db/repo';
-import { useCategories, useCrewName, usePacklist, usePacklistLines } from '../hooks/useDb';
+import { useCategories, useCrewName, useEvent, usePacklist, usePacklistLines } from '../hooks/useDb';
+import { moveInVan, resetVanOrder, unloadOrder } from '../domain/truck';
 import { useSession } from '../hooks/sessionContext';
 import { can, isStationOnly } from '../sync/permissions';
 import {
@@ -221,6 +222,26 @@ export default function PacklistScreen() {
     [visible, items, categories],
   );
 
+  /*
+   * Van order. A two-stage event opens its station lists this way: the crew
+   * packing the van see load order (first in goes to the back), the station
+   * checking it in sees unload order (what they need first, at the top).
+   */
+  const event = useEvent(packlist?.eventId);
+  const [view, setView] = useState<'category' | 'van'>();
+  const vanView = view ? view === 'van' : Boolean(event?.truckStage);
+  const loadView = canPack;
+  const unloaded = useMemo(() => {
+    const byId = new Map((categories ?? []).map((category) => [category.id, category]));
+    return unloadOrder(lines ?? [], (line) => byId.get(items?.get(line.itemId)?.categoryId ?? ''));
+  }, [lines, items, categories]);
+  const vanLines = useMemo(() => {
+    const order = loadView ? [...unloaded].reverse() : unloaded;
+    const shown = new Set(visible.map((line) => line.id));
+    return order.map((line, index) => ({ line, position: index + 1 })).filter(({ line }) => shown.has(line.id));
+  }, [unloaded, visible, loadView]);
+  const vanCustomised = unloaded.some((line) => line.vanOrder !== undefined && line.vanOrder !== null);
+
   if (!packlist) {
     return (
       <Screen title="Packlist" back="-1">
@@ -259,97 +280,14 @@ export default function PacklistScreen() {
     toast(messages[status] ?? 'Updated');
   };
 
-  return (
-    <Screen
-      title={packlist.name}
-      subtitle={`${packlist.code} · ${PACKLIST_STATUS_LABELS[packlist.status]}`}
-      back={stationOnly ? '/' : `/events/${packlist.eventId}`}
-    >
-      <div className="card card-pad mb-3">
-        <div className="spread mb-2">
-          <span className="strong">
-            {progress.linesDone} / {progress.linesTotal} {canPack ? 'lines' : 'lines confirmed'}
-          </span>
-          <Pill tone={STATUS_TONE[packlist.status]}>{PACKLIST_STATUS_LABELS[packlist.status]}</Pill>
-        </div>
-        <ProgressBar percent={progress.percent} done={progress.percent === 100} />
-        {progress.blocking.length ? (
-          <p className="tiny mt-2" style={{ color: 'var(--danger)' }}>
-            ⚠ {plural(progress.blocking.length, 'must-have item')}{' '}
-            {canPack ? 'still short' : 'not confirmed yet'}
-          </p>
-        ) : null}
-        {destination?.accessNotes ? (
-          <p className="tiny muted mt-2">🚙 {destination.accessNotes}</p>
-        ) : null}
-        {packlist.notes ? <p className="tiny muted mt-2">📝 {packlist.notes}</p> : null}
-        {siblings?.length ? (
-          <p className="tiny mt-2" style={{ color: 'var(--warn)' }}>
-            ⚠ This station has {plural(siblings.length + 1, 'list')}:{' '}
-            {siblings.map((entry, index) => (
-              <span key={entry.id}>
-                {index ? ', ' : ''}
-                <Link to={`/packlists/${entry.id}`}>{entry.code}</Link>
-              </span>
-            ))}{' '}
-            and this one. The warehouse list counts them all.
-          </p>
-        ) : null}
-      </div>
-
-      <div className="chip-row mb-3">
-        {(Object.keys(FILTER_LABELS) as Filter[]).map((option) => (
-          <button
-            key={option}
-            type="button"
-            className="chip"
-            aria-pressed={filter === option}
-            onClick={() => setFilter(option)}
-          >
-            {(canPack ? FILTER_LABELS : CHECK_FILTER_LABELS)[option]}
-          </button>
-        ))}
-      </div>
-
-      {canManage ? (
-        <div className="btn-row mb-3 no-print">
-          <button type="button" className="btn btn-outline" onClick={() => setPicking(true)}>
-            + Add items
-          </button>
-          <button type="button" className="btn btn-outline" onClick={() => setApplying(true)}>
-            📋 Apply template
-          </button>
-          {canAsk ? (
-            <button type="button" className="btn btn-outline" onClick={() => setChecking(true)}>
-              ✨ Check this list
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* The pack rules, while the list can still change before stock leaves. */}
-      {canManage && !hasIssued(packlist.status) && items ? (
-        <PackRuleSuggestions
-          packlistId={packlist.id}
-          lines={lines ?? []}
-          items={items}
-          destinationType={destination?.type}
-        />
-      ) : null}
-
-      {visible.length ? (
-        <div>
-          {grouped.map(([categoryId, groupLines]) => {
-            return (
-              <section key={categoryId ?? 'uncategorised'} className="pack-group">
-                {grouped.length > 1 ? (
-                  <div className="pack-group-head">
-                    {categoryLabel(categoryId, categories ?? [])}
-                    <span className="muted"> · {groupLines.length}</span>
-                  </div>
-                ) : null}
-                <div className="list">
-                  {groupLines.map((line) => {
+  /**
+   * One packlist line. In van order it also shows where it sits in the van,
+   * and arrows for the crew to move it.
+   */
+  const renderLine = (
+    line: PacklistLine,
+    van?: { position: number; onUp?: () => void; onDown?: () => void },
+  ) => {
             const item = items?.get(line.itemId);
             const count = countOn(line);
             const packed = count >= line.qtyRequired;
@@ -376,9 +314,39 @@ export default function PacklistScreen() {
                 ) : null}
                 <span className="row-body">
                   <span className="row-title">
+                    {van ? <span className="van-pos">{van.position}</span> : null}
                     {item?.name ?? 'Unknown item'}
                     {line.mandatory ? <span style={{ color: 'var(--danger)' }}> *</span> : null}
                   </span>
+                  {van && (van.onUp || van.onDown) ? (
+                    <span className="van-move">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        aria-label="Move up"
+                        disabled={!van.onUp}
+                        onClick={(event) => {
+                          // The row itself toggles packed; this only moves it.
+                          event.stopPropagation();
+                          van.onUp?.();
+                        }}
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        aria-label="Move down"
+                        disabled={!van.onDown}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          van.onDown?.();
+                        }}
+                      >
+                        ▼
+                      </button>
+                    </span>
+                  ) : null}
                   <span className="row-sub">
                     {item ? `${item.bin || 'no bin'} · ${item.sku}` : ''}
                     {line.note ? ` · ${line.note}` : ''}
@@ -479,7 +447,141 @@ export default function PacklistScreen() {
             ) : (
               <div key={line.id}>{row}</div>
             );
+  };
+
+  return (
+    <Screen
+      title={packlist.name}
+      subtitle={`${packlist.code} · ${PACKLIST_STATUS_LABELS[packlist.status]}`}
+      back={stationOnly ? '/' : `/events/${packlist.eventId}`}
+    >
+      <div className="card card-pad mb-3">
+        <div className="spread mb-2">
+          <span className="strong">
+            {progress.linesDone} / {progress.linesTotal} {canPack ? 'lines' : 'lines confirmed'}
+          </span>
+          <Pill tone={STATUS_TONE[packlist.status]}>{PACKLIST_STATUS_LABELS[packlist.status]}</Pill>
+        </div>
+        <ProgressBar percent={progress.percent} done={progress.percent === 100} />
+        {progress.blocking.length ? (
+          <p className="tiny mt-2" style={{ color: 'var(--danger)' }}>
+            ⚠ {plural(progress.blocking.length, 'must-have item')}{' '}
+            {canPack ? 'still short' : 'not confirmed yet'}
+          </p>
+        ) : null}
+        {destination?.accessNotes ? (
+          <p className="tiny muted mt-2">🚙 {destination.accessNotes}</p>
+        ) : null}
+        {packlist.notes ? <p className="tiny muted mt-2">📝 {packlist.notes}</p> : null}
+        {siblings?.length ? (
+          <p className="tiny mt-2" style={{ color: 'var(--warn)' }}>
+            ⚠ This station has {plural(siblings.length + 1, 'list')}:{' '}
+            {siblings.map((entry, index) => (
+              <span key={entry.id}>
+                {index ? ', ' : ''}
+                <Link to={`/packlists/${entry.id}`}>{entry.code}</Link>
+              </span>
+            ))}{' '}
+            and this one. The warehouse list counts them all.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="chip-row mb-3">
+        {(Object.keys(FILTER_LABELS) as Filter[]).map((option) => (
+          <button
+            key={option}
+            type="button"
+            className="chip"
+            aria-pressed={filter === option}
+            onClick={() => setFilter(option)}
+          >
+            {(canPack ? FILTER_LABELS : CHECK_FILTER_LABELS)[option]}
+          </button>
+        ))}
+      </div>
+
+      {canManage ? (
+        <div className="btn-row mb-3 no-print">
+          <button type="button" className="btn btn-outline" onClick={() => setPicking(true)}>
+            + Add items
+          </button>
+          <button type="button" className="btn btn-outline" onClick={() => setApplying(true)}>
+            📋 Apply template
+          </button>
+          {canAsk ? (
+            <button type="button" className="btn btn-outline" onClick={() => setChecking(true)}>
+              ✨ Check this list
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* The pack rules, while the list can still change before stock leaves. */}
+      {canManage && !hasIssued(packlist.status) && items ? (
+        <PackRuleSuggestions
+          packlistId={packlist.id}
+          lines={lines ?? []}
+          items={items}
+          destinationType={destination?.type}
+        />
+      ) : null}
+
+      <div className="chip-row mb-3">
+        <button type="button" className="chip" aria-pressed={!vanView} onClick={() => setView('category')}>
+          By category
+        </button>
+        <button type="button" className="chip" aria-pressed={vanView} onClick={() => setView('van')}>
+          🚐 Van order
+        </button>
+      </div>
+
+      {vanView ? (
+        <p className="tiny muted mb-3">
+          {loadView
+            ? 'Load order: pack from the top. Number 1 goes in first, at the back of the van, so what the station needs first comes out first.'
+            : 'Unload order: what the station needs first is at the top.'}
+          {canManage && !returning ? ' Use the arrows to move a line.' : ''}
+          {canManage && vanCustomised ? (
+            <>
+              {' '}
+              <button type="button" className="link-btn" onClick={() => void resetVanOrder(lines ?? [])}>
+                Back to the standard order
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+
+      {visible.length && vanView ? (
+        <div className="list">
+          {vanLines.map(({ line, position }) => {
+            const total = unloaded.length;
+            // Arrows move a line on screen; underneath that is a move in the
+            // unload order, which runs the other way in the load view.
+            const move = (onScreen: -1 | 1) =>
+              void moveInVan(unloaded, line.id, (loadView ? -onScreen : onScreen) as -1 | 1);
+            const movable = canManage && !returning;
+            return renderLine(line, {
+              position,
+              onUp: movable && position > 1 ? () => move(-1) : undefined,
+              onDown: movable && position < total ? () => move(1) : undefined,
+            });
           })}
+        </div>
+      ) : visible.length ? (
+        <div>
+          {grouped.map(([categoryId, groupLines]) => {
+            return (
+              <section key={categoryId ?? 'uncategorised'} className="pack-group">
+                {grouped.length > 1 ? (
+                  <div className="pack-group-head">
+                    {categoryLabel(categoryId, categories ?? [])}
+                    <span className="muted"> · {groupLines.length}</span>
+                  </div>
+                ) : null}
+                <div className="list">
+                  {groupLines.map((line) => renderLine(line))}
                 </div>
               </section>
             );

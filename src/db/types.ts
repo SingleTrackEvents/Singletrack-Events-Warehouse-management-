@@ -137,6 +137,14 @@ export interface RaceEvent extends SyncMeta {
   endDate: string;
   status: EventStatus;
   notes: string;
+  /**
+   * Packed in two stages: everything into one truck at the warehouse, then
+   * into a van per station at the event. Absent or false is the one-stage
+   * event, packed straight into each station's vehicle.
+   */
+  truckStage?: boolean;
+  /** When the truck was last marked loaded, taking its stock out of the warehouse. */
+  truckLoadedAt?: string | null;
 }
 
 /** What kind of place goods are going to. Drives which templates are suggested. */
@@ -306,6 +314,22 @@ export interface PacklistLine extends SyncMeta {
   qtyReceived?: number | null;
   /** How many came back after the event. */
   qtyReturned: number;
+  /**
+   * Two-stage events: how many of this station's share went into the truck
+   * at the warehouse. `qtyPacked` is then the van pack at the event.
+   */
+  qtyOnTruck?: number;
+  /**
+   * How many have been taken out of warehouse stock against this line, by
+   * the truck or by the list being loaded. Whichever comes second only
+   * issues the difference, so nothing leaves the count twice.
+   */
+  qtyIssued?: number;
+  /**
+   * Position in the van, counted in unload order (what comes out first).
+   * Absent follows the default setup order by category.
+   */
+  vanOrder?: number | null;
   /** Blocks a packlist from being marked packed while short. */
   mandatory: boolean;
   /** Which crate/tub this line was packed into. */

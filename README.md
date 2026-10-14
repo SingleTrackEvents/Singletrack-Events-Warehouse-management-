@@ -25,6 +25,14 @@ is a full-width tap target per line so a list can be worked one-handed, with a
 stepper for partial packs. Must-have items are flagged and warned about before a
 list is marked packed.
 
+**Truck, then vans**: for events that go out in one big truck and are split into a van per
+station on site. Turn on Truck stage in the event's settings. The warehouse list then ticks
+gear onto the truck, and "Truck loaded" takes it out of stock in one go. Each station's
+packlist becomes its van pack, in van order: shelter first out, so it goes in last, then
+tables, power and light, water and ice, the kit and the food. The crew packing a van see load
+order, the station sees unload order, and any line can be moved up or down for a station
+that sets up differently. Stock never leaves the count twice.
+
 **Pack rules**: what usually travels with what, for every event. Put 3 marquees
 on an aid station list and the app offers 12 ratchet straps, 24 steel weights
 and 6 walls; a trestle table brings its table cloth, an IBC its pipe, a
