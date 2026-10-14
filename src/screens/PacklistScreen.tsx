@@ -312,17 +312,14 @@ export default function PacklistScreen() {
                     ✓
                   </span>
                 ) : null}
-                <span className="row-body">
-                  <span className="row-title">
-                    {van ? <span className="van-pos">{van.position}</span> : null}
-                    {item?.name ?? 'Unknown item'}
-                    {line.mandatory ? <span style={{ color: 'var(--danger)' }}> *</span> : null}
-                  </span>
-                  {van && (van.onUp || van.onDown) ? (
-                    <span className="van-move">
+                {/* Place in the van, with the arrows to move it either side of
+                    the number: out of the way of the name and its details. */}
+                {van ? (
+                  <span className="van-rail">
+                    {van.onUp || van.onDown ? (
                       <button
                         type="button"
-                        className="btn btn-ghost btn-sm"
+                        className="van-arrow"
                         aria-label="Move up"
                         disabled={!van.onUp}
                         onClick={(event) => {
@@ -333,9 +330,12 @@ export default function PacklistScreen() {
                       >
                         ▲
                       </button>
+                    ) : null}
+                    <span className="van-pos">{van.position}</span>
+                    {van.onUp || van.onDown ? (
                       <button
                         type="button"
-                        className="btn btn-ghost btn-sm"
+                        className="van-arrow"
                         aria-label="Move down"
                         disabled={!van.onDown}
                         onClick={(event) => {
@@ -345,8 +345,14 @@ export default function PacklistScreen() {
                       >
                         ▼
                       </button>
-                    </span>
-                  ) : null}
+                    ) : null}
+                  </span>
+                ) : null}
+                <span className="row-body">
+                  <span className="row-title">
+                    {item?.name ?? 'Unknown item'}
+                    {line.mandatory ? <span style={{ color: 'var(--danger)' }}> *</span> : null}
+                  </span>
                   <span className="row-sub">
                     {item ? `${item.bin || 'no bin'} · ${item.sku}` : ''}
                     {line.note ? ` · ${line.note}` : ''}
