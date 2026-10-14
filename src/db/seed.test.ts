@@ -1034,3 +1034,23 @@ describe('the Roller Coaster Run food plan', () => {
     expect((await db.destinations.get(id))?.raceVisits).toEqual([]);
   });
 });
+
+describe('the Roller Coaster Run truck stage', () => {
+  const rcr = seedId('event', 'rcr26');
+
+  it('is on for the Roller Coaster Run', async () => {
+    await seedStarterData();
+    expect((await db.events.get(rcr))?.truckStage).toBe(true);
+  });
+
+  it('reaches an event seeded before it existed, once, and leaves the crew’s choice alone', async () => {
+    await seedStarterData();
+    await db.events.update(rcr, { truckStage: undefined });
+    await ensureSeeded();
+    expect((await db.events.get(rcr))?.truckStage).toBe(true);
+
+    await update(db.events, rcr, { truckStage: false });
+    await ensureSeeded();
+    expect((await db.events.get(rcr))?.truckStage).toBe(false);
+  });
+});
