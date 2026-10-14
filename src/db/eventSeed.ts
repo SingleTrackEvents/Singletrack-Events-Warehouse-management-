@@ -33,6 +33,8 @@ export interface SeedEvent {
   startDate: string;
   endDate: string;
   status?: EventStatus;
+  /** Packed in two stages: one truck from the warehouse, then a van per station. */
+  truckStage?: boolean;
   notes?: string;
   /** Race distances, with projected fields where the planning sheets have them. */
   races?: Array<{ name: string; projection: number; day?: string }>;
@@ -121,6 +123,7 @@ export const EVENT_SEED: SeedEvent[] = [
     startDate: '2026-10-17',
     endDate: '2026-10-17',
     notes: '46 km, 23 km, 12 km twilight and kids, out of Kalorama Memorial Reserve.',
+    truckStage: true,
     // Projections from the RCR 2026 Aid Station Consumptions sheet.
     races: [
       { name: '46k', projection: 225, day: '2026-10-17' },

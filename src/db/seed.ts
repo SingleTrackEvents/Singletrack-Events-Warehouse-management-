@@ -296,7 +296,15 @@ export async function seedStarterData(
         endDate: spec.endDate,
         status: spec.status ?? 'planning',
         notes: spec.notes ?? '',
+        ...(spec.truckStage ? { truckStage: true } : {}),
       });
+    } else if (spec.truckStage) {
+      // An event seeded before the truck stage existed gets it once: absent
+      // is "never set", while true or false is the crew's choice and stays.
+      const existing = await db.events.get(eventId);
+      if (existing && !existing.deletedAt && existing.truckStage === undefined) {
+        await update(db.events, eventId, { truckStage: true });
+      }
     }
 
     // Race name → seeded id, so station links can be spelled by name above.
