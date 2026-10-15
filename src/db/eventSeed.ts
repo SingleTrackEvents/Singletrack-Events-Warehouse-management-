@@ -275,12 +275,6 @@ export const EVENT_SEED: SeedEvent[] = [
         notes: 'Event hub, registration and merch.',
         sort: 45,
       },
-      {
-        name: 'Sterling Place',
-        type: 'checkpoint',
-        notes: 'Stretcher beds and blankets on the pack list. Location to confirm.',
-        sort: 135,
-      },
     ],
   },
   {

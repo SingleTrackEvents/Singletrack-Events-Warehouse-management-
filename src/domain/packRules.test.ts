@@ -75,6 +75,28 @@ describe('the pack rules', () => {
     expect(asked([], 'event_village')).toEqual({});
   });
 
+  it('gives a gas stove its bottle, lighter and two kettles, and a heater its own bottle', () => {
+    expect(asked(list([['CKG-02', 1], ['CKG-07', 1]]), 'checkpoint')).toEqual({
+      'CKG-01': 2, 'CKG-90': 1, 'CKG-03': 2,
+    });
+  });
+
+  it('puts 2 blankets on every nap bed, and a pole and cone under every flag', () => {
+    expect(asked(list([['MED-02', 2]]), 'checkpoint')).toEqual({ 'MED-01': 4 });
+    expect(asked(list([['OTH-02', 25]]), 'start')).toEqual({ 'OTH-03': 25, 'CRS-90': 25 });
+  });
+
+  it('asks for a Starlink at GPT100 stations only', () => {
+    const gpt = (type: DestinationType) =>
+      Object.fromEntries(
+        suggestionsFor([], items, type, 'stw-event-gpt26').map((entry) => [entry.item.sku, entry.qty]),
+      );
+    expect(gpt('finish')).toEqual({ 'COM-01': 1 });
+    expect(gpt('aid_station')['COM-01']).toBe(1);
+    expect(gpt('event_village')).toEqual({});
+    expect(asked([], 'finish')).toEqual({});
+  });
+
   it('finds nothing missing on the RCR26 cards, bar a cover for the recovery power board', () => {
     const types: Record<string, DestinationType> = {
       'Kalorama Event Village': 'event_village',

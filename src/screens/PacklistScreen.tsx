@@ -530,6 +530,7 @@ export default function PacklistScreen() {
           lines={lines ?? []}
           items={items}
           destinationType={destination?.type}
+          eventId={packlist.eventId}
         />
       ) : null}
 

@@ -17,19 +17,21 @@ export function PackRuleSuggestions({
   lines,
   items,
   destinationType,
+  eventId,
 }: {
   packlistId: string;
   lines: PacklistLine[];
   items: Map<string, Item>;
   destinationType: DestinationType | undefined;
+  eventId?: string;
 }) {
   const toast = useToast();
   const storageKey = `packRules:dismissed:${packlistId}`;
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => readDismissed(storageKey));
 
   const suggestions = useMemo(
-    () => suggestionsFor(lines, items, destinationType).filter((entry) => !dismissed.has(entry.key)),
-    [lines, items, destinationType, dismissed],
+    () => suggestionsFor(lines, items, destinationType, eventId).filter((entry) => !dismissed.has(entry.key)),
+    [lines, items, destinationType, eventId, dismissed],
   );
   if (!suggestions.length) return null;
 

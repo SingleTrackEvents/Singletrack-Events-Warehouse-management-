@@ -205,8 +205,8 @@ describe('the seeded season', () => {
     );
     const rosea = destinations.find((destination) => destination.name === 'Rosea Carpark');
     expect(rosea?.courseKm).toBe(59);
-    // 13 from the race page, and 4 more from the GPT 2025 pack list.
-    expect(destinations).toHaveLength(17);
+    // 13 from the race page, and 3 more from the GPT 2025 pack list.
+    expect(destinations).toHaveLength(16);
   });
 
   it('links Hounslow’s stations to its races, double passes included', async () => {
