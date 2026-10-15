@@ -23,9 +23,9 @@ import type { HounslowPacklist } from './hounslowSeed';
  * the sheet lists it at Halls Gap and Dunkeld, but it is one fence moved.
  *
  * Corrected with the crew after reading it: Sterling Place is the Dunkeld
- * finish, so its beds are on the Dunkeld list; two nap beds with two
- * blankets each at every aid station from Borough Huts on, except Yarram
- * Gap, which is a basic emergency station this year; no bain marie; two
+ * finish, so its beds are on the Dunkeld list; nap beds stay as the sheet
+ * has them, 3 with 5 blankets each, and none at Yarram Gap, which is a
+ * basic emergency station this year; no bain marie; two
  * kettles per gas stove; one set of merch racking and two arch pumps; and
  * 10 power boards at the Halls Gap village, not 20.
  *
@@ -289,8 +289,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Firewood', qty: 2 },
       { item: 'Kindling', qty: 1 },
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
-      { item: 'Camp Stretcher / Folding Bed', qty: 2 },
-      { item: 'Blankets / Space Blankets', qty: 4, note: '2 per bed' },
+      { item: 'Camp Stretcher / Folding Bed', qty: 3 },
+      { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
       { item: 'Starlink', qty: 1, note: 'Hired or owned' },
       { item: 'Festoon Lighting (10m lengths)', qty: 1 },
     ],
@@ -335,8 +335,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Spray Bottle / Backpack (Ice Water)', qty: 2 },
       { item: 'Toilet Paper', qty: 48 },
       { item: 'Portable Toilets', qty: 6, note: 'Hired. Sheet notes relocation' },
-      { item: 'Camp Stretcher / Folding Bed', qty: 2 },
-      { item: 'Blankets / Space Blankets', qty: 4, note: '2 per bed' },
+      { item: 'Camp Stretcher / Folding Bed', qty: 3 },
+      { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
       { item: 'Shoe Wash Kit', qty: 1 },
       { item: 'Starlink', qty: 1, note: 'Hired or owned' },
       { item: 'Festoon Lighting (10m lengths)', qty: 1 },
@@ -379,8 +379,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Spray Bottle / Backpack (Ice Water)', qty: 2 },
       { item: 'Toilet Paper', qty: 12 },
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
-      { item: 'Camp Stretcher / Folding Bed', qty: 2 },
-      { item: 'Blankets / Space Blankets', qty: 4, note: '2 per bed' },
+      { item: 'Camp Stretcher / Folding Bed', qty: 3 },
+      { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
       { item: 'Starlink', qty: 1, note: 'Hired or owned' },
     ],
   },
@@ -463,8 +463,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Spray Bottle / Backpack (Ice Water)', qty: 3, note: '2 spray bottle, 1 backpack' },
       { item: 'Toilet Paper', qty: 48 },
       { item: 'Portable Toilets', qty: 6, note: 'Hired. Sheet notes relocation' },
-      { item: 'Camp Stretcher / Folding Bed', qty: 2 },
-      { item: 'Blankets / Space Blankets', qty: 4, note: '2 per bed' },
+      { item: 'Camp Stretcher / Folding Bed', qty: 3 },
+      { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
       { item: 'Shoe Wash Kit', qty: 1 },
       { item: 'Ice Baths (DOPE)', qty: 1 },
       { item: 'Starlink', qty: 1, note: 'Hired or owned' },
@@ -510,8 +510,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'IBC Water Container (1000L)', qty: 1 },
       { item: 'IBC Pipe', qty: 1 },
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
-      { item: 'Camp Stretcher / Folding Bed', qty: 2 },
-      { item: 'Blankets / Space Blankets', qty: 4, note: '2 per bed' },
+      { item: 'Camp Stretcher / Folding Bed', qty: 3 },
+      { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
       { item: 'Ice Baths (DOPE)', qty: 1 },
       { item: 'Starlink', qty: 1, note: 'Hired or owned' },
     ],
@@ -552,8 +552,6 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Spray Bottle / Backpack (Ice Water)', qty: 2 },
       { item: 'Toilet Paper', qty: 12 },
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
-      { item: 'Camp Stretcher / Folding Bed', qty: 2 },
-      { item: 'Blankets / Space Blankets', qty: 4, note: '2 per bed' },
       { item: 'Starlink', qty: 1, note: 'Hired or owned' },
     ],
   },
@@ -592,7 +590,7 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Traffic Bollards and Bases', qty: 10 },
       { item: 'Ice Baths (DOPE)', qty: 1 },
       { item: 'Camp Stretcher / Folding Bed', qty: 5, note: 'Sterling Place on the sheet' },
-      { item: 'Blankets / Space Blankets', qty: 10, note: '2 per bed' },
+      { item: 'Blankets / Space Blankets', qty: 25, note: '5 per bed' },
       { item: 'Starlink', qty: 1, note: 'Hired or owned' },
       { item: 'Finish Gantry (Running Wild)', qty: 1 },
       { item: 'Toolbox', qty: 1, note: 'Finish gantry tool box' },

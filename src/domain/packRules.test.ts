@@ -81,8 +81,8 @@ describe('the pack rules', () => {
     });
   });
 
-  it('puts 2 blankets on every nap bed, and a pole and cone under every flag', () => {
-    expect(asked(list([['MED-02', 2]]), 'checkpoint')).toEqual({ 'MED-01': 4 });
+  it('puts 5 blankets on every nap bed, and a pole and cone under every flag', () => {
+    expect(asked(list([['MED-02', 2]]), 'checkpoint')).toEqual({ 'MED-01': 10 });
     expect(asked(list([['OTH-02', 25]]), 'start')).toEqual({ 'OTH-03': 25, 'CRS-90': 25 });
   });
 

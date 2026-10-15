@@ -145,8 +145,8 @@ export const PACK_RULES: PackRule[] = [
   {
     id: 'nap-bed',
     when: { sku: 'MED-02' }, // Camp Stretcher / Folding Bed
-    why: '2 blankets per nap bed',
-    add: [{ sku: 'MED-01', per: 2 }], // Blankets / Space Blankets
+    why: '5 blankets per nap bed',
+    add: [{ sku: 'MED-01', per: 5 }], // Blankets / Space Blankets
   },
   {
     id: 'flags',
