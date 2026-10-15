@@ -440,8 +440,24 @@ export async function seedStarterData(
        * the event screen only ever opens one. Where the seeded copy already
        * exists beside the crew's working list, it goes, as long as it is
        * still a draft with nothing packed or confirmed against it.
+       *
+       * A crew list with nothing on it is not a list anyone is keeping: it
+       * is what tapping the station, or building packlists from a template
+       * that had nothing for it, leaves behind before the seed arrives. A
+       * blank draft like that steps aside for the seeded one, so the
+       * station opens on the run sheet instead of an empty page.
        */
-      const working = await packlistForDestination(destinationId);
+      let working = await packlistForDestination(destinationId);
+      if (
+        working &&
+        working.id !== packlistId &&
+        working.status === 'draft' &&
+        !working.notes.trim() &&
+        !(await liveWhere(db.packlistLines, 'packlistId', working.id)).length
+      ) {
+        await softDelete(db.packlists, working.id);
+        working = await packlistForDestination(destinationId);
+      }
       if (working && working.id !== packlistId) {
         const seeded = await db.packlists.get(packlistId);
         if (seeded && !seeded.deletedAt && seeded.status === 'draft') {
