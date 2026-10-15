@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { db, getSettings } from './db';
-import { alive, create, softDelete, update } from './repo';
+import { alive, create, liveWhere, softDelete, update } from './repo';
+import { packlistForDestination } from '../domain/packlists';
 import { ensureSeeded, seedId, seedStarterData } from './seed';
 import { lineQtyByDay } from '../domain/consumption';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
@@ -891,6 +892,56 @@ describe('the GPT100 starting packlists', () => {
     // Not box contents, so still their own lines.
     expect(qty('Ratchet Straps')).toBe(8);
     expect(qty('Table Cloths')).toBe(2);
+  });
+});
+
+describe('a GPT100 station opened before its run sheet arrived', () => {
+  const station = 'Rosea Carpark';
+  const destinationId = seedId('dest', `gpt26-${station}`);
+
+  it('fills the station from the seed in place of the blank list', async () => {
+    await seedStarterData();
+    // As a phone holds it: the station tapped, an empty list made, before
+    // this build seeded the run sheets.
+    const seeded = seedId('plist', `gpt26-${station}`);
+    for (const line of alive(await db.packlistLines.toArray()).filter((entry) => entry.packlistId === seeded)) {
+      await db.packlistLines.delete(line.id);
+    }
+    await db.packlists.delete(seeded);
+    const blank = await create(db.packlists, {
+      eventId: seedId('event', 'gpt26'), destinationId, name: station, code: 'RC-BLNK',
+      status: 'draft', packedBy: '', packedAt: null, deliveredAt: null, receivedBy: '', notes: '',
+    });
+
+    await ensureSeeded();
+
+    expect((await db.packlists.get(blank.id))?.deletedAt).not.toBeNull();
+    const working = await packlistForDestination(destinationId);
+    expect(working?.id).toBe(seeded);
+    expect((await liveWhere(db.packlistLines, 'packlistId', seeded)).length).toBeGreaterThan(10);
+  });
+
+  it('leaves a crew list alone once it has anything on it', async () => {
+    await seedStarterData();
+    const seeded = seedId('plist', `gpt26-${station}`);
+    for (const line of alive(await db.packlistLines.toArray()).filter((entry) => entry.packlistId === seeded)) {
+      await db.packlistLines.delete(line.id);
+    }
+    await db.packlists.delete(seeded);
+    const own = await create(db.packlists, {
+      eventId: seedId('event', 'gpt26'), destinationId, name: station, code: 'RC-OWN1',
+      status: 'draft', packedBy: '', packedAt: null, deliveredAt: null, receivedBy: '', notes: '',
+    });
+    const tables = alive(await db.items.toArray()).find((item) => item.name === 'Trestle Tables')!;
+    await create(db.packlistLines, {
+      packlistId: own.id, itemId: tables.id, qtyRequired: 2, qtyPacked: 0, qtyReturned: 0,
+      mandatory: false, containerId: null, note: '', sort: 10,
+    });
+
+    await ensureSeeded();
+
+    expect((await packlistForDestination(destinationId))?.id).toBe(own.id);
+    expect(await db.packlists.get(seeded)).toBeUndefined();
   });
 });
 
