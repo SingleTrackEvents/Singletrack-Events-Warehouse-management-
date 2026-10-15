@@ -43,10 +43,10 @@ export const PACK_RULES: PackRule[] = [
   {
     id: 'marquee',
     when: { sku: 'STR-02' }, // Marquee - ST 3x3
-    why: '4 ratchet straps and 8 steel weights per marquee (2 per leg if windy), and 2 walls at an aid station',
+    why: '4 ratchet straps and 4 steel weights per marquee (1 per leg, 2 if windy), and 2 walls at an aid station',
     add: [
       { sku: 'ANC-01', per: 4 }, // Ratchet Straps
-      { sku: 'ANC-03', per: 8 }, // Weights - Steel 20kg
+      { sku: 'ANC-03', per: 4 }, // Weights - Steel 20kg, 1 per leg
       // The village sets its walls by layout, not by marquee count.
       { sku: 'STR-01', per: 2, notAt: ['event_village'] }, // Marquee Walls
     ],

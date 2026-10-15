@@ -46,11 +46,11 @@ describe('the pack rules', () => {
   });
 
   it('asks for straps, weights and walls with a marquee at an aid station', () => {
-    expect(asked(list([['STR-02', 3]]), 'checkpoint')).toEqual({ 'ANC-01': 12, 'ANC-03': 24, 'STR-01': 6 });
+    expect(asked(list([['STR-02', 3]]), 'checkpoint')).toEqual({ 'ANC-01': 12, 'ANC-03': 12, 'STR-01': 6 });
   });
 
   it('leaves the village walls to the crew', () => {
-    expect(asked(list([['STR-02', 15]]), 'event_village')).toEqual({ 'ANC-01': 60, 'ANC-03': 120 });
+    expect(asked(list([['STR-02', 15]]), 'event_village')).toEqual({ 'ANC-01': 60, 'ANC-03': 60 });
   });
 
   it('offers only the shortfall', () => {

@@ -34,7 +34,7 @@ order, the station sees unload order, and any line can be moved up or down for a
 that sets up differently. Stock never leaves the count twice.
 
 **Pack rules**: what usually travels with what, for every event. Put 3 marquees
-on an aid station list and the app offers 12 ratchet straps, 24 steel weights
+on an aid station list and the app offers 12 ratchet straps, 12 steel weights
 and 6 walls; a trestle table brings its table cloth, an IBC its pipe, a
 generator its RCD, jerry can, power board and leads, a gas stove its bottle, lighter
 and two kettles, a nap bed two blankets, a flag its pole and cone, every aid station
