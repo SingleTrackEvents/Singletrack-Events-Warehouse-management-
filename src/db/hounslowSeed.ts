@@ -24,6 +24,8 @@ export interface HounslowPackLine {
 export interface HounslowPacklist {
   /** Destination name, matching the hc26 entry in eventSeed.ts. */
   station: string;
+  /** Added to the list's notes, after the line saying where it came from. */
+  notes?: string;
   lines: HounslowPackLine[];
 }
 

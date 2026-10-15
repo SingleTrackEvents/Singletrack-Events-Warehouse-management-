@@ -9,6 +9,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
+import { GPT_PACKLISTS } from './gptSeed';
 import { RCR_CONSUMPTION, RCR_PACKLISTS } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import type { AccessType, DestinationType, SyncMeta, Template } from './types';
@@ -113,7 +114,7 @@ describe('the starting catalogue', () => {
     // Roller Coaster Run's four with its aid station cards, all as drafts;
     // nothing is marked packed and no stock has moved.
     const packlists = alive(await db.packlists.toArray());
-    expect(packlists).toHaveLength(HOUNSLOW_PACKLISTS.length + RCR_PACKLISTS.length);
+    expect(packlists).toHaveLength(HOUNSLOW_PACKLISTS.length + RCR_PACKLISTS.length + GPT_PACKLISTS.length);
     expect(packlists.every((packlist) => packlist.status === 'draft')).toBe(true);
     expect(await db.movements.count()).toBe(0);
   });
@@ -204,7 +205,8 @@ describe('the seeded season', () => {
     );
     const rosea = destinations.find((destination) => destination.name === 'Rosea Carpark');
     expect(rosea?.courseKm).toBe(59);
-    expect(destinations).toHaveLength(13);
+    // 13 from the race page, and 4 more from the GPT 2025 pack list.
+    expect(destinations).toHaveLength(17);
   });
 
   it('links Hounslow’s stations to its races, double passes included', async () => {
@@ -834,6 +836,61 @@ describe('the Roller Coaster Run starting packlists', () => {
       expect(new Set(spec.lines.map((line) => line.item)).size, spec.station).toBe(spec.lines.length);
       expect(lines.filter((line) => line.packlistId === packlist!.id), spec.station).toHaveLength(spec.lines.length);
     }
+  });
+});
+
+describe('the GPT100 starting packlists', () => {
+  it('names only items the catalogue actually has, once per list', () => {
+    const known = new Set([
+      ...CATALOGUE.flatMap((group) => group.items.map((item) => item.name)),
+      ...FOOD_CATALOGUE.map((item) => item.name),
+      ...EXTRA_ITEMS.map((item) => item.name),
+    ]);
+    const missing = GPT_PACKLISTS.flatMap((list) =>
+      list.lines.map((line) => line.item).filter((name) => !known.has(name)),
+    );
+    expect(missing).toEqual([]);
+    for (const list of GPT_PACKLISTS) {
+      expect(new Set(list.lines.map((line) => line.item)).size, list.station).toBe(list.lines.length);
+    }
+  });
+
+  it('puts every pack list column on a GPT100 site', async () => {
+    await seedStarterData();
+
+    const gpt = seedId('event', 'gpt26');
+    const destinations = alive(await db.destinations.toArray()).filter((entry) => entry.eventId === gpt);
+    const packlists = alive(await db.packlists.toArray()).filter((entry) => entry.eventId === gpt);
+    expect(packlists).toHaveLength(GPT_PACKLISTS.length);
+    for (const spec of GPT_PACKLISTS) {
+      const packlist = packlists.find((entry) => entry.name === spec.station);
+      expect(packlist, spec.station).toBeDefined();
+      expect(destinations.some((entry) => entry.id === packlist!.destinationId), spec.station).toBe(true);
+    }
+    // The sites the pack list adds slot in between the race page's own.
+    const order = destinations.sort((a, b) => a.sort - b.sort).map((entry) => entry.name);
+    expect(order.slice(0, 3)).toEqual(['Mt Zero Picnic Area', 'Coppermine', 'GAR Trailhead']);
+  });
+
+  it('packs the black box as one Aid Station Box, with only the extras beside it', async () => {
+    await seedStarterData();
+
+    const items = alive(await db.items.toArray());
+    const named = (name: string) => items.find((item) => item.name === name)!;
+    const kit = named('Primary Aid Station Kit (3 x Black Tubs)');
+    const rosea = seedId('plist', 'gpt26-Rosea Carpark');
+    const lines = alive(await db.packlistLines.toArray()).filter((line) => line.packlistId === rosea);
+    const qty = (name: string) => lines.find((line) => line.itemId === named(name).id)?.qtyRequired;
+
+    expect(qty(kit.name)).toBe(1);
+    // In the box at the sheet's quantity or less, so no line of their own.
+    expect(qty('Knives')).toBeUndefined();
+    expect(qty('Tongs')).toBeUndefined();
+    // The sheet wants 4 sunscreens; the box holds 1.
+    expect(qty('Sunscreen')).toBe(3);
+    // Not box contents, so still their own lines.
+    expect(qty('Ratchet Straps')).toBe(8);
+    expect(qty('Table Cloths')).toBe(2);
   });
 });
 

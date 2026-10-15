@@ -6,6 +6,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
+import { GPT_PACKLISTS } from './gptSeed';
 import { RCR_CONSUMPTION, RCR_PACKLISTS, RCR_RETIRED } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import { makeCode } from '../domain/codes';
@@ -361,7 +362,7 @@ export async function seedStarterData(
         openTime: '06:00',
         closeTime: '16:00',
         notes: destination.notes ?? '',
-        sort: (index + 1) * 10,
+        sort: destination.sort ?? (index + 1) * 10,
         ...(raceVisits.length ? { raceVisits } : {}),
       });
     }
@@ -402,6 +403,12 @@ export async function seedStarterData(
       retired: RCR_RETIRED,
       notes: 'Starting quantities from the RCR26 Aid Station Cards v2.1.',
     },
+    {
+      code: 'gpt26',
+      lists: GPT_PACKLISTS,
+      retired: [],
+      notes: 'Starting quantities from the GPT 2025 pack list (draft).',
+    },
   ];
   /*
    * A newer version of the cards reaches a list already seeded from an older
@@ -417,13 +424,14 @@ export async function seedStarterData(
     if (!anyRevision && line.rev !== 1) return undefined;
     return line;
   };
-  for (const { code, lists, retired, notes } of startingLists) {
+  for (const { code, lists, retired, notes: source } of startingLists) {
     for (const gone of retired) {
       const packlistId = seedId('plist', `${code}-${gone.station}`);
       const lineId = seedId('pline', `${code}-${gone.station}-${gone.item}`);
       if (await untouched(packlistId, lineId)) await softDelete(db.packlistLines, lineId);
     }
     for (const list of lists) {
+      const notes = list.notes ? `${source} ${list.notes}` : source;
       const packlistId = seedId('plist', `${code}-${list.station}`);
       const destinationId = seedId('dest', `${code}-${list.station}`);
       /*
