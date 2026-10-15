@@ -23,6 +23,12 @@ export interface SeedDestination {
   notes?: string;
   /** Race names from this event's `races`, with how many times each passes. */
   visits?: Array<[race: string, passes: number]>;
+  /**
+   * Position in the event's list. Defaults to the entry's place in the array;
+   * set for a site added after the others were seeded, so it slots in
+   * between them on phones that already have the rest.
+   */
+  sort?: number;
 }
 
 export interface SeedEvent {
@@ -247,6 +253,27 @@ export const EVENT_SEED: SeedEvent[] = [
         type: 'finish',
         courseKm: 162,
         notes: 'Full access, 46 min from Halls Gap. Course closes Sun 10:00 am.',
+      },
+      // Sites the GPT 2025 pack list carries that the race page does not.
+      {
+        name: 'Coppermine',
+        type: 'water_drop',
+        notes: 'Drinks and ice, no food. Between Mt Zero and GAR Trailhead on the pack list.',
+        sort: 15,
+      },
+      {
+        name: 'Mt Difficult Ridgeline',
+        type: 'water_drop',
+        access: 'foot',
+        accessNotes: 'Hiked in.',
+        notes: 'Drinks only. Between GAR Trailhead and Mt Difficult Rd on the pack list.',
+        sort: 25,
+      },
+      {
+        name: 'Halls Gap Event Village',
+        type: 'event_village',
+        notes: 'Event hub, registration and merch.',
+        sort: 45,
       },
     ],
   },

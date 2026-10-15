@@ -29,9 +29,11 @@ export interface Companion {
 export interface PackRule {
   id: string;
   /** What sets the rule off: an item on the list, or the kind of destination. */
-  when: { sku: string } | { destination: DestinationType };
+  when: { sku: string } | { destination: DestinationType | DestinationType[] };
   /** Destination types the whole rule stays out of. */
   notAt?: DestinationType[];
+  /** Event ids the rule is kept to. Absent is every event. */
+  events?: string[];
   /** Said back to the crew alongside the suggestion. */
   why: string;
   add: Companion[];
@@ -41,10 +43,10 @@ export const PACK_RULES: PackRule[] = [
   {
     id: 'marquee',
     when: { sku: 'STR-02' }, // Marquee - ST 3x3
-    why: '4 ratchet straps and 8 steel weights per marquee (2 per leg if windy), and 2 walls at an aid station',
+    why: '4 ratchet straps and 4 steel weights per marquee (1 per leg, 2 if windy), and 2 walls at an aid station',
     add: [
       { sku: 'ANC-01', per: 4 }, // Ratchet Straps
-      { sku: 'ANC-03', per: 8 }, // Weights - Steel 20kg
+      { sku: 'ANC-03', per: 4 }, // Weights - Steel 20kg, 1 per leg
       // The village sets its walls by layout, not by marquee count.
       { sku: 'STR-01', per: 2, notAt: ['event_village'] }, // Marquee Walls
     ],
@@ -125,6 +127,45 @@ export const PACK_RULES: PackRule[] = [
     ],
   },
   {
+    id: 'gas-stove',
+    when: { sku: 'CKG-02' }, // Gas Stove
+    why: 'a gas stove needs its bottle, a lighter and 2 stove-top kettles',
+    add: [
+      { sku: 'CKG-01', per: 1 }, // Gas Bottle
+      { sku: 'CKG-90', per: 1 }, // Lighter
+      { sku: 'CKG-03', per: 2 }, // Kettle - Stove Top
+    ],
+  },
+  {
+    id: 'gas-heater',
+    when: { sku: 'CKG-07' }, // Gas Heater
+    why: 'a gas heater needs its own bottle, on top of the stove\'s',
+    add: [{ sku: 'CKG-01', per: 1 }], // Gas Bottle
+  },
+  {
+    id: 'nap-bed',
+    when: { sku: 'MED-02' }, // Camp Stretcher / Folding Bed
+    why: '5 blankets per nap bed',
+    add: [{ sku: 'MED-01', per: 5 }], // Blankets / Space Blankets
+  },
+  {
+    id: 'flags',
+    when: { sku: 'OTH-02' }, // International / Participant / Presentation Flags
+    why: 'every flag goes up on a pole, with a soccer cone for a base',
+    add: [
+      { sku: 'OTH-03', per: 1 }, // Flag Poles
+      { sku: 'CRS-90', per: 1 }, // Soccer Cones
+    ],
+  },
+  {
+    id: 'gpt-starlink',
+    when: { destination: ['aid_station', 'start', 'finish'] },
+    // The seeded GPT100 2026 event. No phone reception on most of that course.
+    events: ['stw-event-gpt26'],
+    why: 'every GPT100 station runs a Starlink',
+    add: [{ sku: 'COM-01', atLeast: 1 }], // Starlink
+  },
+  {
     id: 'aid-station-basics',
     when: { destination: 'aid_station' },
     why: 'every staffed aid station',
@@ -165,6 +206,7 @@ export function suggestionsFor(
   lines: PacklistLine[],
   items: Map<string, Item>,
   destinationType: DestinationType | undefined,
+  eventId?: string,
   rules: PackRule[] = PACK_RULES,
 ): Suggestion[] {
   const bySku = new Map<string, Item>();
@@ -189,14 +231,16 @@ export function suggestionsFor(
     const why = new Map<string, string[]>();
     for (const rule of rules) {
       if (!applies(rule.notAt)) continue;
+      if (rule.events && (!eventId || !rule.events.includes(eventId))) continue;
       let trigger: number;
       let label: string;
       if ('sku' in rule.when) {
         trigger = count(rule.when.sku);
         label = `${trigger} × ${bySku.get(rule.when.sku)?.name ?? rule.when.sku}`;
       } else {
-        trigger = destinationType === rule.when.destination ? 1 : 0;
-        label = 'Aid station';
+        const types = ([] as DestinationType[]).concat(rule.when.destination);
+        trigger = destinationType && types.includes(destinationType) ? 1 : 0;
+        label = types.length === 1 && types[0] === 'aid_station' ? 'Aid station' : 'This station';
       }
       if (trigger <= 0) continue;
       for (const companion of rule.add) {
