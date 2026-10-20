@@ -8,9 +8,11 @@ import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import type {
   Access,
+  AccessGrant,
   ChangeSet,
   CreateInviteInput,
   Invite,
+  Member,
   Passkey,
   PullResult,
   PushResult,
@@ -666,17 +668,96 @@ export class SupabaseBackend implements SyncBackend {
       p_invite: inviteId,
       p_expires_at: expiresAt,
     });
-    if (error) {
-      if (/set_invite_expiry/i.test(error.message)) {
-        throw new SyncError(
-          'The server is not ready to change end dates yet. Re-run supabase/schema.sql in the Supabase SQL editor.',
-          'invalid',
-        );
-      }
-      throw toSyncError(error.message);
-    }
+    if (error) throw notReady(error.message, 'set_invite_expiry');
     return toInvite(data as InviteRow);
   }
+
+  async updateInvite(
+    _session: Session,
+    inviteId: string,
+    grant: AccessGrant & { label: string },
+  ): Promise<Invite> {
+    const { data, error } = await this.client.rpc('update_invite', {
+      p_invite: inviteId,
+      p_role: grant.role,
+      p_event: grant.scope.eventId,
+      p_destination: grant.scope.destinationId,
+      p_access: grant.access,
+      p_label: grant.label,
+    });
+    if (error) throw notReady(error.message, 'update_invite');
+    return toInvite(data as InviteRow);
+  }
+
+  async listMembers(): Promise<Member[]> {
+    const { data, error } = await this.client.rpc('list_members');
+    if (error) throw notReady(error.message, 'list_members');
+    return (data as MemberRow[]).map(toMember);
+  }
+
+  async updateMember(
+    _session: Session,
+    userId: string,
+    grant: AccessGrant & { expiresAt: string | null },
+  ): Promise<Member> {
+    const { data, error } = await this.client.rpc('update_member', {
+      p_user: userId,
+      p_role: grant.role,
+      p_event: grant.scope.eventId,
+      p_destination: grant.scope.destinationId,
+      p_access: grant.access,
+      p_expires_at: grant.expiresAt,
+    });
+    if (error) throw notReady(error.message, 'update_member');
+    // The membership row has no email; the list it came from does.
+    return toMember({ ...(data as MemberRow), email: null });
+  }
+
+  async removeMember(_session: Session, userId: string): Promise<void> {
+    const { error } = await this.client.rpc('remove_member', { p_user: userId });
+    if (error) throw notReady(error.message, 'remove_member');
+  }
+}
+
+/**
+ * A function the server does not have yet means the schema has not been
+ * re-run since this version, which deserves saying in those words.
+ */
+function notReady(message: string, fn: string): SyncError {
+  if (message.includes(fn)) {
+    return new SyncError(
+      'The server needs updating for this. Re-run supabase/schema.sql in the Supabase SQL editor.',
+      'invalid',
+    );
+  }
+  return toSyncError(message);
+}
+
+interface MemberRow {
+  user_id: string;
+  role: Role;
+  event_id: string | null;
+  destination_id: string | null;
+  display_name: string;
+  expires_at: string | null;
+  access: Access[] | null;
+  invite_id: string | null;
+  created_at: string;
+  email: string | null;
+}
+
+function toMember(row: MemberRow): Member {
+  return {
+    userId: row.user_id,
+    displayName: row.display_name || displayNameFromEmail(row.email ?? '') || 'No name',
+    email: row.email,
+    role: row.role,
+    scope: { eventId: row.event_id, destinationId: row.destination_id },
+    access: row.access ?? null,
+    expiresAt: row.expires_at,
+    inviteId: row.invite_id ?? null,
+    createdAt: row.created_at,
+  };
 }
 
 /**

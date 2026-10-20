@@ -155,8 +155,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       void sync();
     };
 
+    /*
+     * Ask the server who this is again on the way back to the foreground. An
+     * admin can now change or remove someone's access from the People list,
+     * and that should reach their phone the next time they pick it up, not
+     * the next time the app happens to be closed and reopened. Offline, the
+     * backend answers with the remembered account, so nothing changes.
+     */
+    const recheck = () => {
+      void backend.currentSession().then((next) => {
+        if (!sameAccount(session, next)) adopt(next);
+      });
+    };
+
     const onVisible = () => {
-      if (document.visibilityState === 'visible') attempt();
+      if (document.visibilityState !== 'visible') return;
+      attempt();
+      recheck();
     };
 
     const first = setTimeout(attempt, 800);
@@ -170,7 +185,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('online', attempt);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [backend, session, sync]);
+  }, [backend, session, sync, adopt]);
 
   const value = useMemo<SessionContextValue>(
     () => ({
@@ -182,4 +197,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}
+
+/** True when nothing an admin can change about the account has changed. */
+function sameAccount(a: Session | null, b: Session | null): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.userId === b.userId &&
+    a.displayName === b.displayName &&
+    a.role === b.role &&
+    a.scope.eventId === b.scope.eventId &&
+    a.scope.destinationId === b.scope.destinationId &&
+    a.expiresAt === b.expiresAt &&
+    (a.access ?? []).join(',') === (b.access ?? []).join(',') &&
+    Boolean(a.access) === Boolean(b.access)
+  );
 }

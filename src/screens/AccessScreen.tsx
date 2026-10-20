@@ -9,9 +9,12 @@ import { useSession } from '../hooks/sessionContext';
 import { SUPABASE_CONFIGURED } from '../sync';
 import { clearAuthRedirect, getAuthRedirect } from '../sync/authRedirect';
 import { useDestinations, useEvents } from '../hooks/useDb';
-import { describeRole, normaliseAccess, presetAccess } from '../sync/permissions';
-import { ACCESS_OPTIONS, ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
-import type { Access, Invite, Passkey as PasskeyType, Role, Scope } from '../sync/types';
+import { describeRole } from '../sync/permissions';
+import { ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
+import type { Invite, Member, Passkey as PasskeyType, Scope } from '../sync/types';
+import { AccessEditor } from '../components/AccessEditor';
+import { draftReady, grantOf } from '../domain/accessDraft';
+import { useAccessDraft, useAutoLabel } from '../hooks/useAccessDraft';
 import { formatDateTime, plural } from '../domain/format';
 import { joinUrl } from '../domain/codes';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -289,6 +292,9 @@ export default function AccessScreen() {
           )}
         </section>
       ) : null}
+
+      {/* Bumped with the invites, since changing an invite changes its people. */}
+      {session.role === 'admin' ? <PeopleSection version={inviteVersion} /> : null}
 
       <button type="button" className="btn btn-ghost btn-block mt-4" onClick={() => setSigningOut(true)}>
         Sign out
@@ -731,6 +737,7 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
   const [revoking, setRevoking] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [extending, setExtending] = useState(false);
+  const [editingAccess, setEditingAccess] = useState(false);
   const url = joinUrl(invite.token);
   const expired = Boolean(invite.expiresAt && new Date(invite.expiresAt) <= new Date());
   const dead = expired || Boolean(invite.revokedAt);
@@ -766,21 +773,23 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
             {describeRole(invite.role, invite.scope, invite.access ?? null).join(' · ') ||
               'See their packlists'}
           </p>
-          {!invite.revokedAt ? (
-            <div className="btn-row mt-2">
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExtending(true)}>
-                {expired ? 'Extend' : 'Change end date'}
-              </button>
-              {!expired ? (
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRevoking(true)}>
-                  Revoke
-                </button>
-              ) : null}
-            </div>
-          ) : null}
         </div>
       </div>
-
+      {!invite.revokedAt ? (
+        <div className="row-flex mt-3" style={{ flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditingAccess(true)}>
+              Edit access
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExtending(true)}>
+              {expired ? 'Extend' : 'Change end date'}
+            </button>
+            {!expired ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRevoking(true)}>
+                Revoke
+              </button>
+            ) : null}
+          </div>
+        ) : null}
     </div>
     </SwipeToDelete>
 
@@ -789,6 +798,10 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
       transformed ancestor traps a fixed sheet inside the card instead of
       letting it cover the screen.
     */}
+      {editingAccess ? (
+        <EditInviteSheet invite={invite} onClose={() => setEditingAccess(false)} onChanged={onChanged} />
+      ) : null}
+
       {extending ? (
         <ExpirySheet invite={invite} onClose={() => setExtending(false)} onChanged={onChanged} />
       ) : null}
@@ -1059,45 +1072,16 @@ function ExpirySheet({
 function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { backend, session } = useSession();
   const toast = useToast();
-  const events = useEvents();
-  const [eventId, setEventId] = useState('');
-  const destinations = useDestinations(eventId || undefined);
-  const [destinationId, setDestinationId] = useState('');
-  const [role, setRole] = useState<Role>('volunteer');
-  const [picked, setPicked] = useState<Access[]>(() => presetAccess('volunteer'));
-  const [touched, setTouched] = useState(false);
+  const [draft, setDraft] = useAccessDraft(null);
   const [expiryDay, setExpiryDay] = useState(() => daysFromNow(4));
   const [noExpiry, setNoExpiry] = useState(false);
   const [label, setLabel] = useState('');
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [today] = useState(() => localDate(new Date()));
+  const autoLabel = useAutoLabel(draft);
 
-  const scope: Scope = {
-    eventId: eventId || null,
-    destinationId: eventId ? destinationId || null : null,
-  };
-
-  // Ticks follow the role and the event until someone changes one by hand.
-  const follow = (nextRole: Role, nextScope: Scope) => {
-    if (!touched) setPicked(presetAccess(nextRole, nextScope));
-  };
-
-  const access = normaliseAccess(role, scope, picked);
-  const destination = destinations?.find((entry) => entry.id === destinationId);
-  const event = events?.find((entry) => entry.id === eventId);
-  const autoLabel = destination
-    ? `${destination.name}${role === 'volunteer' ? '' : ` · ${ROLE_LABELS[role]}`}`
-    : `${ROLE_LABELS[role]} · ${event ? event.name : 'all events'}`;
-
-  const needsDestination = role === 'volunteer';
-  // Only crew can be let loose on the whole warehouse; a driver or a volunteer
-  // without an event would have nothing to be shown.
-  const needsEvent = role !== 'crew';
-  const expiry = noExpiry ? null : endOfDay(expiryDay);
-  const expiryValid = expiryOk(expiryDay, noExpiry, today);
-  const ready =
-    (!needsEvent || eventId) && (!needsDestination || destinationId) && expiryValid && !busy;
+  const ready = draftReady(draft) && expiryOk(expiryDay, noExpiry, today) && !busy;
 
   const create = async () => {
     if (!backend || !session) return;
@@ -1105,11 +1089,9 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
     setError(undefined);
     try {
       await backend.createInvite(session, {
-        role,
-        scope,
+        ...grantOf(draft),
         label: label.trim() || autoLabel,
-        expiresAt: expiry ? expiry.toISOString() : null,
-        access,
+        expiresAt: noExpiry ? null : endOfDay(expiryDay).toISOString(),
       });
       toast('Invite created');
       onCreated();
@@ -1136,136 +1118,7 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
       }
     >
       <div className="stack">
-        <Field label="Who is it for?">
-          {() => (
-            <div className="chip-row" role="group" aria-label="Who is it for?">
-              {(['volunteer', 'driver', 'crew'] as Role[]).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className="chip"
-                  aria-pressed={role === option}
-                  onClick={() => {
-                    setRole(option);
-                    const nextScope = {
-                      ...scope,
-                      destinationId: option === 'volunteer' ? scope.destinationId : null,
-                    };
-                    if (option !== 'volunteer') setDestinationId('');
-                    follow(option, nextScope);
-                  }}
-                >
-                  {ROLE_LABELS[option]}
-                </button>
-              ))}
-            </div>
-          )}
-        </Field>
-        <p className="tiny muted">{ROLE_BLURBS[role]}</p>
-
-        <Field
-          label="Event"
-          hint={
-            role === 'crew' && !eventId
-              ? 'Every event, plus the warehouse: stock, stocktakes and templates.'
-              : undefined
-          }
-        >
-          {(id) => (
-            <select
-              id={id}
-              className="select"
-              value={eventId}
-              onChange={(e) => {
-                setEventId(e.target.value);
-                setDestinationId('');
-                follow(role, { eventId: e.target.value || null, destinationId: null });
-              }}
-            >
-              <option value="">{needsEvent ? 'Choose an event' : 'All events (warehouse crew)'}</option>
-              {(events ?? []).map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </Field>
-
-        {eventId ? (
-          <Field
-            label="Aid station"
-            hint={
-              needsDestination
-                ? 'They see this station’s packlist and no other.'
-                : 'Leave on every station unless they only work one.'
-            }
-          >
-            {(id) => (
-              <select
-                id={id}
-                className="select"
-                value={destinationId}
-                onChange={(e) => setDestinationId(e.target.value)}
-              >
-                <option value="">{needsDestination ? 'Choose a station' : 'Every station'}</option>
-                {(destinations ?? []).map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {entry.name}
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-        ) : null}
-
-        <div>
-          <div className="spread">
-            <span className="small strong">What they can do</span>
-            {access ? <Pill tone="accent">Custom</Pill> : null}
-          </div>
-          <p className="tiny muted mt-1">
-            They always see the packlists for {destination ? destination.name : event ? event.name : 'every event'}.
-          </p>
-          {ACCESS_OPTIONS.map((option) => {
-            const off = Boolean(option.warehouse && eventId);
-            return (
-              <label key={option.key} className="checkbox" style={{ opacity: off ? 0.45 : 1 }}>
-                <input
-                  type="checkbox"
-                  disabled={off}
-                  checked={!off && picked.includes(option.key)}
-                  onChange={(changed) => {
-                    setTouched(true);
-                    setPicked((current) =>
-                      changed.target.checked
-                        ? [...current, option.key]
-                        : current.filter((key) => key !== option.key),
-                    );
-                  }}
-                />
-                <span>
-                  <span className="strong">{option.label}</span>
-                  <span className="tiny muted" style={{ display: 'block' }}>
-                    {off ? 'Only on an invite for all events.' : option.hint}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
-          {access ? (
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm mt-2"
-              onClick={() => {
-                setTouched(false);
-                setPicked(presetAccess(role, scope));
-              }}
-            >
-              Back to the usual for {ROLE_LABELS[role].toLowerCase()}s
-            </button>
-          ) : null}
-        </div>
+        <AccessEditor draft={draft} onChange={setDraft} />
 
         <ExpiryField
           day={expiryDay}
@@ -1287,12 +1140,312 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
           )}
         </Field>
 
-        {error ? (
-          <p className="small" style={{ color: 'var(--danger)' }}>
-            {error}
-          </p>
-        ) : null}
+        <ErrorLine error={error} />
       </div>
+    </Sheet>
+  );
+}
+
+/**
+ * Change what an existing invite gives. Everyone still following it changes
+ * too, so a station captain who needs the food plan on Saturday morning gets
+ * it without scanning anything new.
+ */
+function EditInviteSheet({
+  invite,
+  onClose,
+  onChanged,
+}: {
+  invite: Invite;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { backend, session } = useSession();
+  const toast = useToast();
+  const [draft, setDraft] = useAccessDraft({
+    role: invite.role,
+    scope: invite.scope,
+    access: invite.access ?? null,
+  });
+  const [label, setLabel] = useState(invite.label);
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const autoLabel = useAutoLabel(draft);
+
+  const save = async () => {
+    if (!backend || !session) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await backend.updateInvite(session, invite.id, { ...grantOf(draft), label: label.trim() || autoLabel });
+      toast('Invite updated');
+      onChanged();
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not change the invite.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet
+      title="Edit access"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || !draftReady(draft)}
+            onClick={() => void save()}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="small muted">
+          {invite.usedCount
+            ? `The ${plural(invite.usedCount, 'person', 'people')} who joined with it change too, unless you have since changed them on their own under People.`
+            : 'Nobody has joined with it yet.'}
+        </p>
+        <AccessEditor draft={draft} onChange={setDraft} />
+        <Field label="Name on the invite">
+          {(id) => (
+            <input
+              id={id}
+              className="input"
+              value={label}
+              placeholder={autoLabel}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+          )}
+        </Field>
+        <ErrorLine error={error} />
+      </div>
+    </Sheet>
+  );
+}
+
+function ErrorLine({ error }: { error?: string }) {
+  if (!error) return null;
+  return (
+    <p className="small" style={{ color: 'var(--danger)' }}>
+      {error}
+    </p>
+  );
+}
+
+/**
+ * Everyone with access, for an admin.
+ *
+ * The invites say what each QR gives; this says who is actually in, which is
+ * the question on race weekend: who has the Aid 3 list, and can Sam see the
+ * food plan yet. Tapping someone changes them on their own or takes their
+ * access away.
+ */
+function PeopleSection({ version }: { version: number }) {
+  const { backend, session } = useSession();
+  const [members, setMembers] = useState<Member[]>();
+  const [error, setError] = useState<string>();
+  const [editing, setEditing] = useState<Member>();
+  const [reloads, setReloads] = useState(0);
+  const refresh = useCallback(() => setReloads((n) => n + 1), []);
+
+  useEffect(() => {
+    if (!backend || !session) return;
+    let cancelled = false;
+    backend
+      .listMembers(session)
+      .then((found) => {
+        if (!cancelled) {
+          setMembers(found);
+          setError(undefined);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load the people list.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backend, session, reloads, version]);
+
+  return (
+    <section className="section">
+      <div className="section-head">
+        <h2>People</h2>
+        {members ? <span className="small muted">{members.length}</span> : null}
+      </div>
+      {error ? (
+        <div className="card card-pad small" style={{ color: 'var(--danger)' }}>
+          {error}
+        </div>
+      ) : !members ? (
+        <div className="card card-pad center muted small">Loading…</div>
+      ) : (
+        <div className="list">
+          {members.map((member) => {
+            const me = member.userId === session?.userId;
+            const lapsed = Boolean(member.expiresAt && new Date(member.expiresAt) <= new Date());
+            return (
+              <button
+                key={member.userId}
+                type="button"
+                className="row"
+                disabled={me}
+                onClick={() => setEditing(member)}
+              >
+                <span className="row-body">
+                  <span className="row-title truncate">
+                    {member.displayName}
+                    {me ? ' (you)' : ''}
+                  </span>
+                  <span className="row-sub">
+                    {member.email ?? 'Joined by invite'}
+                    {member.expiresAt
+                      ? ` · ${lapsed ? 'ended' : 'ends'} ${formatDateTime(member.expiresAt)}`
+                      : ''}
+                  </span>
+                  <ScopeLine scope={member.scope} />
+                </span>
+                <Pill tone={lapsed ? 'danger' : member.role === 'admin' ? 'ok' : member.access ? 'accent' : 'info'}>
+                  {lapsed ? 'Ended' : `${ROLE_LABELS[member.role]}${member.access ? ' · custom' : ''}`}
+                </Pill>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {editing ? (
+        <MemberSheet member={editing} onClose={() => setEditing(undefined)} onChanged={refresh} />
+      ) : null}
+    </section>
+  );
+}
+
+/** Change one person, or take their access away. */
+function MemberSheet({
+  member,
+  onClose,
+  onChanged,
+}: {
+  member: Member;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { backend, session } = useSession();
+  const toast = useToast();
+  const [draft, setDraft] = useAccessDraft({ role: member.role, scope: member.scope, access: member.access });
+  const [today] = useState(() => localDate(new Date()));
+  const [expiryDay, setExpiryDay] = useState(() => {
+    const current = member.expiresAt ? localDate(new Date(member.expiresAt)) : '';
+    return current && current >= today ? current : daysFromNow(7);
+  });
+  const [noExpiry, setNoExpiry] = useState(!member.expiresAt);
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const admin = draft.role === 'admin';
+
+  const save = async () => {
+    if (!backend || !session) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await backend.updateMember(session, member.userId, {
+        ...grantOf(draft),
+        expiresAt: admin || noExpiry ? null : endOfDay(expiryDay).toISOString(),
+      });
+      toast(`${member.displayName} updated`);
+      onChanged();
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not change their access.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet
+      title={member.displayName}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || !draftReady(draft) || (!admin && !expiryOk(expiryDay, noExpiry, today))}
+            onClick={() => void save()}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="small muted">
+          {member.email ?? 'Joined by invite'}.{' '}
+          {member.inviteId
+            ? 'Saving here changes just them: later changes to their invite will leave them alone.'
+            : 'Their phone picks up a change the next time the app is opened with signal.'}
+        </p>
+        <AccessEditor
+          draft={draft}
+          onChange={setDraft}
+          roles={['volunteer', 'driver', 'crew', 'admin']}
+          roleLabel="Role"
+        />
+        {admin ? (
+          <p className="tiny" style={{ color: 'var(--warn)' }}>
+            An admin can change everything, including who else has access.
+          </p>
+        ) : (
+          <ExpiryField
+            day={expiryDay}
+            noExpiry={noExpiry}
+            today={today}
+            onDay={setExpiryDay}
+            onNoExpiry={setNoExpiry}
+          />
+        )}
+        <ErrorLine error={error} />
+        <button type="button" className="btn btn-ghost btn-block" onClick={() => setRemoving(true)}>
+          Remove their access
+        </button>
+      </div>
+
+      {removing ? (
+        <ConfirmSheet
+          title={`Remove ${member.displayName}?`}
+          body="They are signed out the next time their phone checks in, and nothing they recorded is lost. To let them back in, send them an invite."
+          confirmLabel="Remove"
+          tone="danger"
+          onCancel={() => setRemoving(false)}
+          onConfirm={() => {
+            if (!backend || !session) return;
+            void backend
+              .removeMember(session, member.userId)
+              .then(() => {
+                toast(`${member.displayName} removed`);
+                onChanged();
+                onClose();
+              })
+              .catch((cause: unknown) => {
+                setRemoving(false);
+                setError(cause instanceof Error ? cause.message : 'Could not remove them.');
+              });
+          }}
+        />
+      ) : null}
     </Sheet>
   );
 }

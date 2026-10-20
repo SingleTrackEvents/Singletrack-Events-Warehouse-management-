@@ -7,9 +7,11 @@ import { shouldReplace } from '../domain/backup';
 import { cleanDisplayName, displayNameFromEmail } from './names';
 import { inScope, readableTableFor, readsReference, writableFields, writableTables } from './permissions';
 import type {
+  AccessGrant,
   ChangeSet,
   CreateInviteInput,
   Invite,
+  Member,
   PullResult,
   PushResult,
   Role,
@@ -17,7 +19,7 @@ import type {
   SignInChallenge,
   SyncBackend,
 } from './types';
-import { SyncError, inviteExpiry } from './types';
+import { SyncError, UNSCOPED, inviteExpiry } from './types';
 
 /**
  * A stand-in server.
@@ -44,6 +46,14 @@ interface StoredRow {
 
 interface StoredSession extends Session {
   key: string;
+  /** Changed on its own from the People list, so no longer follows its invite. */
+  detached?: boolean;
+}
+
+/** The token of the invite a guest session came from, if it still follows one. */
+function inviteTokenOf(entry: StoredSession): string | null {
+  if (entry.detached || !entry.key.startsWith('invite:')) return null;
+  return entry.key.split(':')[1] ?? null;
 }
 
 /**
@@ -85,6 +95,21 @@ class MockServerDb extends Dexie {
 
 const server = new MockServerDb();
 const SESSION_KEY = 'stw.sync.mock.session';
+
+function toMember(entry: StoredSession, invites: Invite[]): Member {
+  const token = inviteTokenOf(entry);
+  return {
+    userId: entry.userId,
+    displayName: entry.displayName,
+    email: entry.email,
+    role: entry.role,
+    scope: entry.scope,
+    access: entry.access ?? null,
+    expiresAt: entry.expiresAt,
+    inviteId: token ? invites.find((invite) => invite.token === token)?.id ?? null : null,
+    createdAt: '',
+  };
+}
 
 /** Monotonic sequence, standing in for a database transaction id. */
 async function nextSeq(count: number): Promise<number> {
@@ -141,8 +166,21 @@ export class MockBackend implements SyncBackend {
   // would hide the one thing worth testing about passkeys.
   readonly supportsPasskeys = false;
 
+  /**
+   * The phone's session, refreshed from the server's copy so a change made
+   * from the People list reaches it, and a removal signs it out.
+   */
   async currentSession(): Promise<Session | null> {
-    return loadSession();
+    const local = loadSession();
+    if (!local) return null;
+    const stored = await server.sessions.get(local.token);
+    if (!stored) {
+      saveSession(null);
+      return null;
+    }
+    const { key: _key, detached: _detached, ...fresh } = stored;
+    saveSession(fresh);
+    return fresh;
   }
 
   async signInWithEmail(email: string): Promise<SignInChallenge> {
@@ -365,6 +403,85 @@ export class MockBackend implements SyncBackend {
     const current = loadSession();
     if (current?.token.startsWith(`invite:${invite.token}:`)) saveSession({ ...current, expiresAt });
     return changed;
+  }
+
+  async updateInvite(
+    session: Session,
+    inviteId: string,
+    grant: AccessGrant & { label: string },
+  ): Promise<Invite> {
+    this.assertLive(session);
+    if (session.role !== 'admin') {
+      throw new SyncError('Only an admin can change what an invite gives.', 'permission');
+    }
+    const invite = await server.invites.get(inviteId);
+    if (!invite || invite.revokedAt) {
+      throw new SyncError('That one is gone or has been revoked.', 'invalid');
+    }
+    const changed: Invite = {
+      ...invite,
+      role: grant.role,
+      scope: grant.scope,
+      access: grant.access,
+      label: grant.label.trim() || invite.label,
+    };
+    await server.invites.put(changed);
+    const following = await server.sessions
+      .filter((entry) => inviteTokenOf(entry) === invite.token)
+      .toArray();
+    await server.sessions.bulkPut(
+      following.map((entry) => ({ ...entry, role: grant.role, scope: grant.scope, access: grant.access })),
+    );
+    return changed;
+  }
+
+  async listMembers(session: Session): Promise<Member[]> {
+    this.assertLive(session);
+    if (session.role !== 'admin') {
+      throw new SyncError('Only an admin can see who has access.', 'permission');
+    }
+    const invites = await server.invites.toArray();
+    return (await server.sessions.toArray())
+      .map((entry) => toMember(entry, invites))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }
+
+  async updateMember(
+    session: Session,
+    userId: string,
+    grant: AccessGrant & { expiresAt: string | null },
+  ): Promise<Member> {
+    this.assertLive(session);
+    if (session.role !== 'admin') {
+      throw new SyncError('Only an admin can change someone’s access.', 'permission');
+    }
+    if (userId === session.userId) {
+      throw new SyncError('You cannot change your own access. Ask another admin.', 'permission');
+    }
+    const entries = await server.sessions.where('userId').equals(userId).toArray();
+    if (!entries.length) throw new SyncError('That person no longer has access.', 'invalid');
+    const admin = grant.role === 'admin';
+    const changed = entries.map((entry) => ({
+      ...entry,
+      role: grant.role,
+      scope: admin ? UNSCOPED : grant.scope,
+      access: admin ? null : grant.access,
+      expiresAt: admin ? null : grant.expiresAt,
+      detached: true,
+    }));
+    await server.sessions.bulkPut(changed);
+    return toMember(changed[0], await server.invites.toArray());
+  }
+
+  async removeMember(session: Session, userId: string): Promise<void> {
+    this.assertLive(session);
+    if (session.role !== 'admin') {
+      throw new SyncError('Only an admin can remove someone.', 'permission');
+    }
+    if (userId === session.userId) {
+      throw new SyncError('You cannot remove yourself. Ask another admin.', 'permission');
+    }
+    await server.sessions.where('userId').equals(userId).delete();
   }
 
   /* --------------------------------------------------------------- guards -- */

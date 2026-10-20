@@ -421,6 +421,42 @@ describe('invites and volunteer access', () => {
     expect(tom.expiresAt).toBe(later);
   });
 
+  it('moves the people following an invite when it changes, and not one changed on their own', async () => {
+    const admin = await adminSession();
+    const invite = await backend.createInvite(admin, {
+      role: 'volunteer', scope: { eventId: 'e1', destinationId: 'd1' }, label: 'Aid 1',
+    });
+    const tom = await backend.joinWithInvite(invite.token, 'Tom');
+    const sam = await backend.joinWithInvite(invite.token, 'Sam');
+    await backend.updateMember(admin, sam.userId, {
+      role: 'driver', scope: { eventId: 'e1', destinationId: null }, access: null, expiresAt: null,
+    });
+
+    await backend.updateInvite(admin, invite.id, {
+      role: 'volunteer', scope: { eventId: 'e1', destinationId: 'd2' }, access: ['receive', 'food'], label: '',
+    });
+
+    const members = await backend.listMembers(admin);
+    const byName = (name: string) => members.find((member) => member.displayName === name)!;
+    expect(byName('Tom')).toMatchObject({
+      scope: { eventId: 'e1', destinationId: 'd2' }, access: ['receive', 'food'], inviteId: invite.id,
+    });
+    expect(byName('Sam')).toMatchObject({ role: 'driver', inviteId: null });
+    expect(tom.userId).not.toBe(sam.userId);
+  });
+
+  it('signs a removed person out, and will not let an admin remove themselves', async () => {
+    const admin = await adminSession();
+    const invite = await backend.createInvite(admin, {
+      role: 'volunteer', scope: { eventId: 'e1', destinationId: 'd1' }, label: 'Aid 1',
+    });
+    const tom = await backend.joinWithInvite(invite.token, 'Tom');
+    await backend.removeMember(admin, tom.userId);
+
+    expect(await backend.currentSession()).toBeNull();
+    await expect(backend.removeMember(admin, admin.userId)).rejects.toThrow(/yourself/i);
+  });
+
   it('takes a deleted invite off the list and out of use', async () => {
     const admin = await adminSession();
     const invite = await backend.createInvite(admin, {
