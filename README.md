@@ -257,6 +257,27 @@ confirm-only view — every line shows what the warehouse says is coming, and th
 only number they can move is how many turned up. Typing another screen's address
 sends them back to their station.
 
+### Custom access on an invite
+
+The role on an invite is a starting point. Picking Volunteer, Driver or Crew
+ticks the boxes that role has always had, and the boxes can then be changed for
+that one invite: a volunteer who should also see the food plan, a crew lead who
+should pack but not touch transport, a station captain pinned to one aid station
+who can also edit the station details. Seeing the packlists the invite's event
+and station admit is never a box, since an account without it would have nothing
+to open. Edit stock, Run stocktakes and Edit templates belong to the warehouse,
+so they only take effect on an invite for all events.
+
+An invite left at its role's boxes is stored as the plain role, so ordinary
+invites behave exactly as before. A customised one carries its list of boxes
+onto the membership of everyone who joins with it, and the server's read, write
+and field rules follow the boxes (`access_reads`, `access_writes` and
+`access_fields` in `supabase/schema.sql`). Admins are never narrowed.
+
+The expiry is picked on a calendar, with shortcuts for this Sunday, a week and a
+month, or no end date at all. The invite stops working at the end of that day,
+and so does the access of everyone who joined with it.
+
 The rules are enforced in three places, because two of them are only courtesies:
 the screens hide what a role cannot do, `update()` in `src/db/repo.ts` drops a
 forbidden change before it can reach this device's database, and
@@ -270,9 +291,14 @@ policies allow is allowed to anyone who cares to try.
 ### Two ways in
 
 Core crew sign in with an email link. Volunteers scan an invite QR at their aid
-station and type their name — no inbox, no password, nothing to remember, because
+station and type their name: no inbox, no password, nothing to remember, because
 race morning is the worst possible time to make someone set up an account. Invites
-are scoped to one destination and expire after the weekend.
+expire on the day the admin picks.
+
+On an iPhone the app added to the home screen keeps its storage apart from
+Safari's, so someone who joined in the browser opens the app to a sign-in page.
+That page leads with "Scan invite QR": the camera opens, they scan the same card,
+type their name and they are in. Typing the code is still there underneath.
 
 Signing out keeps the phone connected and shows the sign-in page, and nothing
 else, until someone signs in again. Work already on the phone stays there. Only

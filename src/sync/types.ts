@@ -55,6 +55,57 @@ export interface Scope {
 
 export const UNSCOPED: Scope = { eventId: null, destinationId: null };
 
+/* ----------------------------------------------------------------- access -- */
+
+/**
+ * The tick boxes on an invite.
+ *
+ * A role is a preset: volunteer, driver and crew each start with a sensible set
+ * of these ticked. An admin can then tick more or fewer for one invite, say a
+ * volunteer who should also see the food plan, and the invite carries the list.
+ * Seeing the packlists the scope admits is never a box: an account that could
+ * not see them would have nothing to open.
+ *
+ * Mirrored by access_* in supabase/schema.sql, which is the real boundary.
+ */
+export type Access =
+  | 'receive'
+  | 'pack'
+  | 'deliver'
+  | 'loads'
+  | 'catalogue'
+  | 'stock'
+  | 'food'
+  | 'events'
+  | 'shopping'
+  | 'stocktakes'
+  | 'templates';
+
+export interface AccessOption {
+  key: Access;
+  label: string;
+  hint: string;
+  /** Warehouse-wide: only takes effect on an invite given every event. */
+  warehouse?: boolean;
+}
+
+/** In the order the invite sheet lists them: the station first, the warehouse last. */
+export const ACCESS_OPTIONS: AccessOption[] = [
+  { key: 'receive', label: 'Record what arrived', hint: 'Tick off deliveries and returns at the station.' },
+  { key: 'pack', label: 'Pack and edit packlists', hint: 'Tick lines packed, add and change lines.' },
+  { key: 'deliver', label: 'Transport: confirm deliveries', hint: 'See the loads and sign them off on the road.' },
+  { key: 'loads', label: 'Transport: plan loads', hint: 'Build and change the truck and van loads.' },
+  { key: 'catalogue', label: 'See the stock catalogue', hint: 'Items, categories and templates, read only.' },
+  { key: 'food', label: 'Food plan', hint: 'Race projections and aid station food quantities.' },
+  { key: 'events', label: 'Edit event and stations', hint: 'Names, dates, access notes and station details.' },
+  { key: 'shopping', label: 'Shopping list', hint: 'Add to it, tick it off, book it into stock.' },
+  { key: 'stock', label: 'Edit stock', hint: 'Add items and adjust quantities.', warehouse: true },
+  { key: 'stocktakes', label: 'Run stocktakes', hint: 'Count the shed and correct the numbers.', warehouse: true },
+  { key: 'templates', label: 'Edit templates', hint: 'The reusable lists packlists are built from.', warehouse: true },
+];
+
+export const ACCESS_KEYS: Access[] = ACCESS_OPTIONS.map((option) => option.key);
+
 /* --------------------------------------------------------------- sessions -- */
 
 export interface Session {
@@ -72,6 +123,11 @@ export interface Session {
   expiresAt: string | null;
   /** True when the account was created by scanning an invite. */
   guest: boolean;
+  /**
+   * The ticked boxes from a customised invite. Null or absent means the role's
+   * own rules, which is every account that was not customised.
+   */
+  access?: Access[] | null;
 }
 
 /** Returned when a magic link has been sent but not yet followed. */
@@ -104,6 +160,8 @@ export interface Invite {
   revokedAt: string | null;
   /** How many people have joined with it. */
   usedCount: number;
+  /** Ticked boxes when customised; null means the role's own rules. */
+  access?: Access[] | null;
 }
 
 export interface CreateInviteInput {
@@ -112,6 +170,23 @@ export interface CreateInviteInput {
   label: string;
   /** Days until the invite stops working. Defaults to a long weekend. */
   expiresInDays?: number;
+  /**
+   * An exact ISO expiry, chosen on a calendar, or null for none. Wins over
+   * expiresInDays when given.
+   */
+  expiresAt?: string | null;
+  /** Ticked boxes; leave out or null for the role's own rules. */
+  access?: Access[] | null;
+}
+
+/**
+ * When a new invite stops working: the date picked on the calendar, or never
+ * when "no expiry" was chosen, or a long weekend from now.
+ */
+export function inviteExpiry(input: CreateInviteInput, now = Date.now()): string | null {
+  if (input.expiresAt !== undefined) return input.expiresAt;
+  const days = input.expiresInDays ?? 4;
+  return new Date(now + days * 86_400_000).toISOString();
 }
 
 /* ------------------------------------------------------------ change sets -- */

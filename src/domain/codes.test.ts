@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { makeCode, normaliseCode, parseScan, prefixFor, randomSuffix } from './codes';
+import { joinUrl, makeCode, normaliseCode, parseInviteScan, parseScan, prefixFor, randomSuffix } from './codes';
 
 describe('short codes', () => {
   it('builds a prefix from initials and any number in the name', () => {
@@ -49,5 +49,20 @@ describe('parsing a scan', () => {
 
   it('normalises typed input for comparison', () => {
     expect(normaliseCode(' as3 - 7k2m ')).toBe('AS3-7K2M');
+  });
+});
+
+describe('parseInviteScan', () => {
+  it('reads the code out of the join link on an invite QR', () => {
+    expect(parseInviteScan(joinUrl('J7QM-4KTP', 'https://example.com/app/'))).toBe('J7QM-4KTP');
+  });
+
+  it('takes a bare code off the printed card, however it was typed', () => {
+    expect(parseInviteScan(' j7qm-4ktp ')).toBe('J7QM-4KTP');
+  });
+
+  it('turns away a packlist crate code', () => {
+    expect(parseInviteScan('https://example.com/#/scan/AS3-7K2M')).toBeNull();
+    expect(parseInviteScan('9300601000000')).toBeNull();
   });
 });

@@ -74,3 +74,22 @@ export function joinUrl(token: string, origin?: string): string {
     origin ?? (typeof location !== 'undefined' ? `${location.origin}${location.pathname}` : '');
   return `${base}#/join/${encodeURIComponent(token)}`;
 }
+
+/**
+ * Pull an invite code out of a scanned QR. Accepts the join link the invite QR
+ * carries ("https://.../#/join/J7QM-4KTP") or the bare code off the printed
+ * card. Anything else, a packlist crate say, is not an invite.
+ */
+export function parseInviteScan(raw: string): string | null {
+  const value = raw.trim();
+  if (!value) return null;
+  const tail = value.includes('/join/') ? value.split('/join/').pop()! : value;
+  let decoded = tail.split(/[?#]/)[0];
+  try {
+    decoded = decodeURIComponent(decoded);
+  } catch {
+    // A mangled escape is still worth trying as typed.
+  }
+  const code = normaliseCode(decoded);
+  return /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code) ? code : null;
+}

@@ -7,6 +7,7 @@ import { cleanDisplayName, displayNameFromEmail } from './names';
 import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import type {
+  Access,
   ChangeSet,
   CreateInviteInput,
   Invite,
@@ -19,7 +20,7 @@ import type {
   SignInChallenge,
   SyncBackend,
 } from './types';
-import { SyncError } from './types';
+import { SyncError, inviteExpiry } from './types';
 
 /**
  * Supabase adapter.
@@ -63,6 +64,8 @@ interface MembershipRow {
   destination_id: string | null;
   display_name: string;
   expires_at: string | null;
+  /** Absent on a server whose schema predates invite tick boxes. */
+  access?: Access[] | null;
 }
 
 /** How many rows to send per request. */
@@ -202,6 +205,7 @@ function sessionFrom(user: User, membership: MembershipRow, token: string): Sess
     token,
     expiresAt: membership.expires_at,
     guest: user.is_anonymous ?? !user.email,
+    access: membership.access ?? null,
   };
 }
 
@@ -591,7 +595,6 @@ export class SupabaseBackend implements SyncBackend {
   }
 
   async createInvite(_session: Session, input: CreateInviteInput): Promise<Invite> {
-    const days = input.expiresInDays ?? 4;
     const { data, error } = await this.client
       .from('invites')
       .insert({
@@ -600,11 +603,22 @@ export class SupabaseBackend implements SyncBackend {
         event_id: input.scope.eventId,
         destination_id: input.scope.destinationId,
         label: input.label,
-        expires_at: new Date(Date.now() + days * 86_400_000).toISOString(),
+        expires_at: inviteExpiry(input),
+        // Sent only when customised, so a server that has not had the schema
+        // re-run since tick boxes arrived still takes an ordinary invite.
+        ...(input.access ? { access: input.access } : {}),
       })
       .select()
       .single();
-    if (error) throw toSyncError(error.message);
+    if (error) {
+      if (input.access && /access/i.test(error.message)) {
+        throw new SyncError(
+          'The server is not ready for custom access yet. Re-run supabase/schema.sql in the Supabase SQL editor, or keep the boxes as the role sets them.',
+          'invalid',
+        );
+      }
+      throw toSyncError(error.message);
+    }
     return toInvite(data as InviteRow);
   }
 
@@ -666,6 +680,7 @@ interface InviteRow {
   expires_at: string | null;
   revoked_at: string | null;
   used_count: number;
+  access?: Access[] | null;
 }
 
 function toInvite(row: InviteRow): Invite {
@@ -680,6 +695,7 @@ function toInvite(row: InviteRow): Invite {
     expiresAt: row.expires_at,
     revokedAt: row.revoked_at,
     usedCount: row.used_count,
+    access: row.access ?? null,
   };
 }
 

@@ -800,3 +800,127 @@ describe('the shopping list', () => {
     await db.close();
   });
 });
+
+describe('an invite with its own tick boxes', () => {
+  const CUSTOM = '77777777-7777-4777-8777-777777777777';
+
+  /** A volunteer for aid 3 who was also given the food plan and the catalogue. */
+  async function customised(access: string[]) {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await db.query('select public.push_records($1::jsonb)', [
+      JSON.stringify([
+        wireRow({ table_name: 'races', id: 'race-50k', event_id: EVENT }),
+        wireRow({ table_name: 'loads', id: 'load-1', event_id: EVENT }),
+        wireRow({
+          table_name: 'packlistLines', id: 'line-1',
+          event_id: EVENT, destination_id: MY_STATION,
+          data: { id: 'line-1', qtyRequired: 4, qtyPacked: 4, qtyReceived: 0, note: '' },
+        }),
+      ]),
+    ]);
+    await db.query(
+      `insert into public.invites (token, role, event_id, destination_id, label, access)
+       values ('CCCC-DDDD', 'volunteer', $1, $2, 'Aid 3 plus', $3)`,
+      [EVENT, MY_STATION, access],
+    );
+    await db.addUser(CUSTOM, null);
+    await db.actAs(CUSTOM);
+    await db.query(`select public.redeem_invite('CCCC-DDDD', 'Sam Lee')`);
+    return db;
+  }
+
+  const tables = async (db: Awaited<ReturnType<typeof seeded>>) =>
+    (await db.query<{ table_name: string }>(
+      'select distinct table_name from public.records order by table_name',
+    )).rows.map((row) => row.table_name);
+
+  it('carries the boxes onto the membership', async () => {
+    const db = await customised(['receive', 'food']);
+    const { rows } = await db.query<{ access: string[] }>(
+      `select access from public.memberships where user_id = $1`,
+      [CUSTOM],
+    );
+    expect(rows[0].access).toEqual(['receive', 'food']);
+    await db.close();
+  });
+
+  it('reads what the boxes give and nothing more', async () => {
+    const db = await customised(['receive', 'food', 'catalogue']);
+    await db.enforceRls();
+    expect(await tables(db)).toEqual([
+      'events', 'items', 'packlistLines', 'packlists', 'races', 'templates',
+    ]);
+    await db.close();
+  });
+
+  it('still keeps to its aid station', async () => {
+    const db = await customised(['receive', 'food']);
+    await db.enforceRls();
+    const { rows } = await db.query<{ id: string }>(
+      `select id from public.records where table_name = 'packlists'`,
+    );
+    expect(rows.map((row) => row.id)).toEqual(['pl-mine']);
+    await db.close();
+  });
+
+  it('writes the food plan when ticked, and is refused loads when not', async () => {
+    const db = await customised(['receive', 'food']);
+    const { rows } = await db.query<{ push_records: Record<string, number> }>(
+      'select public.push_records($1::jsonb) as push_records',
+      [JSON.stringify([
+        wireRow({ table_name: 'races', id: 'race-50k', rev: 9, event_id: EVENT }),
+        wireRow({ table_name: 'loads', id: 'load-1', rev: 9, event_id: EVENT }),
+      ])],
+    );
+    expect(rows[0].push_records).toMatchObject({ accepted: 1, refused: 1 });
+    await db.close();
+  });
+
+  it('may rewrite a whole line once packing is ticked', async () => {
+    const db = await customised(['pack']);
+    await db.query('select public.push_records($1::jsonb)', [
+      JSON.stringify([wireRow({
+        table_name: 'packlistLines', id: 'line-1', rev: 9,
+        updated_at: '2026-05-01T00:00:00.000Z',
+        event_id: EVENT, destination_id: MY_STATION,
+        data: { id: 'line-1', qtyRequired: 6, qtyPacked: 6, qtyReceived: 0, note: '' },
+      })]),
+    ]);
+    const { rows } = await db.query<{ data: Record<string, unknown> }>(
+      `select data from public.records where id = 'line-1'`,
+    );
+    expect(rows[0].data).toMatchObject({ qtyRequired: 6, qtyPacked: 6 });
+    await db.close();
+  });
+
+  it('only records arrivals on a line without packing', async () => {
+    const db = await customised(['receive']);
+    await db.query('select public.push_records($1::jsonb)', [
+      JSON.stringify([wireRow({
+        table_name: 'packlistLines', id: 'line-1', rev: 9,
+        updated_at: '2026-05-01T00:00:00.000Z',
+        event_id: EVENT, destination_id: MY_STATION,
+        data: { id: 'line-1', qtyRequired: 9, qtyPacked: 9, qtyReceived: 3, note: '' },
+      })]),
+    ]);
+    const { rows } = await db.query<{ data: Record<string, unknown> }>(
+      `select data from public.records where id = 'line-1'`,
+    );
+    expect(rows[0].data).toMatchObject({ qtyRequired: 4, qtyPacked: 4, qtyReceived: 3 });
+    await db.close();
+  });
+
+  it('cannot reach the warehouse from one event, whatever is ticked', async () => {
+    const db = await customised(['stock', 'stocktakes']);
+    const { rows } = await db.query<{ push_records: Record<string, number> }>(
+      'select public.push_records($1::jsonb) as push_records',
+      [JSON.stringify([
+        wireRow({ table_name: 'items', id: 'item-1', rev: 9 }),
+        wireRow({ table_name: 'stocktakes', id: 'count-1', rev: 9 }),
+      ])],
+    );
+    expect(rows[0].push_records).toMatchObject({ accepted: 0, refused: 2 });
+    await db.close();
+  });
+});
