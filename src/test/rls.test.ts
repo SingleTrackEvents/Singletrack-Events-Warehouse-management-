@@ -924,3 +924,89 @@ describe('an invite with its own tick boxes', () => {
     await db.close();
   });
 });
+
+describe('changing an invite’s end date', () => {
+  const ended = (db: Awaited<ReturnType<typeof seeded>>, user: string) =>
+    db.query<{ expires_at: string | null }>(
+      'select expires_at from public.memberships where user_id = $1',
+      [user],
+    );
+
+  it('moves the invite and everyone who joined with it', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const { rows: [invite] } = await db.query<{ id: string }>(
+      `select id from public.invites where token = 'AAAA-BBBB'`,
+    );
+    await db.query(`select public.set_invite_expiry($1, '2030-01-05T12:59:00Z')`, [invite.id]);
+    const { rows } = await ended(db, VOLUNTEER);
+    expect(new Date(rows[0].expires_at!).toISOString()).toBe('2030-01-05T12:59:00.000Z');
+    await db.close();
+  });
+
+  it('brings back access that had already run out', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const { rows: [invite] } = await db.query<{ id: string }>(
+      `select id from public.invites where token = 'AAAA-BBBB'`,
+    );
+    await db.query(`select public.set_invite_expiry($1, now() - interval '1 day')`, [invite.id]);
+    await db.actAs(VOLUNTEER);
+    expect((await db.query<{ r: string | null }>('select public.my_role() as r')).rows[0].r).toBeNull();
+    await db.actAs(ADMIN);
+    await db.query(`select public.set_invite_expiry($1, null)`, [invite.id]);
+    await db.actAs(VOLUNTEER);
+    expect((await db.query<{ r: string | null }>('select public.my_role() as r')).rows[0].r).toBe('volunteer');
+    await db.close();
+  });
+
+  it('is refused to anyone but an admin', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const { rows: [invite] } = await db.query<{ id: string }>(
+      `select id from public.invites where token = 'AAAA-BBBB'`,
+    );
+    await db.actAs(VOLUNTEER);
+    await expect(
+      db.query(`select public.set_invite_expiry($1, null)`, [invite.id]),
+    ).rejects.toThrow(/only an admin/i);
+    await db.close();
+  });
+
+  it('leaves a revoked invite revoked', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const { rows: [invite] } = await db.query<{ id: string }>(
+      `update public.invites set revoked_at = now() where token = 'AAAA-BBBB' returning id`,
+    );
+    await expect(
+      db.query(`select public.set_invite_expiry($1, null)`, [invite.id]),
+    ).rejects.toThrow(/revoked/i);
+    await db.close();
+  });
+});
+
+describe('changing the end date of an invite redeemed before the link existed', () => {
+  it('still finds the people who joined with it', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const end = '2026-11-01T12:59:00Z';
+    const { rows: [invite] } = await db.query<{ id: string }>(
+      `update public.invites set expires_at = $1 where token = 'AAAA-BBBB' returning id`,
+      [end],
+    );
+    // As an older deployment left it: the right end date, but no invite named.
+    await db.query(
+      `update public.memberships set invite_id = null, expires_at = $2 where user_id = $1`,
+      [VOLUNTEER, end],
+    );
+    await db.query(`select public.set_invite_expiry($1, '2030-01-05T12:59:00Z')`, [invite.id]);
+    const { rows } = await db.query<{ expires_at: string; invite_id: string }>(
+      'select expires_at, invite_id from public.memberships where user_id = $1',
+      [VOLUNTEER],
+    );
+    expect(new Date(rows[0].expires_at).toISOString()).toBe('2030-01-05T12:59:00.000Z');
+    expect(rows[0].invite_id).toBe(invite.id);
+    await db.close();
+  });
+});

@@ -346,6 +346,27 @@ export class MockBackend implements SyncBackend {
     await server.invites.delete(inviteId);
   }
 
+  async setInviteExpiry(session: Session, inviteId: string, expiresAt: string | null): Promise<Invite> {
+    this.assertLive(session);
+    if (session.role !== 'admin') {
+      throw new SyncError('Only an admin can change an end date.', 'permission');
+    }
+    const invite = await server.invites.get(inviteId);
+    if (!invite || invite.revokedAt) {
+      throw new SyncError('That one is gone or has been revoked.', 'invalid');
+    }
+    const changed = { ...invite, expiresAt };
+    await server.invites.put(changed);
+    // Guest sessions carry their invite's token, which is how they are found.
+    const joined = await server.sessions
+      .filter((entry) => entry.key.startsWith(`invite:${invite.token}:`))
+      .toArray();
+    await server.sessions.bulkPut(joined.map((entry) => ({ ...entry, expiresAt })));
+    const current = loadSession();
+    if (current?.token.startsWith(`invite:${invite.token}:`)) saveSession({ ...current, expiresAt });
+    return changed;
+  }
+
   /* --------------------------------------------------------------- guards -- */
 
   private assertLive(session: Session): void {

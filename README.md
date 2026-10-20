@@ -278,6 +278,14 @@ The expiry is picked on a calendar, with shortcuts for this Sunday, a week and a
 month, or no end date at all. The invite stops working at the end of that day,
 and so does the access of everyone who joined with it.
 
+"Change end date" on an invite card moves it later, sooner or off entirely, and
+takes everyone who joined with it along, including anyone whose access had
+already run out. An expired invite shows "Extend" instead, so a weekend that ran
+long does not mean printing new QRs. A revoked invite stays revoked.
+`set_invite_expiry()` in `supabase/schema.sql` does it on the server: each
+membership now remembers the invite it came from, and people who joined before
+that are matched by the role, scope and end date the invite gave them.
+
 The rules are enforced in three places, because two of them are only courtesies:
 the screens hide what a role cannot do, `update()` in `src/db/repo.ts` drops a
 forbidden change before it can reach this device's database, and

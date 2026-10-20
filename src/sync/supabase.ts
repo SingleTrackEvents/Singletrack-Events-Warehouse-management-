@@ -655,6 +655,28 @@ export class SupabaseBackend implements SyncBackend {
     if (error) throw toSyncError(error.message);
     if (!data?.length) throw new SyncError(noRowTouched('delete'), 'permission');
   }
+
+  /**
+   * Through a function rather than an update on the table: the memberships of
+   * the people who joined are admin-writable row by row, but finding them
+   * means following the invite they came from, which only the server knows.
+   */
+  async setInviteExpiry(_session: Session, inviteId: string, expiresAt: string | null): Promise<Invite> {
+    const { data, error } = await this.client.rpc('set_invite_expiry', {
+      p_invite: inviteId,
+      p_expires_at: expiresAt,
+    });
+    if (error) {
+      if (/set_invite_expiry/i.test(error.message)) {
+        throw new SyncError(
+          'The server is not ready to change end dates yet. Re-run supabase/schema.sql in the Supabase SQL editor.',
+          'invalid',
+        );
+      }
+      throw toSyncError(error.message);
+    }
+    return toInvite(data as InviteRow);
+  }
 }
 
 /**

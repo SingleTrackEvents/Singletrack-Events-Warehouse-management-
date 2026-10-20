@@ -730,11 +730,13 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
   const toast = useToast();
   const [revoking, setRevoking] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [extending, setExtending] = useState(false);
   const url = joinUrl(invite.token);
   const expired = Boolean(invite.expiresAt && new Date(invite.expiresAt) <= new Date());
   const dead = expired || Boolean(invite.revokedAt);
 
   return (
+    <>
     <SwipeToDelete onDelete={() => setDeleting(true)}>
     <div className="card card-pad">
       <div className="row-flex" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
@@ -764,13 +766,32 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
             {describeRole(invite.role, invite.scope, invite.access ?? null).join(' · ') ||
               'See their packlists'}
           </p>
-          {!dead ? (
-            <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={() => setRevoking(true)}>
-              Revoke
-            </button>
+          {!invite.revokedAt ? (
+            <div className="btn-row mt-2">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExtending(true)}>
+                {expired ? 'Extend' : 'Change end date'}
+              </button>
+              {!expired ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRevoking(true)}>
+                  Revoke
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
+
+    </div>
+    </SwipeToDelete>
+
+    {/*
+      Outside the swipe wrapper: it moves the card with a transform, and a
+      transformed ancestor traps a fixed sheet inside the card instead of
+      letting it cover the screen.
+    */}
+      {extending ? (
+        <ExpirySheet invite={invite} onClose={() => setExtending(false)} onChanged={onChanged} />
+      ) : null}
 
       {revoking ? (
         <ConfirmSheet
@@ -833,8 +854,7 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
           }}
         />
       ) : null}
-    </div>
-    </SwipeToDelete>
+    </>
   );
 }
 
@@ -862,6 +882,169 @@ function comingSunday(): string {
   const date = new Date();
   date.setDate(date.getDate() + ((7 - date.getDay()) % 7));
   return localDate(date);
+}
+
+/**
+ * When an invite stops: a day on the calendar, a shortcut, or no end at all.
+ * Shared by the new invite sheet and "Change end date".
+ */
+function ExpiryField({
+  day,
+  noExpiry,
+  today,
+  onDay,
+  onNoExpiry,
+}: {
+  day: string;
+  noExpiry: boolean;
+  today: string;
+  onDay: (day: string) => void;
+  onNoExpiry: (noExpiry: boolean) => void;
+}) {
+  const quick = [
+    { label: 'This Sunday', day: comingSunday() },
+    { label: '1 week', day: daysFromNow(7) },
+    { label: '1 month', day: daysFromNow(30) },
+  ];
+  return (
+    <>
+      <Field
+        label="Stops working"
+        hint={
+          noExpiry
+            ? 'Their access lasts until you revoke the invite and sign them out.'
+            : 'At the end of that day. Anyone who joined loses access then too.'
+        }
+      >
+        {(id) => (
+          <>
+            <input
+              id={id}
+              className="input"
+              type="date"
+              min={today}
+              disabled={noExpiry}
+              value={day}
+              onChange={(e) => onDay(e.target.value)}
+            />
+            <div className="chip-row mt-2" role="group" aria-label="Quick dates">
+              {quick.map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  className="chip"
+                  aria-pressed={!noExpiry && day === option.day}
+                  onClick={() => {
+                    onNoExpiry(false);
+                    onDay(option.day);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="chip"
+                aria-pressed={noExpiry}
+                onClick={() => onNoExpiry(!noExpiry)}
+              >
+                No end date
+              </button>
+            </div>
+          </>
+        )}
+      </Field>
+      {!expiryOk(day, noExpiry, today) ? (
+        <p className="tiny" style={{ color: 'var(--danger)' }}>
+          Pick a day from today on.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** Date strings in this shape sort the same way the days do. */
+function expiryOk(day: string, noExpiry: boolean, today: string): boolean {
+  return noExpiry || (Boolean(day) && day >= today);
+}
+
+/**
+ * Move an invite's end date: the weekend ran long, or a crew member is staying
+ * on for the next race. Everyone who joined with it moves too, including anyone
+ * whose access had already run out, so nobody has to scan a new QR.
+ */
+function ExpirySheet({
+  invite,
+  onClose,
+  onChanged,
+}: {
+  invite: Invite;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { backend, session } = useSession();
+  const toast = useToast();
+  const [today] = useState(() => localDate(new Date()));
+  const [day, setDay] = useState(() => {
+    // Start from the current end date while it is still ahead, else a week out.
+    const current = invite.expiresAt ? localDate(new Date(invite.expiresAt)) : '';
+    return current && current >= today ? current : daysFromNow(7);
+  });
+  const [noExpiry, setNoExpiry] = useState(!invite.expiresAt);
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (!backend || !session) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await backend.setInviteExpiry(session, invite.id, noExpiry ? null : endOfDay(day).toISOString());
+      toast(noExpiry ? 'End date removed' : `Now ends ${formatDateTime(endOfDay(day).toISOString())}`);
+      onChanged();
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not change the end date.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet
+      title={invite.label}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || !expiryOk(day, noExpiry, today)}
+            onClick={() => void save()}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="small muted">
+          {invite.expiresAt ? `Currently ends ${formatDateTime(invite.expiresAt)}.` : 'Currently has no end date.'}{' '}
+          {invite.usedCount
+            ? `The ${plural(invite.usedCount, 'person', 'people')} who joined with it move to the new date too.`
+            : 'Nobody has joined with it yet.'}
+        </p>
+        <ExpiryField day={day} noExpiry={noExpiry} today={today} onDay={setDay} onNoExpiry={setNoExpiry} />
+        {error ? (
+          <p className="small" style={{ color: 'var(--danger)' }}>
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Sheet>
+  );
 }
 
 /**
@@ -912,8 +1095,7 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
   // without an event would have nothing to be shown.
   const needsEvent = role !== 'crew';
   const expiry = noExpiry ? null : endOfDay(expiryDay);
-  // Date strings in this shape sort the same way the days do.
-  const expiryValid = noExpiry || (Boolean(expiryDay) && expiryDay >= today);
+  const expiryValid = expiryOk(expiryDay, noExpiry, today);
   const ready =
     (!needsEvent || eventId) && (!needsDestination || destinationId) && expiryValid && !busy;
 
@@ -1085,61 +1267,13 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
           ) : null}
         </div>
 
-        <Field
-          label="Stops working"
-          hint={
-            noExpiry
-              ? 'Their access lasts until you revoke the invite and sign them out.'
-              : `At the end of that day. Anyone who joined loses access then too.`
-          }
-        >
-          {(id) => (
-            <>
-              <input
-                id={id}
-                className="input"
-                type="date"
-                min={today}
-                disabled={noExpiry}
-                value={expiryDay}
-                onChange={(e) => setExpiryDay(e.target.value)}
-              />
-              <div className="chip-row mt-2" role="group" aria-label="Quick dates">
-                {[
-                  { label: 'This Sunday', day: comingSunday() },
-                  { label: '1 week', day: daysFromNow(7) },
-                  { label: '1 month', day: daysFromNow(30) },
-                ].map((quick) => (
-                  <button
-                    key={quick.label}
-                    type="button"
-                    className="chip"
-                    aria-pressed={!noExpiry && expiryDay === quick.day}
-                    onClick={() => {
-                      setNoExpiry(false);
-                      setExpiryDay(quick.day);
-                    }}
-                  >
-                    {quick.label}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="chip"
-                  aria-pressed={noExpiry}
-                  onClick={() => setNoExpiry((current) => !current)}
-                >
-                  No end date
-                </button>
-              </div>
-            </>
-          )}
-        </Field>
-        {!expiryValid ? (
-          <p className="tiny" style={{ color: 'var(--danger)' }}>
-            Pick a day from today on.
-          </p>
-        ) : null}
+        <ExpiryField
+          day={expiryDay}
+          noExpiry={noExpiry}
+          today={today}
+          onDay={setExpiryDay}
+          onNoExpiry={setNoExpiry}
+        />
 
         <Field label="Name on the invite" hint="So you can tell the invites apart. Optional.">
           {(id) => (

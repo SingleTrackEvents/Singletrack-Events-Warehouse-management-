@@ -312,6 +312,13 @@ export interface SyncBackend {
    * until it expires, exactly as with a revoke.
    */
   deleteInvite(session: Session, inviteId: string): Promise<void>;
+  /**
+   * Move when an invite stops working, later or sooner, or take its end date
+   * away (null). Everyone who joined with it moves with it, including anyone
+   * whose access had already run out, so extending a weekend does not mean
+   * printing new QRs.
+   */
+  setInviteExpiry(session: Session, inviteId: string, expiresAt: string | null): Promise<Invite>;
 }
 
 export type SyncErrorKind = 'auth' | 'permission' | 'network' | 'conflict' | 'invalid';

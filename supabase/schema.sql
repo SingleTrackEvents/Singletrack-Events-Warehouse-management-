@@ -86,6 +86,12 @@ end $$;
 alter table public.invites add column if not exists access text[];
 alter table public.memberships add column if not exists access text[];
 
+-- Which invite a membership came from, so changing an invite's end date can
+-- carry the people who joined with it. Null for crew who signed in by email,
+-- and for anyone who joined before this column existed.
+alter table public.memberships
+  add column if not exists invite_id uuid references public.invites on delete set null;
+
 create index if not exists records_seq_idx on public.records (seq);
 create index if not exists records_event_idx on public.records (event_id);
 create index if not exists invites_token_idx on public.invites (token);
@@ -474,22 +480,66 @@ begin
   end if;
 
   insert into public.memberships
-    (user_id, role, event_id, destination_id, display_name, expires_at, access)
+    (user_id, role, event_id, destination_id, display_name, expires_at, access, invite_id)
   values
     (auth.uid(), found_invite.role, found_invite.event_id,
      found_invite.destination_id, trim(p_display_name), found_invite.expires_at,
-     found_invite.access)
+     found_invite.access, found_invite.id)
   on conflict (user_id) do update set
     role = excluded.role,
     event_id = excluded.event_id,
     destination_id = excluded.destination_id,
     display_name = excluded.display_name,
     expires_at = excluded.expires_at,
-    access = excluded.access
+    access = excluded.access,
+    invite_id = excluded.invite_id
   returning * into created;
 
   update public.invites set used_count = used_count + 1 where id = found_invite.id;
   return created;
+end;
+$$;
+
+-- Move an invite's end date, and everyone who joined with it, in one go.
+-- Later, sooner or none at all. Lapsed access comes back with a later date,
+-- which is the point: the weekend ran long and the QRs are already printed.
+-- A revoked invite stays revoked. Admin memberships are never touched.
+create or replace function public.set_invite_expiry(p_invite uuid, p_expires_at timestamptz)
+returns public.invites
+language plpgsql security definer set search_path = public as $$
+declare
+  changed public.invites;
+  before public.invites;
+begin
+  if public.my_role() is distinct from 'admin' then
+    raise exception 'Only an admin can change an end date';
+  end if;
+
+  select * into before from public.invites where id = p_invite;
+
+  -- People who joined before memberships remembered their invite are found by
+  -- what redeeming gave them: the same role, scope and end date to the
+  -- millisecond. They are linked as they are found, so this happens once.
+  if found and before.expires_at is not null then
+    update public.memberships set invite_id = p_invite
+    where invite_id is null
+      and role = before.role
+      and role <> 'admin'
+      and event_id is not distinct from before.event_id
+      and destination_id is not distinct from before.destination_id
+      and expires_at = before.expires_at;
+  end if;
+
+  update public.invites set expires_at = p_expires_at
+  where id = p_invite and revoked_at is null
+  returning * into changed;
+  if not found then
+    raise exception 'That one is gone or has been revoked';
+  end if;
+
+  update public.memberships set expires_at = p_expires_at
+  where invite_id = p_invite and role <> 'admin';
+  return changed;
 end;
 $$;
 
@@ -608,6 +658,8 @@ revoke all on function public.push_records(jsonb) from public;
 grant execute on function public.push_records(jsonb) to authenticated;
 grant execute on function public.ensure_membership(text) to authenticated;
 grant execute on function public.redeem_invite(text, text) to authenticated;
+revoke all on function public.set_invite_expiry(uuid, timestamptz) from public;
+grant execute on function public.set_invite_expiry(uuid, timestamptz) to authenticated;
 grant execute on function public.update_display_name(text) to authenticated;
 
 -- Older deployments had a laxer scope check; remove it so nothing calls it.
