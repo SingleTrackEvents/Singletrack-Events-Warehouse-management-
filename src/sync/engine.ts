@@ -232,6 +232,9 @@ function cursorOwner(session: Session): string {
     session.role,
     session.scope.eventId ?? '',
     session.scope.destinationId ?? '',
+    // Only when customised, so an ordinary account's cursor survives the
+    // upgrade; new boxes mean rows it was never sent before.
+    ...(session.access ? [session.access.join(',')] : []),
   ].join('|');
 }
 

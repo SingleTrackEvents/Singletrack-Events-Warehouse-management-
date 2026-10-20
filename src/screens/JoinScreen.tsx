@@ -1,10 +1,12 @@
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Screen } from '../App';
+import { Scanner } from '../components/Scanner';
 import { Field } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { useSession } from '../hooks/sessionContext';
 import { ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
+import { parseInviteScan } from '../domain/codes';
 
 /**
  * What a volunteer sees after scanning the invite QR taped to their crate.
@@ -32,6 +34,31 @@ export default function JoinScreen() {
    * instead of arriving as "not recognised".
    */
   const [code, setCode] = useState(() => (token ? decodeURIComponent(token) : ''));
+
+  /*
+   * The camera, for the home-screen app.
+   *
+   * Opened straight away when the sign-in page sent someone here to scan, and
+   * otherwise one tap away. Reading the QR again is easier than reading the
+   * code off a muddy card, and it is the same card they scanned in the browser.
+   */
+  const [searchParams] = useSearchParams();
+  const [scanning, setScanning] = useState(() => !token && searchParams.get('scan') === '1');
+  const [scanMiss, setScanMiss] = useState(false);
+  const onScan = useCallback(
+    (value: string) => {
+      const found = parseInviteScan(value);
+      if (!found) {
+        setScanMiss(true);
+        return;
+      }
+      setScanMiss(false);
+      setScanning(false);
+      setCode(found);
+      toast('Invite code read');
+    },
+    [toast],
+  );
 
   /*
    * An iPhone keeps the home-screen app's storage apart from Safari's, so
@@ -121,11 +148,36 @@ export default function JoinScreen() {
           <p className="small strong">Adding this app to your home screen?</p>
           <p className="tiny mt-2">
             On an iPhone the home-screen app signs in separately from Safari. Add it to your home
-            screen first, open it from there, tap "Have an invite code?" and enter{' '}
-            {code ? <span className="mono strong">{code}</span> : 'the code from your card'}.
+            screen first, open it from there, tap "Scan invite QR" and scan this card again, or
+            type {code ? <span className="mono strong">{code}</span> : 'the code from your card'}.
           </p>
         </div>
       ) : null}
+
+      {scanning ? (
+        <div className="card card-pad mb-4">
+          <Scanner hint="Point at the invite QR" onDetect={onScan} />
+          {scanMiss ? (
+            <p className="small mt-3" style={{ color: 'var(--danger)' }}>
+              That QR is not an invite. Scan the one on your invite card.
+            </p>
+          ) : null}
+          <button type="button" className="btn btn-ghost btn-block mt-2" onClick={() => setScanning(false)}>
+            Type the code instead
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className={`btn ${code ? 'btn-outline' : 'btn-primary btn-lg'} btn-block mb-4`}
+          onClick={() => {
+            setScanMiss(false);
+            setScanning(true);
+          }}
+        >
+          📷 {code ? 'Scan a different invite' : 'Scan invite QR'}
+        </button>
+      )}
 
       <form
         onSubmit={(event) => {
@@ -133,7 +185,7 @@ export default function JoinScreen() {
           if (name.trim() && code.trim()) void join();
         }}
       >
-        <Field label="Invite code" hint="From the QR you scanned, or read off the printed card.">
+        <Field label="Invite code" hint="Filled in by the scan, or typed off the printed card.">
           {(id) => (
             <input
               id={id}

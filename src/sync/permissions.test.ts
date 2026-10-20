@@ -10,8 +10,11 @@ import {
   isEventScoped,
   isExpired,
   isStationOnly,
+  normaliseAccess,
+  presetAccess,
   reachable,
   readableTable,
+  readableTableFor,
   roleAtLeast,
   scrubChanges,
   writableTables,
@@ -378,5 +381,57 @@ describe('the shopping list', () => {
     expect(readableTable('driver', 'shoppingLines')).toBe(false);
     expect(readableTable('volunteer', 'shoppingLines')).toBe(false);
     expect(writableTables(session('driver'))).not.toContain('shoppingLines');
+  });
+});
+
+describe('invite tick boxes', () => {
+  const station = { eventId: 'e1', destinationId: 'd1' };
+
+  it('stores an invite left at its preset as the plain role', () => {
+    expect(normaliseAccess('volunteer', station, ['receive'])).toBeNull();
+    expect(normaliseAccess('crew', UNSCOPED, presetAccess('crew'))).toBeNull();
+    expect(normaliseAccess('volunteer', station, ['receive', 'food'])).toEqual(['receive', 'food']);
+  });
+
+  it('drops warehouse boxes from an invite pinned to one event', () => {
+    expect(normaliseAccess('volunteer', station, ['receive', 'stock'])).toBeNull();
+    expect(normaliseAccess('crew', { eventId: 'e1', destinationId: null }, presetAccess('crew')))
+      .toBeNull();
+  });
+
+  it('grants what is ticked and nothing else', () => {
+    const sam = session('volunteer', { scope: station, access: ['receive', 'food'] });
+    expect(can(sam, 'food:plan', { eventId: 'e1' })).toBe(true);
+    expect(can(sam, 'packlist:receive', { eventId: 'e1', destinationId: 'd1' })).toBe(true);
+    expect(can(sam, 'packlist:pack')).toBe(false);
+    expect(can(sam, 'load:read')).toBe(false);
+    expect(readableTableFor(sam, 'races')).toBe(true);
+    expect(readableTableFor(sam, 'items')).toBe(false);
+    expect(writableTables(sam)).toEqual(['packlists', 'packlistLines', 'races', 'consumptionLines']);
+  });
+
+  it('lets packing rewrite a line, and recording only the arrivals', () => {
+    const packer = session('volunteer', { scope: station, access: ['pack'] });
+    const counter = session('volunteer', { scope: station, access: ['receive'] });
+    expect(canEditField(packer, 'packlistLines', 'qtyRequired')).toBe(true);
+    expect(canEditField(counter, 'packlistLines', 'qtyRequired')).toBe(false);
+    expect(canEditField(counter, 'packlistLines', 'qtyReceived')).toBe(true);
+  });
+
+  it('keeps a volunteer with something more out of station-only mode', () => {
+    expect(isStationOnly(session('volunteer', { scope: station }))).toBe(true);
+    expect(isStationOnly(session('volunteer', { scope: station, access: ['receive'] }))).toBe(true);
+    expect(isStationOnly(session('volunteer', { scope: station, access: ['receive', 'food'] })))
+      .toBe(false);
+  });
+
+  it('never narrows an admin', () => {
+    const admin = session('admin', { access: ['receive'] });
+    expect(can(admin, 'member:manage')).toBe(true);
+  });
+
+  it('leaves an account with no boxes on its role', () => {
+    expect(can(session('crew'), 'food:plan')).toBe(true);
+    expect(can(session('driver'), 'food:plan')).toBe(false);
   });
 });

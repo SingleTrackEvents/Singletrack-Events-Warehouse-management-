@@ -20,7 +20,7 @@ const INSTALL: IntroStep = {
   title: 'Put it on your home screen',
   body: [
     'Open the menu in your browser and choose "Add to Home Screen". The app then opens like any other and keeps working with no reception.',
-    'On an iPhone the home-screen app signs in separately from Safari. If it asks you to sign in, tap "Have an invite code?" and use the same code again.',
+    'On an iPhone the home-screen app signs in separately from Safari. If it asks you to sign in, tap "Scan invite QR" and scan the same card again.',
   ],
 };
 

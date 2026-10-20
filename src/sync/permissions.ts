@@ -1,7 +1,7 @@
 import { SYNCED_TABLES } from '../db/db';
 import type { TableName } from '../db/db';
-import type { Role, Scope, Session } from './types';
-import { UNSCOPED } from './types';
+import type { Access, Role, Scope, Session } from './types';
+import { ACCESS_KEYS, ACCESS_OPTIONS, UNSCOPED } from './types';
 
 /**
  * Who may do what.
@@ -44,7 +44,9 @@ export type Action =
   // The packing assistant: running checks and editing what it remembers
   | 'assistant:use'
   // The shopping list: adding lines, ticking them off, booking them into stock
-  | 'shopping:manage';
+  | 'shopping:manage'
+  // The food plan: race projections and per-station quantities
+  | 'food:plan';
 
 /**
  * Grants per role.
@@ -61,7 +63,7 @@ const GRANTS: Record<Role, Action[]> = {
     'load:read', 'load:manage', 'load:deliver',
     'stocktake:read', 'stocktake:manage', 'template:manage',
     'member:manage', 'data:export', 'data:wipe',
-    'assistant:use', 'shopping:manage',
+    'assistant:use', 'shopping:manage', 'food:plan',
   ],
   crew: [
     'item:read', 'item:write', 'stock:adjust',
@@ -69,7 +71,7 @@ const GRANTS: Record<Role, Action[]> = {
     'packlist:read', 'packlist:pack', 'packlist:receive', 'packlist:manage',
     'load:read', 'load:manage', 'load:deliver',
     'stocktake:read', 'stocktake:manage', 'template:manage',
-    'data:export', 'shopping:manage',
+    'data:export', 'shopping:manage', 'food:plan',
   ],
   driver: [
     'item:read',
@@ -82,6 +84,133 @@ const GRANTS: Record<Role, Action[]> = {
     'packlist:read', 'packlist:receive',
   ],
 };
+
+/**
+ * What each tick box on an invite grants.
+ *
+ * Every account may read the event and the packlists its scope admits, so
+ * those come with any set of boxes. Packing, stocktakes and templates all need
+ * the catalogue to make sense of, so they bring it with them.
+ */
+const BASE_ACTIONS: Action[] = ['event:read', 'packlist:read'];
+
+const ACCESS_ACTIONS: Record<Access, Action[]> = {
+  receive: ['packlist:receive'],
+  pack: ['packlist:pack', 'packlist:manage', 'packlist:receive', 'item:read'],
+  deliver: ['load:read', 'load:deliver'],
+  loads: ['load:read', 'load:manage', 'load:deliver'],
+  catalogue: ['item:read'],
+  stock: ['item:read', 'item:write', 'stock:adjust'],
+  food: ['food:plan'],
+  events: ['event:write', 'event:create'],
+  shopping: ['shopping:manage'],
+  stocktakes: ['item:read', 'stocktake:read', 'stocktake:manage'],
+  templates: ['item:read', 'template:manage'],
+};
+
+/**
+ * The boxes each role starts with on the invite sheet.
+ *
+ * Chosen so that leaving them as they are gives exactly what the role gave
+ * before boxes existed. An invite whose boxes match its preset is stored as
+ * the plain role, so nothing about an ordinary invite changes.
+ */
+export function presetAccess(role: Role, scope: Scope = UNSCOPED): Access[] {
+  switch (role) {
+    case 'volunteer':
+      return ['receive'];
+    case 'driver':
+      return ['deliver', 'catalogue'];
+    case 'crew':
+    case 'admin': {
+      const all = ACCESS_KEYS;
+      return scope.eventId ? all.filter((key) => !isWarehouseAccess(key)) : [...all];
+    }
+  }
+}
+
+export function isWarehouseAccess(key: Access): boolean {
+  return Boolean(ACCESS_OPTIONS.find((option) => option.key === key)?.warehouse);
+}
+
+/**
+ * Tidy a set of boxes for saving: known keys only, warehouse boxes dropped
+ * for an invite pinned to one event (the server would refuse them anyway),
+ * and null when it is just the role's preset.
+ */
+export function normaliseAccess(role: Role, scope: Scope, picked: Access[]): Access[] | null {
+  const kept = ACCESS_KEYS.filter(
+    (key) => picked.includes(key) && !(scope.eventId && isWarehouseAccess(key)),
+  );
+  const preset = presetAccess(role, scope);
+  const same = kept.length === preset.length && preset.every((key) => kept.includes(key));
+  return same ? null : kept;
+}
+
+/** True when the account runs on ticked boxes rather than its role's rules. */
+function customised(session: Session): session is Session & { access: Access[] } {
+  return session.role !== 'admin' && Array.isArray(session.access);
+}
+
+/** The boxes in effect for a session, whether ticked or from its role. */
+export function accessOf(session: Session): Access[] {
+  return customised(session) ? session.access : presetAccess(session.role, session.scope);
+}
+
+function grantsFor(session: Session): Action[] {
+  if (!customised(session)) return GRANTS[session.role];
+  return [...new Set([...BASE_ACTIONS, ...session.access.flatMap((key) => ACCESS_ACTIONS[key])])];
+}
+
+/**
+ * Tables each box lets an account read and write. Mirrors access_reads and
+ * access_writes in supabase/schema.sql.
+ */
+const BASE_READS: TableName[] = ['events', 'destinations', 'packlists', 'packlistLines', 'containers'];
+
+const ACCESS_READS: Record<Access, TableName[]> = {
+  receive: [],
+  pack: ['items', 'categories', 'templates', 'templateLines'],
+  deliver: ['loads', 'loadStops'],
+  loads: ['loads', 'loadStops'],
+  catalogue: ['items', 'categories', 'templates', 'templateLines'],
+  stock: ['items', 'categories', 'templates', 'templateLines', 'movements'],
+  food: ['races', 'consumptionLines'],
+  events: [],
+  shopping: ['shoppingLines'],
+  stocktakes: ['items', 'categories', 'templates', 'templateLines', 'movements', 'stocktakes', 'stocktakeCounts'],
+  templates: ['items', 'categories', 'templates', 'templateLines'],
+};
+
+const ACCESS_WRITES: Record<Access, TableName[]> = {
+  receive: ['packlists', 'packlistLines'],
+  pack: ['packlists', 'packlistLines', 'containers'],
+  deliver: ['loads', 'loadStops', 'packlists', 'packlistLines'],
+  loads: ['loads', 'loadStops'],
+  catalogue: [],
+  stock: ['items', 'categories', 'movements'],
+  food: ['races', 'consumptionLines'],
+  events: ['events', 'destinations'],
+  shopping: ['shoppingLines'],
+  stocktakes: ['items', 'movements', 'stocktakes', 'stocktakeCounts'],
+  templates: ['templates', 'templateLines'],
+};
+
+/** Warehouse-wide tables a scoped account may still read, the catalogue mostly. */
+export const REFERENCE_TABLES: TableName[] = ['items', 'categories', 'templates', 'templateLines'];
+
+/** Can this session read the catalogue and templates even when pinned to an event? */
+export function readsReference(session: Session, table: TableName): boolean {
+  if (!REFERENCE_TABLES.includes(table)) return false;
+  if (!customised(session)) return session.role !== 'volunteer';
+  return session.access.some((key) => ACCESS_READS[key].includes(table));
+}
+
+/** Can this session be sent rows from this table at all? */
+export function readableTableFor(session: Session, table: TableName): boolean {
+  if (!customised(session)) return readableTable(session.role, table);
+  return BASE_READS.includes(table) || session.access.some((key) => ACCESS_READS[key].includes(table));
+}
 
 /**
  * Actions that belong to the warehouse rather than to any one event.
@@ -151,7 +280,7 @@ export interface Target {
 export function can(session: Session | null, action: Action, target?: Target): boolean {
   if (!session) return true;
   if (isExpired(session)) return false;
-  if (!GRANTS[session.role].includes(action)) return false;
+  if (!grantsFor(session).includes(action)) return false;
   if (isEventScoped(session) && WAREHOUSE_ACTIONS.includes(action)) return false;
   return inScope(session.scope, target);
 }
@@ -203,7 +332,9 @@ export function isExpired(session: Session, now = new Date()): boolean {
  * tapping the wrong thing.
  */
 export function isStationOnly(session: Session | null): boolean {
-  return Boolean(session && session.role === 'volunteer' && session.scope.destinationId);
+  if (!session?.scope.destinationId) return false;
+  // A volunteer given the food plan as well has somewhere else to go.
+  return accessOf(session).every((key) => key === 'receive');
 }
 
 /** Position in the authority order; lower is more powerful. */
@@ -246,7 +377,23 @@ const WRITABLE_FIELDS: Partial<Record<TableName, Record<Role, string[] | 'all'>>
 /** Which fields this session may write on a table, or 'all'. */
 export function writableFields(session: Session | null, table: TableName): string[] | 'all' {
   if (!session || isExpired(session)) return session ? [] : 'all';
+  if (customised(session)) return accessFields(session.access, table);
   return WRITABLE_FIELDS[table]?.[session.role] ?? 'all';
+}
+
+/**
+ * Fields the boxes allow on a packlist. Packing is the whole row; recording a
+ * delivery or confirming one is the same handful of fields the volunteer and
+ * the driver have always had, and both together get both. Mirrors
+ * access_fields in supabase/schema.sql.
+ */
+function accessFields(access: Access[], table: TableName): string[] | 'all' {
+  const rules = WRITABLE_FIELDS[table];
+  if (!rules || access.includes('pack')) return 'all';
+  const fields = new Set<string>();
+  if (access.includes('receive')) for (const field of rules.volunteer as string[]) fields.add(field);
+  if (access.includes('deliver')) for (const field of rules.driver as string[]) fields.add(field);
+  return [...fields];
 }
 
 export function canEditField(session: Session | null, table: TableName, field: string): boolean {
@@ -307,6 +454,13 @@ export const CREW_TABLES: TableName[] = SYNCED_TABLES.filter((table) => !ADMIN_T
  */
 export function writableTables(session: Session | null): TableName[] | 'all' {
   if (!session) return 'all';
+  if (customised(session)) {
+    const tables = new Set(session.access.flatMap((key) => ACCESS_WRITES[key]));
+    // Pinned to one event, nothing warehouse-wide survives the server's scope check.
+    return SYNCED_TABLES.filter(
+      (table) => tables.has(table) && (!isEventScoped(session) || EVENT_TABLES.includes(table)),
+    );
+  }
   switch (session.role) {
     case 'admin':
       return 'all';
@@ -326,9 +480,13 @@ export function writableTables(session: Session | null): TableName[] | 'all' {
  * differently pinned to one event: crew for the Hounslow Classic do not run
  * stocktakes, and the card should not say they do.
  */
-export function describeRole(role: Role, scope: Scope = UNSCOPED): string[] {
+export function describeRole(
+  role: Role,
+  scope: Scope = UNSCOPED,
+  access: Access[] | null = null,
+): string[] {
   const who: Session = {
-    userId: '', displayName: '', email: null, role, scope, token: '', expiresAt: null, guest: false,
+    userId: '', displayName: '', email: null, role, scope, token: '', expiresAt: null, guest: false, access,
   };
   const has = (action: Action) => can(who, action);
   const lines: string[] = [];
@@ -339,7 +497,10 @@ export function describeRole(role: Role, scope: Scope = UNSCOPED): string[] {
   else if (has('packlist:receive')) lines.push('Record what arrived on a packlist');
   if (has('load:manage')) lines.push('Plan transport loads');
   else if (has('load:deliver')) lines.push('Confirm deliveries');
+  if (has('event:write')) lines.push('Edit the event and its stations');
   if (has('stocktake:manage')) lines.push('Run stocktakes');
+  if (has('template:manage')) lines.push('Edit templates');
+  if (has('food:plan')) lines.push('Plan the food');
   if (has('shopping:manage')) lines.push('Keep the shopping list');
   if (has('member:manage')) lines.push('Invite people and set their access');
   return lines;

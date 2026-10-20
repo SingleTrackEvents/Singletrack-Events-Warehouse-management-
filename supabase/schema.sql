@@ -80,6 +80,18 @@ begin
   end if;
 end $$;
 
+-- Invite tick boxes. Null means the role's own rules, which is every invite and
+-- membership made before the boxes existed and every one left at its preset.
+-- A list means exactly those boxes; see access_reads and friends below.
+alter table public.invites add column if not exists access text[];
+alter table public.memberships add column if not exists access text[];
+
+-- Which invite a membership came from, so changing an invite's end date can
+-- carry the people who joined with it. Null for crew who signed in by email,
+-- and for anyone who joined before this column existed.
+alter table public.memberships
+  add column if not exists invite_id uuid references public.invites on delete set null;
+
 create index if not exists records_seq_idx on public.records (seq);
 create index if not exists records_event_idx on public.records (event_id);
 create index if not exists invites_token_idx on public.invites (token);
@@ -215,6 +227,106 @@ returns boolean language sql immutable as $$
   end
 $$;
 
+-- ---------------------------------------------------------- tick boxes ---
+
+-- The caller's ticked boxes, or null for their role's own rules.
+create or replace function public.my_access() returns text[]
+language sql stable security definer set search_path = public as $$
+  select access from public.memberships
+  where user_id = auth.uid()
+    and (expires_at is null or expires_at > now())
+$$;
+
+-- Tables a set of boxes may read. Mirrors ACCESS_READS in the app. The event
+-- and the packlists the scope admits come with any set of boxes.
+create or replace function public.access_reads(p_access text[], p_table text)
+returns boolean language sql immutable as $$
+  select p_table in ('events', 'destinations', 'packlists', 'packlistLines', 'containers')
+    or (p_table in ('items', 'categories', 'templates', 'templateLines')
+        and p_access && array['pack', 'catalogue', 'stock', 'stocktakes', 'templates'])
+    or (p_table = 'movements' and p_access && array['stock', 'stocktakes'])
+    or (p_table in ('loads', 'loadStops') and p_access && array['deliver', 'loads'])
+    or (p_table in ('races', 'consumptionLines') and 'food' = any(p_access))
+    or (p_table = 'shoppingLines' and 'shopping' = any(p_access))
+    or (p_table in ('stocktakes', 'stocktakeCounts') and 'stocktakes' = any(p_access))
+$$;
+
+-- Tables a set of boxes may write. Mirrors ACCESS_WRITES in the app.
+create or replace function public.access_writes(p_access text[], p_table text)
+returns boolean language sql immutable as $$
+  select (p_table in ('packlists', 'packlistLines')
+          and p_access && array['pack', 'receive', 'deliver'])
+    or (p_table = 'containers' and 'pack' = any(p_access))
+    or (p_table in ('loads', 'loadStops') and p_access && array['deliver', 'loads'])
+    or (p_table in ('items', 'categories', 'movements') and 'stock' = any(p_access))
+    or (p_table in ('items', 'movements', 'stocktakes', 'stocktakeCounts')
+        and 'stocktakes' = any(p_access))
+    or (p_table in ('templates', 'templateLines') and 'templates' = any(p_access))
+    or (p_table in ('races', 'consumptionLines') and 'food' = any(p_access))
+    or (p_table in ('events', 'destinations') and 'events' = any(p_access))
+    or (p_table = 'shoppingLines' and 'shopping' = any(p_access))
+$$;
+
+-- Fields a set of boxes may change. Null means the whole row. Packing is the
+-- whole packlist; recording or confirming a delivery is the same few fields
+-- the volunteer and the driver have always had. Mirrors accessFields in the app.
+create or replace function public.access_fields(p_access text[], p_table text)
+returns text[] language sql immutable as $$
+  select case
+    when p_table not in ('packlists', 'packlistLines') or 'pack' = any(p_access) then null
+    else array(
+      select distinct unnest(
+        case when 'receive' = any(p_access)
+          then public.writable_fields('volunteer', p_table) else array[]::text[] end
+        || case when 'deliver' = any(p_access)
+          then public.writable_fields('driver', p_table) else array[]::text[] end
+      ) order by 1
+    )
+  end
+$$;
+
+-- What the policies and push_records ask: the caller's role rules, or their
+-- boxes when an invite was customised. Admins always run on the role.
+create or replace function public.my_can_read(p_table text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select case
+    when public.my_role() is null then false
+    when public.my_role() = 'admin' or public.my_access() is null
+      then public.can_read_table(public.my_role(), p_table)
+    else public.access_reads(public.my_access(), p_table)
+  end
+$$;
+
+create or replace function public.my_can_write(p_table text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select case
+    when public.my_role() is null then false
+    when public.my_role() = 'admin' or public.my_access() is null
+      then public.can_write_table(public.my_role(), p_table)
+    else public.access_writes(public.my_access(), p_table)
+  end
+$$;
+
+create or replace function public.my_writable_fields(p_table text) returns text[]
+language sql stable security definer set search_path = public as $$
+  select case
+    when public.my_role() = 'admin' or public.my_access() is null
+      then public.writable_fields(public.my_role(), p_table)
+    else public.access_fields(public.my_access(), p_table)
+  end
+$$;
+
+create or replace function public.my_reference_readable(p_table text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select case
+    when public.my_role() is null then false
+    when public.my_role() = 'admin' or public.my_access() is null
+      then public.reference_readable(public.my_role(), p_table)
+    else p_table in ('items', 'categories', 'templates', 'templateLines')
+      and public.access_reads(public.my_access(), p_table)
+  end
+$$;
+
 -- ------------------------------------------------------------------ RLS ---
 
 alter table public.records enable row level security;
@@ -225,13 +337,13 @@ drop policy if exists records_select on public.records;
 create policy records_select on public.records for select to authenticated
 using (
   public.my_role() is not null
-  and public.can_read_table(public.my_role(), table_name)
+  and public.my_can_read(table_name)
   and (
     public.row_in_scope(table_name, event_id, destination_id)
     or (
       event_id is null
       and destination_id is null
-      and public.reference_readable(public.my_role(), table_name)
+      and public.my_reference_readable(table_name)
     )
   )
 );
@@ -240,7 +352,7 @@ drop policy if exists records_insert on public.records;
 create policy records_insert on public.records for insert to authenticated
 with check (
   public.my_role() is not null
-  and public.can_write_table(public.my_role(), table_name)
+  and public.my_can_write(table_name)
   and public.row_in_scope(table_name, event_id, destination_id)
 );
 
@@ -248,11 +360,11 @@ drop policy if exists records_update on public.records;
 create policy records_update on public.records for update to authenticated
 using (
   public.my_role() is not null
-  and public.can_write_table(public.my_role(), table_name)
+  and public.my_can_write(table_name)
   and public.row_in_scope(table_name, event_id, destination_id)
 )
 with check (
-  public.can_write_table(public.my_role(), table_name)
+  public.my_can_write(table_name)
   and public.row_in_scope(table_name, event_id, destination_id)
 );
 
@@ -368,20 +480,66 @@ begin
   end if;
 
   insert into public.memberships
-    (user_id, role, event_id, destination_id, display_name, expires_at)
+    (user_id, role, event_id, destination_id, display_name, expires_at, access, invite_id)
   values
     (auth.uid(), found_invite.role, found_invite.event_id,
-     found_invite.destination_id, trim(p_display_name), found_invite.expires_at)
+     found_invite.destination_id, trim(p_display_name), found_invite.expires_at,
+     found_invite.access, found_invite.id)
   on conflict (user_id) do update set
     role = excluded.role,
     event_id = excluded.event_id,
     destination_id = excluded.destination_id,
     display_name = excluded.display_name,
-    expires_at = excluded.expires_at
+    expires_at = excluded.expires_at,
+    access = excluded.access,
+    invite_id = excluded.invite_id
   returning * into created;
 
   update public.invites set used_count = used_count + 1 where id = found_invite.id;
   return created;
+end;
+$$;
+
+-- Move an invite's end date, and everyone who joined with it, in one go.
+-- Later, sooner or none at all. Lapsed access comes back with a later date,
+-- which is the point: the weekend ran long and the QRs are already printed.
+-- A revoked invite stays revoked. Admin memberships are never touched.
+create or replace function public.set_invite_expiry(p_invite uuid, p_expires_at timestamptz)
+returns public.invites
+language plpgsql security definer set search_path = public as $$
+declare
+  changed public.invites;
+  before public.invites;
+begin
+  if public.my_role() is distinct from 'admin' then
+    raise exception 'Only an admin can change an end date';
+  end if;
+
+  select * into before from public.invites where id = p_invite;
+
+  -- People who joined before memberships remembered their invite are found by
+  -- what redeeming gave them: the same role, scope and end date to the
+  -- millisecond. They are linked as they are found, so this happens once.
+  if found and before.expires_at is not null then
+    update public.memberships set invite_id = p_invite
+    where invite_id is null
+      and role = before.role
+      and role <> 'admin'
+      and event_id is not distinct from before.event_id
+      and destination_id is not distinct from before.destination_id
+      and expires_at = before.expires_at;
+  end if;
+
+  update public.invites set expires_at = p_expires_at
+  where id = p_invite and revoked_at is null
+  returning * into changed;
+  if not found then
+    raise exception 'That one is gone or has been revoked';
+  end if;
+
+  update public.memberships set expires_at = p_expires_at
+  where invite_id = p_invite and role <> 'admin';
+  return changed;
 end;
 $$;
 
@@ -413,7 +571,7 @@ begin
   end if;
 
   for item in select * from jsonb_array_elements(p_rows) loop
-    if not public.can_write_table(role, item->>'table_name')
+    if not public.my_can_write(item->>'table_name')
        or not public.row_in_scope(
             item->>'table_name', item->>'event_id', item->>'destination_id') then
       refused := refused + 1;
@@ -424,7 +582,7 @@ begin
     where table_name = item->>'table_name' and id = item->>'id';
     have_existing := found;
 
-    fields := public.writable_fields(role, item->>'table_name');
+    fields := public.my_writable_fields(item->>'table_name');
 
     -- Newest revision wins; ties break on updated_at. Same rule as the client.
     if have_existing and (
@@ -500,6 +658,8 @@ revoke all on function public.push_records(jsonb) from public;
 grant execute on function public.push_records(jsonb) to authenticated;
 grant execute on function public.ensure_membership(text) to authenticated;
 grant execute on function public.redeem_invite(text, text) to authenticated;
+revoke all on function public.set_invite_expiry(uuid, timestamptz) from public;
+grant execute on function public.set_invite_expiry(uuid, timestamptz) to authenticated;
 grant execute on function public.update_display_name(text) to authenticated;
 
 -- Older deployments had a laxer scope check; remove it so nothing calls it.

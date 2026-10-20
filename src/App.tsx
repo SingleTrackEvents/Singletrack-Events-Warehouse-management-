@@ -186,7 +186,7 @@ export default function App() {
               <Route path="/events" element={<Guard needs="event:read"><EventsScreen /></Guard>} />
               <Route path="/events/:eventId" element={<Guard needs="event:read"><EventDetailScreen /></Guard>} />
               <Route path="/events/:eventId/warehouse" element={<Guard needs="packlist:manage"><WarehouseScreen /></Guard>} />
-              <Route path="/events/:eventId/food" element={<Guard needs="packlist:manage"><FoodScreen /></Guard>} />
+              <Route path="/events/:eventId/food" element={<Guard needs="food:plan"><FoodScreen /></Guard>} />
               <Route path="/import" element={<Guard needs="packlist:manage"><ImportPacklistScreen /></Guard>} />
               <Route path="/packlists/:packlistId" element={<PacklistScreen />} />
               <Route path="/stock" element={<Guard needs="item:read"><StockScreen /></Guard>} />

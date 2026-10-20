@@ -5,7 +5,7 @@ import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import { shouldReplace } from '../domain/backup';
 import { cleanDisplayName, displayNameFromEmail } from './names';
-import { inScope, readableTable, writableFields, writableTables } from './permissions';
+import { inScope, readableTableFor, readsReference, writableFields, writableTables } from './permissions';
 import type {
   ChangeSet,
   CreateInviteInput,
@@ -17,7 +17,7 @@ import type {
   SignInChallenge,
   SyncBackend,
 } from './types';
-import { SyncError } from './types';
+import { SyncError, inviteExpiry } from './types';
 
 /**
  * A stand-in server.
@@ -85,9 +85,6 @@ class MockServerDb extends Dexie {
 
 const server = new MockServerDb();
 const SESSION_KEY = 'stw.sync.mock.session';
-
-/** Warehouse-wide rows a scoped crew member or driver still needs to read. */
-const REFERENCE_TABLES: TableName[] = ['items', 'categories', 'templates', 'templateLines'];
 
 /** Monotonic sequence, standing in for a database transaction id. */
 async function nextSeq(count: number): Promise<number> {
@@ -217,6 +214,7 @@ export class MockBackend implements SyncBackend {
       token: `invite:${invite.token}:${newId()}`,
       expiresAt: invite.expiresAt,
       guest: true,
+      access: invite.access ?? null,
     };
     saveSession(session);
     await server.sessions.put({ ...session, key: session.token });
@@ -309,7 +307,6 @@ export class MockBackend implements SyncBackend {
     if (session.role !== 'admin') {
       throw new SyncError('Only an admin can invite people.', 'permission');
     }
-    const days = input.expiresInDays ?? 4;
     const invite: Invite = {
       id: newId(),
       token: inviteToken(),
@@ -317,9 +314,10 @@ export class MockBackend implements SyncBackend {
       scope: input.scope,
       label: input.label,
       createdAt: nowIso(),
-      expiresAt: new Date(Date.now() + days * 86_400_000).toISOString(),
+      expiresAt: inviteExpiry(input),
       revokedAt: null,
       usedCount: 0,
+      access: input.access ?? null,
     };
     await server.invites.put(invite);
     return invite;
@@ -348,6 +346,27 @@ export class MockBackend implements SyncBackend {
     await server.invites.delete(inviteId);
   }
 
+  async setInviteExpiry(session: Session, inviteId: string, expiresAt: string | null): Promise<Invite> {
+    this.assertLive(session);
+    if (session.role !== 'admin') {
+      throw new SyncError('Only an admin can change an end date.', 'permission');
+    }
+    const invite = await server.invites.get(inviteId);
+    if (!invite || invite.revokedAt) {
+      throw new SyncError('That one is gone or has been revoked.', 'invalid');
+    }
+    const changed = { ...invite, expiresAt };
+    await server.invites.put(changed);
+    // Guest sessions carry their invite's token, which is how they are found.
+    const joined = await server.sessions
+      .filter((entry) => entry.key.startsWith(`invite:${invite.token}:`))
+      .toArray();
+    await server.sessions.bulkPut(joined.map((entry) => ({ ...entry, expiresAt })));
+    const current = loadSession();
+    if (current?.token.startsWith(`invite:${invite.token}:`)) saveSession({ ...current, expiresAt });
+    return changed;
+  }
+
   /* --------------------------------------------------------------- guards -- */
 
   private assertLive(session: Session): void {
@@ -374,12 +393,12 @@ export class MockBackend implements SyncBackend {
   private async rowVisible(session: Session, table: TableName, row: SyncMeta): Promise<boolean> {
     // Table first, scope second: the assistant's notes go to admins and to
     // nobody else, however wide the account's scope.
-    if (!readableTable(session.role, table)) return false;
+    if (!readableTableFor(session, table)) return false;
     if (!session.scope.eventId && !session.scope.destinationId) return true;
     // Reference data a scoped session still needs to make sense of its
     // packlists: the catalogue and the templates it builds lists from. A
     // volunteer gets none of it, since their lines name the items already.
-    if (REFERENCE_TABLES.includes(table)) return session.role !== 'volunteer';
+    if (readsReference(session, table)) return true;
     const target = await this.targetOf(table, row);
     if (!target.eventId) return false;
     return inScope(session.scope, target);

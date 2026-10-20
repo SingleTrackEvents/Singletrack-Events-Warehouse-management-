@@ -9,9 +9,9 @@ import { useSession } from '../hooks/sessionContext';
 import { SUPABASE_CONFIGURED } from '../sync';
 import { clearAuthRedirect, getAuthRedirect } from '../sync/authRedirect';
 import { useDestinations, useEvents } from '../hooks/useDb';
-import { describeRole } from '../sync/permissions';
-import { ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
-import type { Invite, Passkey as PasskeyType, Role, Scope } from '../sync/types';
+import { describeRole, normaliseAccess, presetAccess } from '../sync/permissions';
+import { ACCESS_OPTIONS, ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
+import type { Access, Invite, Passkey as PasskeyType, Role, Scope } from '../sync/types';
 import { formatDateTime, plural } from '../domain/format';
 import { joinUrl } from '../domain/codes';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -118,6 +118,28 @@ export default function AccessScreen() {
           </p>
         </div>
         {/*
+          The invite comes first. Most phones that land here signed out belong
+          to a volunteer who joined in the browser and then opened the app from
+          the home screen, which on an iPhone starts with nothing. Scanning the
+          same card again is the whole way back in.
+        */}
+        <div className="card card-pad mb-4">
+          <p className="small strong">Got an invite from the crew?</p>
+          <p className="tiny muted mt-2">
+            Scan the QR on your card or crate. No email or password needed.
+          </p>
+          <Link className="btn btn-primary btn-lg btn-block mt-3" to="/join?scan=1">
+            📷 Scan invite QR
+          </Link>
+          <Link className="btn btn-ghost btn-block mt-2" to="/join">
+            Type the code instead
+          </Link>
+        </div>
+
+        <div className="divider" />
+        <p className="small strong center mb-3">Crew with an account</p>
+
+        {/*
           Order matters here. A passkey can only be used on a phone that has
           already had one added, so leading with it sent every first-time user
           into a failure. Email comes first until the device has been set up,
@@ -128,7 +150,7 @@ export default function AccessScreen() {
           <p className="small strong">First time on this phone?</p>
           <p className="tiny muted mt-2">
             Sign in with email once. Then add a passkey and this phone will sign you in with your
-            face or fingerprint from then on — no email involved.
+            face or fingerprint from then on, no email involved.
           </p>
         </div>
 
@@ -177,18 +199,6 @@ export default function AccessScreen() {
           </p>
         )}
 
-        <p className="small muted center">
-          Volunteers do not sign in: scan the QR the crew give you at your aid station.
-        </p>
-        {/*
-          The way back in for anyone who joined by invite in the browser and
-          then opened the app from their home screen. On an iPhone the two
-          keep separate storage, so the home-screen app starts signed out and
-          the invite has to be used again here.
-        */}
-        <Link className="btn btn-outline btn-block mt-3" to="/join">
-          🎟 Have an invite code? Enter it
-        </Link>
         {backend.isReal ? null : (
           <button type="button" className="btn btn-ghost btn-block mt-4" onClick={() => void disconnect()}>
             Go back to this device only
@@ -208,7 +218,10 @@ export default function AccessScreen() {
             <h3>{session.displayName}</h3>
             <p className="small muted">{session.email ?? 'Joined by invite'}</p>
           </div>
-          <Pill tone={session.role === 'admin' ? 'ok' : 'info'}>{ROLE_LABELS[session.role]}</Pill>
+          <Pill tone={session.role === 'admin' ? 'ok' : 'info'}>
+            {ROLE_LABELS[session.role]}
+            {session.access && session.role !== 'admin' ? ' · custom' : ''}
+          </Pill>
         </div>
         {backend.setDisplayName ? (
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRenaming(true)}>
@@ -218,7 +231,7 @@ export default function AccessScreen() {
         <p className="tiny muted">{ROLE_BLURBS[session.role]}</p>
         <ScopeLine scope={session.scope} />
         <ul className="small muted mt-2" style={{ paddingLeft: '1.1em', margin: 0 }}>
-          {describeRole(session.role, session.scope).map((line) => (
+          {describeRole(session.role, session.scope, session.access ?? null).map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
@@ -717,11 +730,13 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
   const toast = useToast();
   const [revoking, setRevoking] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [extending, setExtending] = useState(false);
   const url = joinUrl(invite.token);
   const expired = Boolean(invite.expiresAt && new Date(invite.expiresAt) <= new Date());
   const dead = expired || Boolean(invite.revokedAt);
 
   return (
+    <>
     <SwipeToDelete onDelete={() => setDeleting(true)}>
     <div className="card card-pad">
       <div className="row-flex" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
@@ -731,8 +746,12 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
         <div className="grow">
           <div className="spread">
             <span className="strong">{invite.label}</span>
-            <Pill tone={dead ? 'danger' : 'ok'}>
-              {invite.revokedAt ? 'Revoked' : expired ? 'Expired' : ROLE_LABELS[invite.role]}
+            <Pill tone={dead ? 'danger' : invite.access ? 'accent' : 'ok'}>
+              {invite.revokedAt
+                ? 'Revoked'
+                : expired
+                  ? 'Expired'
+                  : `${ROLE_LABELS[invite.role]}${invite.access ? ' · custom' : ''}`}
             </Pill>
           </div>
           <p className="mono strong mt-2" style={{ fontSize: 'var(--text-lg)' }}>
@@ -743,13 +762,36 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
             {plural(invite.usedCount, 'person', 'people')} joined
           </p>
           <ScopeLine scope={invite.scope} />
-          {!dead ? (
-            <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={() => setRevoking(true)}>
-              Revoke
-            </button>
+          <p className="tiny muted mt-1">
+            {describeRole(invite.role, invite.scope, invite.access ?? null).join(' · ') ||
+              'See their packlists'}
+          </p>
+          {!invite.revokedAt ? (
+            <div className="btn-row mt-2">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExtending(true)}>
+                {expired ? 'Extend' : 'Change end date'}
+              </button>
+              {!expired ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRevoking(true)}>
+                  Revoke
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
+
+    </div>
+    </SwipeToDelete>
+
+    {/*
+      Outside the swipe wrapper: it moves the card with a transform, and a
+      transformed ancestor traps a fixed sheet inside the card instead of
+      letting it cover the screen.
+    */}
+      {extending ? (
+        <ExpirySheet invite={invite} onClose={() => setExtending(false)} onChanged={onChanged} />
+      ) : null}
 
       {revoking ? (
         <ConfirmSheet
@@ -812,11 +854,208 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
           }}
         />
       ) : null}
-    </div>
-    </SwipeToDelete>
+    </>
   );
 }
 
+/** A calendar date as the date input wants it, in this phone's time zone. */
+function localDate(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** The last minute of a picked day, so "ends Sunday" means all of Sunday. */
+function endOfDay(day: string): Date {
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(year, month - 1, date, 23, 59, 0);
+}
+
+/** Today plus some days, as a date input value. */
+function daysFromNow(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return localDate(date);
+}
+
+/** The Sunday coming, or today if it is Sunday: the end of a race weekend. */
+function comingSunday(): string {
+  const date = new Date();
+  date.setDate(date.getDate() + ((7 - date.getDay()) % 7));
+  return localDate(date);
+}
+
+/**
+ * When an invite stops: a day on the calendar, a shortcut, or no end at all.
+ * Shared by the new invite sheet and "Change end date".
+ */
+function ExpiryField({
+  day,
+  noExpiry,
+  today,
+  onDay,
+  onNoExpiry,
+}: {
+  day: string;
+  noExpiry: boolean;
+  today: string;
+  onDay: (day: string) => void;
+  onNoExpiry: (noExpiry: boolean) => void;
+}) {
+  const quick = [
+    { label: 'This Sunday', day: comingSunday() },
+    { label: '1 week', day: daysFromNow(7) },
+    { label: '1 month', day: daysFromNow(30) },
+  ];
+  return (
+    <>
+      <Field
+        label="Stops working"
+        hint={
+          noExpiry
+            ? 'Their access lasts until you revoke the invite and sign them out.'
+            : 'At the end of that day. Anyone who joined loses access then too.'
+        }
+      >
+        {(id) => (
+          <>
+            <input
+              id={id}
+              className="input"
+              type="date"
+              min={today}
+              disabled={noExpiry}
+              value={day}
+              onChange={(e) => onDay(e.target.value)}
+            />
+            <div className="chip-row mt-2" role="group" aria-label="Quick dates">
+              {quick.map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  className="chip"
+                  aria-pressed={!noExpiry && day === option.day}
+                  onClick={() => {
+                    onNoExpiry(false);
+                    onDay(option.day);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="chip"
+                aria-pressed={noExpiry}
+                onClick={() => onNoExpiry(!noExpiry)}
+              >
+                No end date
+              </button>
+            </div>
+          </>
+        )}
+      </Field>
+      {!expiryOk(day, noExpiry, today) ? (
+        <p className="tiny" style={{ color: 'var(--danger)' }}>
+          Pick a day from today on.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** Date strings in this shape sort the same way the days do. */
+function expiryOk(day: string, noExpiry: boolean, today: string): boolean {
+  return noExpiry || (Boolean(day) && day >= today);
+}
+
+/**
+ * Move an invite's end date: the weekend ran long, or a crew member is staying
+ * on for the next race. Everyone who joined with it moves too, including anyone
+ * whose access had already run out, so nobody has to scan a new QR.
+ */
+function ExpirySheet({
+  invite,
+  onClose,
+  onChanged,
+}: {
+  invite: Invite;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { backend, session } = useSession();
+  const toast = useToast();
+  const [today] = useState(() => localDate(new Date()));
+  const [day, setDay] = useState(() => {
+    // Start from the current end date while it is still ahead, else a week out.
+    const current = invite.expiresAt ? localDate(new Date(invite.expiresAt)) : '';
+    return current && current >= today ? current : daysFromNow(7);
+  });
+  const [noExpiry, setNoExpiry] = useState(!invite.expiresAt);
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (!backend || !session) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await backend.setInviteExpiry(session, invite.id, noExpiry ? null : endOfDay(day).toISOString());
+      toast(noExpiry ? 'End date removed' : `Now ends ${formatDateTime(endOfDay(day).toISOString())}`);
+      onChanged();
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not change the end date.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet
+      title={invite.label}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || !expiryOk(day, noExpiry, today)}
+            onClick={() => void save()}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="small muted">
+          {invite.expiresAt ? `Currently ends ${formatDateTime(invite.expiresAt)}.` : 'Currently has no end date.'}{' '}
+          {invite.usedCount
+            ? `The ${plural(invite.usedCount, 'person', 'people')} who joined with it move to the new date too.`
+            : 'Nobody has joined with it yet.'}
+        </p>
+        <ExpiryField day={day} noExpiry={noExpiry} today={today} onDay={setDay} onNoExpiry={setNoExpiry} />
+        {error ? (
+          <p className="small" style={{ color: 'var(--danger)' }}>
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Sheet>
+  );
+}
+
+/**
+ * Make an invite: who it is for, what it opens, and when it stops.
+ *
+ * The role is a starting point. Picking one ticks the boxes that role has
+ * always had, so an ordinary invite is three taps; the boxes are there for the
+ * volunteer who should also see the food plan, or the crew lead who should
+ * not touch transport. Until a box is touched, the ticks follow the role and
+ * the event as they change.
+ */
 function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { backend, session } = useSession();
   const toast = useToast();
@@ -825,40 +1064,61 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const destinations = useDestinations(eventId || undefined);
   const [destinationId, setDestinationId] = useState('');
   const [role, setRole] = useState<Role>('volunteer');
+  const [picked, setPicked] = useState<Access[]>(() => presetAccess('volunteer'));
+  const [touched, setTouched] = useState(false);
+  const [expiryDay, setExpiryDay] = useState(() => daysFromNow(4));
+  const [noExpiry, setNoExpiry] = useState(false);
+  const [label, setLabel] = useState('');
   const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [today] = useState(() => localDate(new Date()));
 
-  const create = async () => {
-    if (!backend || !session) return;
-    const scope: Scope = {
-      // Crew may be given every event, which makes them warehouse crew: stock,
-      // stocktakes and templates as well as packing. Everyone else is pinned
-      // to one event.
-      eventId: eventId || null,
-      // Only a volunteer gets pinned to a single aid station; a driver needs the
-      // whole event to see every stop on their run.
-      destinationId: role === 'volunteer' ? destinationId || null : null,
-    };
-    const destination = destinations?.find((entry) => entry.id === destinationId);
-    const event = events?.find((entry) => entry.id === eventId);
-    const label =
-      role === 'volunteer' && destination
-        ? destination.name
-        : `${ROLE_LABELS[role]} — ${event ? event.name : 'all events'}`;
-
-    try {
-      await backend.createInvite(session, { role, scope, label });
-      toast('Invite created');
-      onCreated();
-      onClose();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not create the invite.');
-    }
+  const scope: Scope = {
+    eventId: eventId || null,
+    destinationId: eventId ? destinationId || null : null,
   };
+
+  // Ticks follow the role and the event until someone changes one by hand.
+  const follow = (nextRole: Role, nextScope: Scope) => {
+    if (!touched) setPicked(presetAccess(nextRole, nextScope));
+  };
+
+  const access = normaliseAccess(role, scope, picked);
+  const destination = destinations?.find((entry) => entry.id === destinationId);
+  const event = events?.find((entry) => entry.id === eventId);
+  const autoLabel = destination
+    ? `${destination.name}${role === 'volunteer' ? '' : ` · ${ROLE_LABELS[role]}`}`
+    : `${ROLE_LABELS[role]} · ${event ? event.name : 'all events'}`;
 
   const needsDestination = role === 'volunteer';
   // Only crew can be let loose on the whole warehouse; a driver or a volunteer
   // without an event would have nothing to be shown.
   const needsEvent = role !== 'crew';
+  const expiry = noExpiry ? null : endOfDay(expiryDay);
+  const expiryValid = expiryOk(expiryDay, noExpiry, today);
+  const ready =
+    (!needsEvent || eventId) && (!needsDestination || destinationId) && expiryValid && !busy;
+
+  const create = async () => {
+    if (!backend || !session) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await backend.createInvite(session, {
+        role,
+        scope,
+        label: label.trim() || autoLabel,
+        expiresAt: expiry ? expiry.toISOString() : null,
+        access,
+      });
+      toast('Invite created');
+      onCreated();
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not create the invite.');
+      setBusy(false);
+    }
+  };
 
   return (
     <Sheet
@@ -869,25 +1129,36 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={(needsEvent && !eventId) || (needsDestination && !destinationId)}
-            onClick={() => void create()}
-          >
-            Create
+          <button type="button" className="btn btn-primary" disabled={!ready} onClick={() => void create()}>
+            {busy ? 'Creating…' : 'Create'}
           </button>
         </>
       }
     >
       <div className="stack">
-        <Field label="Access level">
-          {(id) => (
-            <select id={id} className="select" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-              <option value="volunteer">Volunteer — one aid station</option>
-              <option value="driver">Driver — their loads for one event</option>
-              <option value="crew">Crew — pack and run one event, or the whole warehouse</option>
-            </select>
+        <Field label="Who is it for?">
+          {() => (
+            <div className="chip-row" role="group" aria-label="Who is it for?">
+              {(['volunteer', 'driver', 'crew'] as Role[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className="chip"
+                  aria-pressed={role === option}
+                  onClick={() => {
+                    setRole(option);
+                    const nextScope = {
+                      ...scope,
+                      destinationId: option === 'volunteer' ? scope.destinationId : null,
+                    };
+                    if (option !== 'volunteer') setDestinationId('');
+                    follow(option, nextScope);
+                  }}
+                >
+                  {ROLE_LABELS[option]}
+                </button>
+              ))}
+            </div>
           )}
         </Field>
         <p className="tiny muted">{ROLE_BLURBS[role]}</p>
@@ -895,10 +1166,8 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
         <Field
           label="Event"
           hint={
-            role === 'crew'
-              ? eventId
-                ? 'They will see this event and the catalogue, and nothing warehouse-wide.'
-                : 'Every event, plus stock, stocktakes and templates. For the warehouse crew.'
+            role === 'crew' && !eventId
+              ? 'Every event, plus the warehouse: stock, stocktakes and templates.'
               : undefined
           }
         >
@@ -910,20 +1179,28 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
               onChange={(e) => {
                 setEventId(e.target.value);
                 setDestinationId('');
+                follow(role, { eventId: e.target.value || null, destinationId: null });
               }}
             >
               <option value="">{needsEvent ? 'Choose an event' : 'All events (warehouse crew)'}</option>
-              {(events ?? []).map((event) => (
-                <option key={event.id} value={event.id}>
-                  {event.name}
+              {(events ?? []).map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name}
                 </option>
               ))}
             </select>
           )}
         </Field>
 
-        {needsDestination ? (
-          <Field label="Aid station" hint="They will see this packlist and nothing else.">
+        {eventId ? (
+          <Field
+            label="Aid station"
+            hint={
+              needsDestination
+                ? 'They see this station’s packlist and no other.'
+                : 'Leave on every station unless they only work one.'
+            }
+          >
             {(id) => (
               <select
                 id={id}
@@ -931,16 +1208,84 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
                 value={destinationId}
                 onChange={(e) => setDestinationId(e.target.value)}
               >
-                <option value="">Choose a destination</option>
-                {(destinations ?? []).map((destination) => (
-                  <option key={destination.id} value={destination.id}>
-                    {destination.name}
+                <option value="">{needsDestination ? 'Choose a station' : 'Every station'}</option>
+                {(destinations ?? []).map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.name}
                   </option>
                 ))}
               </select>
             )}
           </Field>
         ) : null}
+
+        <div>
+          <div className="spread">
+            <span className="small strong">What they can do</span>
+            {access ? <Pill tone="accent">Custom</Pill> : null}
+          </div>
+          <p className="tiny muted mt-1">
+            They always see the packlists for {destination ? destination.name : event ? event.name : 'every event'}.
+          </p>
+          {ACCESS_OPTIONS.map((option) => {
+            const off = Boolean(option.warehouse && eventId);
+            return (
+              <label key={option.key} className="checkbox" style={{ opacity: off ? 0.45 : 1 }}>
+                <input
+                  type="checkbox"
+                  disabled={off}
+                  checked={!off && picked.includes(option.key)}
+                  onChange={(changed) => {
+                    setTouched(true);
+                    setPicked((current) =>
+                      changed.target.checked
+                        ? [...current, option.key]
+                        : current.filter((key) => key !== option.key),
+                    );
+                  }}
+                />
+                <span>
+                  <span className="strong">{option.label}</span>
+                  <span className="tiny muted" style={{ display: 'block' }}>
+                    {off ? 'Only on an invite for all events.' : option.hint}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+          {access ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm mt-2"
+              onClick={() => {
+                setTouched(false);
+                setPicked(presetAccess(role, scope));
+              }}
+            >
+              Back to the usual for {ROLE_LABELS[role].toLowerCase()}s
+            </button>
+          ) : null}
+        </div>
+
+        <ExpiryField
+          day={expiryDay}
+          noExpiry={noExpiry}
+          today={today}
+          onDay={setExpiryDay}
+          onNoExpiry={setNoExpiry}
+        />
+
+        <Field label="Name on the invite" hint="So you can tell the invites apart. Optional.">
+          {(id) => (
+            <input
+              id={id}
+              className="input"
+              value={label}
+              placeholder={autoLabel}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+          )}
+        </Field>
 
         {error ? (
           <p className="small" style={{ color: 'var(--danger)' }}>

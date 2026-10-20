@@ -406,6 +406,21 @@ describe('invites and volunteer access', () => {
     await expect(backend.joinWithInvite(invite.token, 'Tom')).rejects.toThrow(/revoked/i);
   });
 
+  it('lets an expired invite be extended and used again', async () => {
+    const admin = await adminSession();
+    const invite = await backend.createInvite(admin, {
+      role: 'volunteer', scope: UNSCOPED, label: 'Aid 1', expiresAt: '2020-01-01T00:00:00.000Z',
+    });
+    await expect(backend.joinWithInvite(invite.token, 'Tom')).rejects.toThrow(/expired/i);
+
+    const later = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    const changed = await backend.setInviteExpiry(admin, invite.id, later);
+    expect(changed.expiresAt).toBe(later);
+
+    const tom = await backend.joinWithInvite(invite.token, 'Tom');
+    expect(tom.expiresAt).toBe(later);
+  });
+
   it('takes a deleted invite off the list and out of use', async () => {
     const admin = await adminSession();
     const invite = await backend.createInvite(admin, {
