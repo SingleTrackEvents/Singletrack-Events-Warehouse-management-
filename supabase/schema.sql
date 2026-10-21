@@ -500,6 +500,57 @@ begin
 end;
 $$;
 
+-- Link the people who joined an invite before memberships remembered it.
+-- They are found by what redeeming gave them: the same role, scope and end
+-- date to the millisecond. Linked as they are found, so this happens once.
+-- Called by the functions below that change an invite and its people.
+create or replace function public.link_invite_members(p_invite uuid)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  found_invite public.invites;
+begin
+  select * into found_invite from public.invites where id = p_invite;
+  if not found or found_invite.expires_at is null then
+    return;
+  end if;
+  update public.memberships set invite_id = p_invite
+  where invite_id is null
+    and role = found_invite.role
+    and role <> 'admin'
+    and event_id is not distinct from found_invite.event_id
+    and destination_id is not distinct from found_invite.destination_id
+    and expires_at = found_invite.expires_at;
+end;
+$$;
+
+-- Refuse a role, scope and set of boxes that make no sense together. An
+-- admin is never scoped or boxed; a station means nothing without its event;
+-- and only known boxes may be ticked.
+create or replace function public.check_access(
+  p_role text, p_event text, p_destination text, p_access text[]
+) returns void
+language plpgsql immutable as $$
+begin
+  if p_role not in ('admin', 'crew', 'driver', 'volunteer') then
+    raise exception 'Unknown role %', p_role;
+  end if;
+  if p_role = 'admin'
+     and (p_event is not null or p_destination is not null or p_access is not null) then
+    raise exception 'An admin has every event and every box';
+  end if;
+  if p_destination is not null and p_event is null then
+    raise exception 'A station needs its event';
+  end if;
+  if p_access is not null and not p_access <@ array[
+    'receive', 'pack', 'deliver', 'loads', 'catalogue', 'stock', 'food',
+    'events', 'shopping', 'stocktakes', 'templates'
+  ] then
+    raise exception 'Unknown access in %', p_access;
+  end if;
+end;
+$$;
+
 -- Move an invite's end date, and everyone who joined with it, in one go.
 -- Later, sooner or none at all. Lapsed access comes back with a later date,
 -- which is the point: the weekend ran long and the QRs are already printed.
@@ -509,26 +560,12 @@ returns public.invites
 language plpgsql security definer set search_path = public as $$
 declare
   changed public.invites;
-  before public.invites;
 begin
   if public.my_role() is distinct from 'admin' then
     raise exception 'Only an admin can change an end date';
   end if;
 
-  select * into before from public.invites where id = p_invite;
-
-  -- People who joined before memberships remembered their invite are found by
-  -- what redeeming gave them: the same role, scope and end date to the
-  -- millisecond. They are linked as they are found, so this happens once.
-  if found and before.expires_at is not null then
-    update public.memberships set invite_id = p_invite
-    where invite_id is null
-      and role = before.role
-      and role <> 'admin'
-      and event_id is not distinct from before.event_id
-      and destination_id is not distinct from before.destination_id
-      and expires_at = before.expires_at;
-  end if;
+  perform public.link_invite_members(p_invite);
 
   update public.invites set expires_at = p_expires_at
   where id = p_invite and revoked_at is null
@@ -540,6 +577,118 @@ begin
   update public.memberships set expires_at = p_expires_at
   where invite_id = p_invite and role <> 'admin';
   return changed;
+end;
+$$;
+
+-- Change what an invite gives, and everyone who joined with it. The end date
+-- has its own function above. A revoked invite is left as it is.
+create or replace function public.update_invite(
+  p_invite uuid, p_role text, p_event text, p_destination text,
+  p_access text[], p_label text
+) returns public.invites
+language plpgsql security definer set search_path = public as $$
+declare
+  changed public.invites;
+begin
+  if public.my_role() is distinct from 'admin' then
+    raise exception 'Only an admin can change what an invite gives';
+  end if;
+  perform public.check_access(p_role, p_event, p_destination, p_access);
+  -- Linked before the change, while they still match what it used to give.
+  perform public.link_invite_members(p_invite);
+
+  update public.invites set
+    role = p_role,
+    event_id = p_event,
+    destination_id = p_destination,
+    access = p_access,
+    label = coalesce(nullif(trim(p_label), ''), label)
+  where id = p_invite and revoked_at is null
+  returning * into changed;
+  if not found then
+    raise exception 'That one is gone or has been revoked';
+  end if;
+
+  update public.memberships set
+    role = p_role,
+    event_id = p_event,
+    destination_id = p_destination,
+    access = p_access
+  where invite_id = p_invite and role <> 'admin';
+  return changed;
+end;
+$$;
+
+-- Everyone with access, for the People list. Admins only. The email comes
+-- from Supabase's own users table, which the app cannot read directly.
+create or replace function public.list_members()
+returns table (
+  user_id uuid, role text, event_id text, destination_id text,
+  display_name text, expires_at timestamptz, access text[],
+  invite_id uuid, created_at timestamptz, email text
+)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if public.my_role() is distinct from 'admin' then
+    raise exception 'Only an admin can see who has access';
+  end if;
+  return query
+    select m.user_id, m.role, m.event_id, m.destination_id, m.display_name,
+           m.expires_at, m.access, m.invite_id, m.created_at, u.email::text
+    from public.memberships m
+    left join auth.users u on u.id = m.user_id
+    order by m.display_name, m.created_at;
+end;
+$$;
+
+-- Change one person. They stop following their invite from here on, so a
+-- later change to the invite does not undo this. Nobody changes their own
+-- access, which also means there is always an admin left.
+create or replace function public.update_member(
+  p_user uuid, p_role text, p_event text, p_destination text,
+  p_access text[], p_expires_at timestamptz
+) returns public.memberships
+language plpgsql security definer set search_path = public as $$
+declare
+  changed public.memberships;
+begin
+  if public.my_role() is distinct from 'admin' then
+    raise exception 'Only an admin can change someone''s access';
+  end if;
+  if p_user = auth.uid() then
+    raise exception 'You cannot change your own access. Ask another admin';
+  end if;
+  perform public.check_access(p_role, p_event, p_destination, p_access);
+
+  update public.memberships set
+    role = p_role,
+    event_id = p_event,
+    destination_id = p_destination,
+    access = p_access,
+    expires_at = case when p_role = 'admin' then null else p_expires_at end,
+    invite_id = null
+  where user_id = p_user
+  returning * into changed;
+  if not found then
+    raise exception 'That person no longer has access';
+  end if;
+  return changed;
+end;
+$$;
+
+-- Take someone's access away. Their work stays; their phone is signed out
+-- the next time it asks the server who it is.
+create or replace function public.remove_member(p_user uuid)
+returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if public.my_role() is distinct from 'admin' then
+    raise exception 'Only an admin can remove someone';
+  end if;
+  if p_user = auth.uid() then
+    raise exception 'You cannot remove yourself. Ask another admin';
+  end if;
+  delete from public.memberships where user_id = p_user;
 end;
 $$;
 
@@ -660,6 +809,15 @@ grant execute on function public.ensure_membership(text) to authenticated;
 grant execute on function public.redeem_invite(text, text) to authenticated;
 revoke all on function public.set_invite_expiry(uuid, timestamptz) from public;
 grant execute on function public.set_invite_expiry(uuid, timestamptz) to authenticated;
+revoke all on function public.update_invite(uuid, text, text, text, text[], text) from public;
+grant execute on function public.update_invite(uuid, text, text, text, text[], text) to authenticated;
+revoke all on function public.list_members() from public;
+grant execute on function public.list_members() to authenticated;
+revoke all on function public.update_member(uuid, text, text, text, text[], timestamptz) from public;
+grant execute on function public.update_member(uuid, text, text, text, text[], timestamptz) to authenticated;
+revoke all on function public.remove_member(uuid) from public;
+grant execute on function public.remove_member(uuid) to authenticated;
+revoke all on function public.link_invite_members(uuid) from public;
 grant execute on function public.update_display_name(text) to authenticated;
 
 -- Older deployments had a laxer scope check; remove it so nothing calls it.

@@ -286,6 +286,18 @@ long does not mean printing new QRs. A revoked invite stays revoked.
 membership now remembers the invite it came from, and people who joined before
 that are matched by the role, scope and end date the invite gave them.
 
+"Edit access" on an invite card changes its role, event, station, boxes and
+name, and everyone still following it changes too (`update_invite()`).
+
+**People**, under the invites, lists everyone with access: name, email or
+"Joined by invite", role, scope and end date. Tapping someone changes just
+them, including making them an admin, or removes their access
+(`update_member()`, `remove_member()`). A person changed on their own stops
+following their invite, so a later change to the invite leaves them where they
+were put. Nobody can change or remove themselves, which also means there is
+always an admin left. A phone picks up a change, or is signed out after a
+removal, the next time the app comes to the foreground with signal.
+
 The rules are enforced in three places, because two of them are only courtesies:
 the screens hide what a role cannot do, `update()` in `src/db/repo.ts` drops a
 forbidden change before it can reach this device's database, and

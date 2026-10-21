@@ -1010,3 +1010,135 @@ describe('changing the end date of an invite redeemed before the link existed', 
     await db.close();
   });
 });
+
+describe('changing what an invite gives', () => {
+  const inviteId = async (db: Awaited<ReturnType<typeof seeded>>) =>
+    (await db.query<{ id: string }>(`select id from public.invites where token = 'AAAA-BBBB'`)).rows[0].id;
+
+  it('moves everyone who joined with it', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await db.query(
+      `select public.update_invite($1, 'volunteer', $2, $3, array['receive', 'food'], '')`,
+      [await inviteId(db), EVENT, OTHER_STATION],
+    );
+    const { rows } = await db.query<{ destination_id: string; access: string[] }>(
+      'select destination_id, access from public.memberships where user_id = $1',
+      [VOLUNTEER],
+    );
+    expect(rows[0]).toEqual({ destination_id: OTHER_STATION, access: ['receive', 'food'] });
+    await db.close();
+  });
+
+  it('keeps the name when none is given, and takes a new one when it is', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const id = await inviteId(db);
+    await db.query(`select public.update_invite($1, 'volunteer', $2, $3, null, '  ')`, [id, EVENT, MY_STATION]);
+    expect((await db.query<{ label: string }>('select label from public.invites where id = $1', [id])).rows[0].label)
+      .toBe('Aid 3');
+    await db.query(`select public.update_invite($1, 'volunteer', $2, $3, null, 'Aid 3 north')`, [id, EVENT, MY_STATION]);
+    expect((await db.query<{ label: string }>('select label from public.invites where id = $1', [id])).rows[0].label)
+      .toBe('Aid 3 north');
+    await db.close();
+  });
+
+  it('refuses nonsense: an unknown box, or a station with no event', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const id = await inviteId(db);
+    await expect(
+      db.query(`select public.update_invite($1, 'volunteer', $2, $3, array['everything'], '')`, [id, EVENT, MY_STATION]),
+    ).rejects.toThrow(/unknown access/i);
+    await expect(
+      db.query(`select public.update_invite($1, 'volunteer', null, $2, null, '')`, [id, MY_STATION]),
+    ).rejects.toThrow(/needs its event/i);
+    await db.close();
+  });
+
+  it('is refused to anyone but an admin', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const id = await inviteId(db);
+    await db.actAs(VOLUNTEER);
+    await expect(
+      db.query(`select public.update_invite($1, 'crew', null, null, null, '')`, [id]),
+    ).rejects.toThrow(/only an admin/i);
+    await db.close();
+  });
+});
+
+describe('the people list', () => {
+  it('shows an admin everyone, with their email where they have one', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    const { rows } = await db.query<{ display_name: string; email: string | null; role: string }>(
+      'select display_name, email, role from public.list_members()',
+    );
+    expect(rows).toEqual([
+      { display_name: 'Chad', email: 'chad@singletrack.com.au', role: 'admin' },
+      { display_name: 'Tom Reilly', email: 'tom@example.com', role: 'volunteer' },
+    ]);
+    await db.close();
+  });
+
+  it('is refused to anyone else', async () => {
+    const db = await seeded();
+    await expect(db.query('select * from public.list_members()')).rejects.toThrow(/only an admin/i);
+    await db.close();
+  });
+
+  it('changes one person and stops them following their invite', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await db.query(
+      `select public.update_member($1, 'crew', $2, null, null, '2030-01-01T00:00:00Z')`,
+      [VOLUNTEER, EVENT],
+    );
+    const { rows: [tom] } = await db.query<{ role: string; destination_id: string | null; invite_id: string | null }>(
+      'select role, destination_id, invite_id from public.memberships where user_id = $1',
+      [VOLUNTEER],
+    );
+    expect(tom).toEqual({ role: 'crew', destination_id: null, invite_id: null });
+
+    // A later change to the invite leaves Tom where the admin put him.
+    const { rows: [invite] } = await db.query<{ id: string }>(
+      `select id from public.invites where token = 'AAAA-BBBB'`,
+    );
+    await db.query(`select public.set_invite_expiry($1, '2026-01-01T00:00:00Z')`, [invite.id]);
+    const { rows: [after] } = await db.query<{ expires_at: string }>(
+      'select expires_at from public.memberships where user_id = $1',
+      [VOLUNTEER],
+    );
+    expect(new Date(after.expires_at).toISOString()).toBe('2030-01-01T00:00:00.000Z');
+    await db.close();
+  });
+
+  it('will not let an admin change or remove themselves', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await expect(
+      db.query(`select public.update_member($1, 'crew', null, null, null, null)`, [ADMIN]),
+    ).rejects.toThrow(/your own access/i);
+    await expect(db.query(`select public.remove_member($1)`, [ADMIN])).rejects.toThrow(/yourself/i);
+    await db.close();
+  });
+
+  it('removes someone, who then reads nothing', async () => {
+    const db = await seeded();
+    await db.actAs(ADMIN);
+    await db.query(`select public.remove_member($1)`, [VOLUNTEER]);
+    await db.actAs(VOLUNTEER);
+    await db.enforceRls();
+    expect((await db.query('select id from public.records')).rows).toHaveLength(0);
+    await db.close();
+  });
+
+  it('will not let a volunteer change anyone', async () => {
+    const db = await seeded();
+    await expect(
+      db.query(`select public.update_member($1, 'admin', null, null, null, null)`, [VOLUNTEER]),
+    ).rejects.toThrow(/only an admin/i);
+    await db.close();
+  });
+});

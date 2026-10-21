@@ -164,6 +164,29 @@ export interface Invite {
   access?: Access[] | null;
 }
 
+/** What an invite or a person is given: the parts the access editor sets. */
+export interface AccessGrant {
+  role: Role;
+  scope: Scope;
+  /** Ticked boxes; null means the role's own rules. */
+  access: Access[] | null;
+}
+
+/** Someone with access, as the People list shows them. */
+export interface Member {
+  userId: string;
+  displayName: string;
+  /** Null for people who joined by invite. */
+  email: string | null;
+  role: Role;
+  scope: Scope;
+  access: Access[] | null;
+  expiresAt: string | null;
+  /** The invite they still follow, if any. Changing them on their own unlinks it. */
+  inviteId: string | null;
+  createdAt: string;
+}
+
 export interface CreateInviteInput {
   role: Role;
   scope: Scope;
@@ -319,6 +342,25 @@ export interface SyncBackend {
    * printing new QRs.
    */
   setInviteExpiry(session: Session, inviteId: string, expiresAt: string | null): Promise<Invite>;
+  /**
+   * Change what an invite gives, and everyone still following it. A blank
+   * label keeps the one it has.
+   */
+  updateInvite(session: Session, inviteId: string, grant: AccessGrant & { label: string }): Promise<Invite>;
+
+  /** Everyone with access. Admins only. */
+  listMembers(session: Session): Promise<Member[]>;
+  /**
+   * Change one person. They stop following their invite, so a later change
+   * to it does not undo this. Nobody may change themselves.
+   */
+  updateMember(
+    session: Session,
+    userId: string,
+    grant: AccessGrant & { expiresAt: string | null },
+  ): Promise<Member>;
+  /** Take someone's access away. Nobody may remove themselves. */
+  removeMember(session: Session, userId: string): Promise<void>;
 }
 
 export type SyncErrorKind = 'auth' | 'permission' | 'network' | 'conflict' | 'invalid';
