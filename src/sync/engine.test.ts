@@ -557,6 +557,65 @@ describe('signing in with a code instead of a link', () => {
   });
 });
 
+describe('signing in with a password', () => {
+  it('creates an account and signs in with it, nothing emailed', async () => {
+    const created = await backend.createAccountWithPassword('jess@singletrack.test', 'ridge-line-42');
+    expect(created.email).toBe('jess@singletrack.test');
+
+    await backend.signOut();
+    const again = await backend.signInWithPassword('jess@singletrack.test', 'ridge-line-42');
+    expect(again.userId).toBe(created.userId);
+    expect(await backend.currentSession()).toMatchObject({ userId: created.userId });
+  });
+
+  it('refuses the wrong password, and an address with no account', async () => {
+    await backend.createAccountWithPassword('jess@singletrack.test', 'ridge-line-42');
+    await expect(backend.signInWithPassword('jess@singletrack.test', 'wrong-one')).rejects.toThrow(
+      /do not match/i,
+    );
+    await expect(backend.signInWithPassword('nobody@singletrack.test', 'ridge-line-42')).rejects.toThrow(
+      /do not match/i,
+    );
+  });
+
+  it('will not create a second account for the same address', async () => {
+    await backend.createAccountWithPassword('jess@singletrack.test', 'ridge-line-42');
+    await expect(
+      backend.createAccountWithPassword('Jess@SingleTrack.test', 'another-one'),
+    ).rejects.toThrow(/already an account/i);
+  });
+
+  it('insists on a password worth having', async () => {
+    await expect(backend.createAccountWithPassword('jess@singletrack.test', 'short')).rejects.toThrow(
+      /at least 8/i,
+    );
+    await expect(backend.createAccountWithPassword('jess@singletrack.test', ' padded-out ')).rejects.toThrow(
+      /space/i,
+    );
+  });
+
+  it('lets an account that signed in by code add a password afterwards', async () => {
+    await adminSession();
+    await backend.setPassword('ridge-line-42');
+    await backend.signOut();
+    const session = await backend.signInWithPassword('jess@singletrack.test', 'ridge-line-42');
+    expect(session.role).toBe('admin');
+  });
+
+  it('keeps a password off a guest session', async () => {
+    const admin = await adminSession();
+    const invite = await backend.createInvite(admin, {
+      label: 'Aid station',
+      role: 'volunteer',
+      scope: UNSCOPED,
+      expiresAt: null,
+    });
+    await backend.signOut();
+    await backend.joinWithInvite(invite.token, 'Sam');
+    await expect(backend.setPassword('ridge-line-42')).rejects.toThrow(/email account/i);
+  });
+});
+
 describe('naming yourself', () => {
   it('guesses a sensible name from the email to start with', async () => {
     const challenge = await backend.signInWithEmail('jess.nolan@singletrack.test');

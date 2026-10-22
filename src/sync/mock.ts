@@ -5,6 +5,7 @@ import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import { shouldReplace } from '../domain/backup';
 import { cleanDisplayName, displayNameFromEmail } from './names';
+import { passwordProblem } from './passwords';
 import { inScope, readableTableFor, readsReference, writableFields, writableTables } from './permissions';
 import type {
   AccessGrant,
@@ -76,11 +77,18 @@ function mergePermitted(
   return merged as unknown as SyncMeta;
 }
 
+/** An email account with a password. The stand-in stores it as typed: it is a demo, not a vault. */
+interface StoredAccount {
+  email: string;
+  password: string;
+}
+
 class MockServerDb extends Dexie {
   rows!: Table<StoredRow, string>;
   sessions!: Table<StoredSession, string>;
   invites!: Table<Invite, string>;
   meta!: Table<{ key: string; value: number }, string>;
+  accounts!: Table<StoredAccount, string>;
 
   constructor() {
     super('singletrack-sync-mock');
@@ -89,6 +97,9 @@ class MockServerDb extends Dexie {
       sessions: 'key, userId',
       invites: 'id, token',
       meta: 'key',
+    });
+    this.version(2).stores({
+      accounts: 'email',
     });
   }
 }
@@ -201,6 +212,45 @@ export class MockBackend implements SyncBackend {
       throw new SyncError('That code did not work. Check it and try again.', 'auth');
     }
     return this.completeEmailSignIn(`email:${address}`);
+  }
+
+  async signInWithPassword(email: string, password: string): Promise<Session> {
+    const address = email.trim().toLowerCase();
+    const account = await server.accounts.get(address);
+    if (!account || account.password !== password) {
+      throw new SyncError(
+        'That email and password do not match. If you have never set a password on this account, ' +
+          'sign in with a code once and add one under Accounts & sync.',
+        'auth',
+      );
+    }
+    return this.completeEmailSignIn(`email:${address}`);
+  }
+
+  async createAccountWithPassword(email: string, password: string): Promise<Session> {
+    const address = email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) {
+      throw new SyncError('That does not look like an email address.', 'invalid');
+    }
+    const problem = passwordProblem(password);
+    if (problem) throw new SyncError(problem, 'invalid');
+    if (await server.accounts.get(address)) {
+      throw new SyncError(
+        'There is already an account for that address. Sign in with its password, or with a code if it has none.',
+        'auth',
+      );
+    }
+    await server.accounts.put({ email: address, password });
+    return this.completeEmailSignIn(`email:${address}`);
+  }
+
+  async setPassword(password: string): Promise<void> {
+    const current = loadSession();
+    if (!current) throw new SyncError('Not signed in.', 'auth');
+    if (!current.email) throw new SyncError('Only an email account can have a password.', 'permission');
+    const problem = passwordProblem(password);
+    if (problem) throw new SyncError(problem, 'invalid');
+    await server.accounts.put({ email: current.email, password });
   }
 
   async completeEmailSignIn(token: string): Promise<Session> {
@@ -570,7 +620,13 @@ export class MockBackend implements SyncBackend {
 
 /** Wipe the stand-in server. Only used by tests and the reset button. */
 export async function resetMockServer(): Promise<void> {
-  await Promise.all([server.rows.clear(), server.sessions.clear(), server.invites.clear(), server.meta.clear()]);
+  await Promise.all([
+    server.rows.clear(),
+    server.sessions.clear(),
+    server.invites.clear(),
+    server.meta.clear(),
+    server.accounts.clear(),
+  ]);
   saveSession(null);
 }
 
