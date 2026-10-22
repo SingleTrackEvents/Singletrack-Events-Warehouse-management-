@@ -10,7 +10,8 @@ import { SUPABASE_CONFIGURED } from '../sync';
 import { clearAuthRedirect, getAuthRedirect } from '../sync/authRedirect';
 import { useDestinations, useEvents } from '../hooks/useDb';
 import { describeRole } from '../sync/permissions';
-import { ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
+import { ROLE_BLURBS, ROLE_LABELS, SyncError } from '../sync/types';
+import { MIN_PASSWORD_LENGTH, passwordProblem } from '../sync/passwords';
 import type { Invite, Member, Passkey as PasskeyType, Scope } from '../sync/types';
 import { AccessEditor } from '../components/AccessEditor';
 import { draftReady, grantOf } from '../domain/accessDraft';
@@ -22,17 +23,19 @@ import { useLiveQuery } from 'dexie-react-hooks';
 /**
  * Accounts and access.
  *
- * Two ways in, deliberately different. Core crew sign in with an email link and
- * keep that access. Volunteers scan a QR at the aid station, type their name,
- * and get exactly one packlist for one weekend — no inbox, no password, nothing
- * to remember, because race morning is the worst possible time to make someone
- * set up an account.
+ * Two ways in, deliberately different. Core crew sign in with a password, or an
+ * emailed code, and keep that access. Volunteers scan a QR at the aid station,
+ * type their name, and get exactly one packlist for one weekend — no inbox, no
+ * password, nothing to remember, because race morning is the worst possible
+ * time to make someone set up an account.
  */
 export default function AccessScreen() {
   const { backend, session, connectDemo, connectServer, disconnect, signOut, setSession, sync, pending, phase, lastSyncAt, lastError } =
     useSession();
   const toast = useToast();
   const [signingIn, setSigningIn] = useState(false);
+  const [passwordSignIn, setPasswordSignIn] = useState(false);
+  const [settingPassword, setSettingPassword] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
@@ -152,18 +155,41 @@ export default function AccessScreen() {
         <div className="card card-pad mb-3">
           <p className="small strong">First time on this phone?</p>
           <p className="tiny muted mt-2">
-            Sign in with email once. Then add a passkey and this phone will sign you in with your
-            face or fingerprint from then on, no email involved.
+            {backend.signInWithPassword
+              ? 'Sign in with your email and password. No password yet? Have a code emailed instead, ' +
+                'then set one under Accounts & sync. Add a passkey after that and this phone will sign ' +
+                'you in with your face or fingerprint from then on.'
+              : 'Sign in with email once. Then add a passkey and this phone will sign you in with your ' +
+                'face or fingerprint from then on, no email involved.'}
           </p>
         </div>
 
-        <button
-          type="button"
-          className="btn btn-primary btn-lg btn-block mb-4"
-          onClick={() => setSigningIn(true)}
-        >
-          ✉️ Sign in with email
-        </button>
+        {backend.signInWithPassword ? (
+          <>
+            <button
+              type="button"
+              className="btn btn-primary btn-lg btn-block mb-2"
+              onClick={() => setPasswordSignIn(true)}
+            >
+              🔒 Sign in with password
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline btn-block mb-4"
+              onClick={() => setSigningIn(true)}
+            >
+              ✉️ Email me a code instead
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-primary btn-lg btn-block mb-4"
+            onClick={() => setSigningIn(true)}
+          >
+            ✉️ Sign in with email
+          </button>
+        )}
 
         {backend.supportsPasskeys && backend.signInWithPasskey ? (
           <>
@@ -198,7 +224,8 @@ export default function AccessScreen() {
           </>
         ) : (
           <p className="tiny muted center mb-3">
-            This browser does not support passkeys, so email sign-in is the only option here.
+            This browser does not support passkeys, so {backend.signInWithPassword ? 'password or email' : 'email'}{' '}
+            sign-in is the only option here.
           </p>
         )}
 
@@ -209,6 +236,7 @@ export default function AccessScreen() {
         )}
 
         {signingIn ? <SignInSheet onClose={() => setSigningIn(false)} /> : null}
+        {passwordSignIn ? <PasswordSheet onClose={() => setPasswordSignIn(false)} /> : null}
       </Screen>
     );
   }
@@ -269,6 +297,25 @@ export default function AccessScreen() {
         </button>
       </div>
 
+      {backend.setPassword && !session.guest ? (
+        <div className="card card-pad mb-4">
+          <div className="spread mb-2">
+            <span className="strong">Password</span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setSettingPassword(true)}
+            >
+              Set or change
+            </button>
+          </div>
+          <p className="tiny muted">
+            With a password this account can sign in on any device without waiting for an email,
+            which is the way in when there is no inbox to check.
+          </p>
+        </div>
+      ) : null}
+
       <PasskeySection />
 
       {session.role === 'admin' ? (
@@ -309,6 +356,8 @@ export default function AccessScreen() {
       ) : null}
 
       {renaming ? <RenameSheet onClose={() => setRenaming(false)} /> : null}
+
+      {settingPassword ? <SetPasswordSheet onClose={() => setSettingPassword(false)} /> : null}
 
       {signingOut ? (
         <ConfirmSheet
@@ -497,6 +546,253 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
 }
 
 /**
+ * Email and password, with nothing delivered.
+ *
+ * The invite path exists because race morning is no time to set up an account;
+ * this one exists because a code in an inbox is no use to an account with no
+ * inbox, or on a project whose mailer is down. Creating the account here only
+ * gets as far as the account: access still comes from an invite, so a new
+ * account is sent straight on to type its code.
+ */
+function PasswordSheet({ onClose }: { onClose: () => void }) {
+  const { backend, setSession } = useSession();
+  const toast = useToast();
+  const [creating, setCreating] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [again, setAgain] = useState('');
+  const [error, setError] = useState<string>();
+  const [needsInvite, setNeedsInvite] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const canCreate = backend?.createAccountWithPassword !== undefined;
+  const mismatch = creating && again.length > 0 && again !== password;
+  const ready =
+    email.trim().length > 0 &&
+    password.length > 0 &&
+    (!creating || (passwordProblem(password) === null && again === password));
+
+  const submit = async () => {
+    if (!backend?.signInWithPassword || !ready) return;
+    setError(undefined);
+    setNeedsInvite(false);
+    setBusy(true);
+    try {
+      const next = creating
+        ? await backend.createAccountWithPassword!(email, password)
+        : await backend.signInWithPassword(email, password);
+      setSession(next);
+      toast(`Signed in as ${next.displayName}`);
+      onClose();
+    } catch (cause) {
+      // The account exists and is on the device; what it lacks is an invite.
+      if (cause instanceof SyncError && cause.kind === 'permission') setNeedsInvite(true);
+      setError(cause instanceof Error ? cause.message : 'That did not work.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet
+      title={creating ? 'Create an account' : 'Sign in'}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!ready || busy}
+            onClick={() => void submit()}
+          >
+            {busy ? 'Checking…' : creating ? 'Create account' : 'Sign in'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <Field label="Email">
+          {(id) => (
+            <input
+              id={id}
+              className="input"
+              type="email"
+              inputMode="email"
+              autoCapitalize="none"
+              autoComplete="username"
+              value={email}
+              placeholder="name@example.com"
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          )}
+        </Field>
+        <Field
+          label="Password"
+          hint={creating ? `At least ${MIN_PASSWORD_LENGTH} characters.` : undefined}
+        >
+          {(id) => (
+            <input
+              id={id}
+              className="input"
+              type="password"
+              autoComplete={creating ? 'new-password' : 'current-password'}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !creating) void submit();
+              }}
+            />
+          )}
+        </Field>
+        {creating ? (
+          <Field label="Password again" hint={mismatch ? 'These do not match yet.' : undefined}>
+            {(id) => (
+              <input
+                id={id}
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                value={again}
+                onChange={(event) => setAgain(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void submit();
+                }}
+              />
+            )}
+          </Field>
+        ) : null}
+
+        {needsInvite ? (
+          <div className="card card-pad" style={{ background: 'var(--warn-bg)' }}>
+            <p className="small strong" style={{ color: 'var(--warn)' }}>
+              Account ready, access not yet
+            </p>
+            <p className="tiny mt-2">
+              Your account is on this phone. To use it you need the invite code from the crew: type
+              it next and it attaches to this account.
+            </p>
+            <Link className="btn btn-primary btn-block mt-3" to="/join" onClick={onClose}>
+              Type my invite code
+            </Link>
+          </div>
+        ) : error ? (
+          <p className="small" style={{ color: 'var(--danger)' }}>
+            {error}
+          </p>
+        ) : null}
+
+        {canCreate ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-block"
+            onClick={() => {
+              setCreating((current) => !current);
+              setError(undefined);
+              setNeedsInvite(false);
+              setAgain('');
+            }}
+          >
+            {creating ? 'I already have an account' : 'New here? Create an account'}
+          </button>
+        ) : null}
+      </div>
+    </Sheet>
+  );
+}
+
+/**
+ * Set or change the password on the signed-in account, so a crew member who
+ * only ever had a code can sign in on a phone with no inbox.
+ */
+function SetPasswordSheet({ onClose }: { onClose: () => void }) {
+  const { backend } = useSession();
+  const toast = useToast();
+  const [password, setPassword] = useState('');
+  const [again, setAgain] = useState('');
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  const problem = password ? passwordProblem(password) : null;
+  const mismatch = again.length > 0 && again !== password;
+  const ready = password.length > 0 && problem === null && again === password;
+
+  const save = async () => {
+    if (!backend?.setPassword || !ready) return;
+    setError(undefined);
+    setBusy(true);
+    try {
+      await backend.setPassword(password);
+      toast('Password set');
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save that.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet
+      title="Set a password"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!ready || busy}
+            onClick={() => void save()}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <Field label="New password" hint={problem ?? `At least ${MIN_PASSWORD_LENGTH} characters.`}>
+          {(id) => (
+            <input
+              id={id}
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Password again" hint={mismatch ? 'These do not match yet.' : undefined}>
+          {(id) => (
+            <input
+              id={id}
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              value={again}
+              onChange={(event) => setAgain(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void save();
+              }}
+            />
+          )}
+        </Field>
+        {error ? (
+          <p className="small" style={{ color: 'var(--danger)' }}>
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Sheet>
+  );
+}
+
+/**
  * Change the name the crew see against your work.
  *
  * The name guessed from an email is only ever a guess — "info@" and
@@ -659,7 +955,7 @@ function PasskeySection() {
       {removing ? (
         <ConfirmSheet
           title={`Remove ${removing.name}?`}
-          body="That device will need an email link to sign in again."
+          body="That device will need a password or an email code to sign in again."
           confirmLabel="Remove"
           tone="danger"
           onCancel={() => setRemoving(undefined)}

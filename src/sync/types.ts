@@ -284,6 +284,25 @@ export interface SyncBackend {
    */
   verifyEmailCode?(email: string, code: string): Promise<Session>;
 
+  /**
+   * Sign in with an email address and a password. Nothing is delivered, so it
+   * works on a device with no inbox and on a project whose mailer is down.
+   */
+  signInWithPassword?(email: string, password: string): Promise<Session>;
+
+  /**
+   * Create an account with a password instead of waiting for a code.
+   *
+   * The account is only ever half the story: access still comes from an
+   * invite, so for anyone but the first person this throws a `permission`
+   * error once the account exists, and the sign-in screen sends them to type
+   * their invite code. Their account stays on the device for that step.
+   */
+  createAccountWithPassword?(email: string, password: string): Promise<Session>;
+
+  /** Set or change the password on the account signed in on this device. */
+  setPassword?(password: string): Promise<void>;
+
   /** Join from an invite QR, supplying only a display name. */
   joinWithInvite(token: string, displayName: string): Promise<Session>;
 
