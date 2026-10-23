@@ -49,6 +49,7 @@ export default function EventDetailScreen() {
   const event = useEvent(eventId);
   const destinations = useDestinations(eventId);
   const [addingDestination, setAddingDestination] = useState(false);
+  const [editingDestination, setEditingDestination] = useState<Destination>();
   const [editing, setEditing] = useState(false);
   const [buildingLists, setBuildingLists] = useState(false);
   const [removing, setRemoving] = useState<Destination>();
@@ -224,6 +225,14 @@ export default function EventDetailScreen() {
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
+                  onClick={() => setEditingDestination(destination)}
+                  aria-label={`Edit ${destination.name}`}
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
                   onClick={() => setRemoving(destination)}
                   aria-label={`Remove ${destination.name}`}
                 >
@@ -240,6 +249,15 @@ export default function EventDetailScreen() {
           eventId={event.id}
           existing={destinations ?? []}
           onClose={() => setAddingDestination(false)}
+        />
+      ) : null}
+
+      {editingDestination ? (
+        <DestinationSheet
+          eventId={event.id}
+          existing={destinations ?? []}
+          destination={editingDestination}
+          onClose={() => setEditingDestination(undefined)}
         />
       ) : null}
 
@@ -283,27 +301,67 @@ export default function EventDetailScreen() {
 }
 
 /** Add a destination. Access and timings matter as much as the name out here. */
+/**
+ * Add a destination, or change one that exists.
+ *
+ * Stations get renamed when the council moves the carpark, the course km
+ * shifts with a reroute, and the crew lead changes the week before. None of
+ * that should mean removing the station and losing its packlist, so the same
+ * form that creates a destination edits it when given one.
+ */
 function DestinationSheet({
   eventId,
   existing,
+  destination,
   onClose,
 }: {
   eventId: string;
   existing: Destination[];
+  /** When set, the sheet edits this destination instead of adding a new one. */
+  destination?: Destination;
   onClose: () => void;
 }) {
   const toast = useToast();
-  const [name, setName] = useState('');
-  const [type, setType] = useState<DestinationType>('aid_station');
-  const [courseKm, setCourseKm] = useState('');
-  const [access, setAccess] = useState<AccessType>('2wd');
-  const [accessNotes, setAccessNotes] = useState('');
-  const [crewLead, setCrewLead] = useState('');
-  const [openTime, setOpenTime] = useState('06:00');
-  const [closeTime, setCloseTime] = useState('16:00');
+  const [name, setName] = useState(destination?.name ?? '');
+  const [type, setType] = useState<DestinationType>(destination?.type ?? 'aid_station');
+  const [courseKm, setCourseKm] = useState(
+    destination?.courseKm === null || destination?.courseKm === undefined ? '' : String(destination.courseKm),
+  );
+  const [access, setAccess] = useState<AccessType>(destination?.access ?? '2wd');
+  const [accessNotes, setAccessNotes] = useState(destination?.accessNotes ?? '');
+  const [crewLead, setCrewLead] = useState(destination?.crewLead ?? '');
+  const [openTime, setOpenTime] = useState(destination?.openTime || '06:00');
+  const [closeTime, setCloseTime] = useState(destination?.closeTime || '16:00');
 
   const save = async () => {
     if (!name.trim()) return;
+    if (destination) {
+      await update(db.destinations, destination.id, {
+        name: name.trim(),
+        type,
+        courseKm: courseKm.trim() ? Number(courseKm) : null,
+        access,
+        accessNotes: accessNotes.trim(),
+        crewLead: crewLead.trim(),
+        openTime,
+        closeTime,
+      });
+      // A packlist still called what the station used to be called follows the
+      // rename. One given its own name is left alone.
+      if (name.trim() !== destination.name) {
+        const packlists = alive(
+          await db.packlists.where('destinationId').equals(destination.id).toArray(),
+        );
+        for (const packlist of packlists) {
+          if (packlist.name === destination.name) {
+            await update(db.packlists, packlist.id, { name: name.trim() });
+          }
+        }
+      }
+      toast('Destination updated');
+      onClose();
+      return;
+    }
     await create(db.destinations, {
       eventId,
       name: name.trim(),
@@ -326,7 +384,7 @@ function DestinationSheet({
 
   return (
     <Sheet
-      title="New destination"
+      title={destination ? 'Edit destination' : 'New destination'}
       onClose={onClose}
       footer={
         <>
@@ -334,7 +392,7 @@ function DestinationSheet({
             Cancel
           </button>
           <button type="button" className="btn btn-primary" disabled={!name.trim()} onClick={() => void save()}>
-            Add
+            {destination ? 'Save' : 'Add'}
           </button>
         </>
       }
