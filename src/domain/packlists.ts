@@ -348,21 +348,24 @@ export async function setStatus(
     for (const { line } of owed) await update(db.packlistLines, line.id, { qtyIssued: line.qtyPacked });
   }
 
-  // Reconciling books back whatever physically came home.
+  // Reconciling books back whatever physically came home, less anything the
+  // event's home count already booked, so nothing goes on the shelf twice.
   if (status === 'reconciled' && packlist.status !== 'reconciled') {
+    const owed = lines
+      .map((line) => ({ line, qty: round2(line.qtyReturned - (line.qtyBooked ?? 0)) }))
+      .filter(({ qty }) => qty > 0);
     await recordMovements(
-      lines
-        .filter((line) => line.qtyReturned > 0)
-        .map((line) => ({
-          itemId: line.itemId,
-          qty: line.qtyReturned,
-          reason: 'return' as const,
-          refType: 'packlist' as const,
-          refId: packlist.id,
-          note: packlist.name,
-          by: options.by ?? '',
-        })),
+      owed.map(({ line, qty }) => ({
+        itemId: line.itemId,
+        qty,
+        reason: 'return' as const,
+        refType: 'packlist' as const,
+        refId: packlist.id,
+        note: packlist.name,
+        by: options.by ?? '',
+      })),
     );
+    for (const { line } of owed) await update(db.packlistLines, line.id, { qtyBooked: line.qtyReturned });
   }
 
   await update(db.packlists, packlist.id, changes);

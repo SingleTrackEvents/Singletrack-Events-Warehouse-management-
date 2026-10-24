@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
@@ -8,8 +8,8 @@ import { useSearch } from '../hooks/useSearch';
 import { useCategories, useEvent } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
-import { byVehicle, isPulled, pullListCsv, pullListFor, setPulled } from '../domain/warehouse';
-import { loadTruck, setOnTruck } from '../domain/truck';
+import { adoptVehiclesFromLoads, byVehicle, isPulled, pullListCsv, pullListFor, setPulled } from '../domain/warehouse';
+import { issueLoaded, setOnTruck } from '../domain/truck';
 import { downloadCsv, slugify } from '../domain/backup';
 import { formatDateTime, formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
@@ -21,7 +21,7 @@ const FILTER_LABELS: Record<Filter, string> = {
   all: 'Everything',
   todo: 'To pack',
   short: 'Short in the shed',
-  noRun: 'No run yet',
+  noRun: 'No vehicle yet',
 };
 
 /**
@@ -48,6 +48,12 @@ export default function WarehouseScreen() {
   // are then the van packs at the event.
   const truck = Boolean(event?.truckStage);
   const [loadingTruck, setLoadingTruck] = useState(false);
+  // A transport plan made before vehicles were tags is written onto the
+  // stations once, by whoever may edit them, so it keeps reading the same.
+  const canTag = can(session, 'event:write', eventId ? { eventId } : undefined);
+  useEffect(() => {
+    if (eventId && canTag) void adoptVehiclesFromLoads(eventId);
+  }, [eventId, canTag]);
 
   const [grouping, setGrouping] = useState<'item' | 'vehicle'>('item');
   const [filter, setFilter] = useState<Filter>('all');
@@ -66,7 +72,7 @@ export default function WarehouseScreen() {
     const lines = list?.lines ?? [];
     if (filter === 'todo') return lines.filter((line) => !isPulled(line, truck));
     if (filter === 'short') return lines.filter((line) => line.shortfall > 0);
-    if (filter === 'noRun') return lines.filter((line) => line.going.some((entry) => !entry.load));
+    if (filter === 'noRun') return lines.filter((line) => line.going.some((entry) => !entry.vehicle));
     return lines;
   }, [list, filter, truck]);
 
@@ -148,33 +154,31 @@ export default function WarehouseScreen() {
         <p className="tiny muted mt-2">
           {formatQty(totalPacked, 'each')} of {formatQty(totalNeeded, 'each')} {truck ? 'on the truck' : 'packed'}
         </p>
-        {truck ? (
-          <>
-            <p className="tiny muted mt-2">
-              🚛 Two-stage event: tick gear onto the truck here. Each station's own list is its van
-              pack at the event.
-              {event.truckLoadedAt ? ` Truck last marked loaded ${formatDateTime(event.truckLoadedAt)}.` : ''}
-            </p>
-            {canTick ? (
-              <button
-                type="button"
-                className="btn btn-primary btn-block mt-3"
-                disabled={!totalPacked}
-                onClick={() => setLoadingTruck(true)}
-              >
-                {event.truckLoadedAt ? 'Truck loaded again (take out the rest)' : 'Truck loaded'}
-              </button>
-            ) : null}
-          </>
+        <p className="tiny muted mt-2">
+          {truck
+            ? '🚛 Tick gear onto the truck here. Each station\'s own list is its van pack at the event.'
+            : '🚐 Tick gear as it is packed for each station\'s vehicle.'}
+          {event.truckLoadedAt ? ` Last marked loaded ${formatDateTime(event.truckLoadedAt)}.` : ''}
+        </p>
+        {canTick ? (
+          <button
+            type="button"
+            className="btn btn-primary btn-block mt-3"
+            disabled={!totalPacked}
+            onClick={() => setLoadingTruck(true)}
+          >
+            {event.truckLoadedAt
+              ? `${truck ? 'Truck' : 'Vehicles'} loaded again (take out the rest)`
+              : truck
+                ? 'Truck loaded'
+                : 'Vehicles loaded'}
+          </button>
         ) : null}
         {list.unassigned.length ? (
           <p className="tiny mt-2" style={{ color: 'var(--warn)' }}>
-            ⚠ {plural(list.unassigned.length, 'destination')} packed with no run yet:{' '}
+            ⚠ {plural(list.unassigned.length, 'destination')} with no vehicle yet:{' '}
             {list.unassigned.map((entry) => entry.name).join(', ')}.{' '}
-            <Link to={`/transport?event=${event.id}`}>
-              Put {list.unassigned.length === 1 ? 'it' : 'them'} on a vehicle
-            </Link>
-            .
+            <Link to={`/events/${event.id}`}>Set the vehicle on the station</Link>.
           </p>
         ) : null}
       </div>
@@ -257,18 +261,14 @@ export default function WarehouseScreen() {
       ) : (
         <div className="stack">
           {vehicles.map((group) => (
-            <section key={group.load?.id ?? 'unassigned'} className="section">
+            <section key={group.vehicle ?? 'unassigned'} className="section">
               <div className="section-head">
-                <h2>{group.load ? `${group.load.vehicle || group.load.name}` : 'Not on a run yet'}</h2>
-                {group.load ? (
-                  <Link className="btn btn-ghost btn-sm" to={`/transport/${group.load.id}`}>
-                    Open run
+                <h2>{group.vehicle ?? 'No vehicle yet'}</h2>
+                {!group.vehicle ? (
+                  <Link className="btn btn-ghost btn-sm" to={`/events/${event.id}`}>
+                    Set on the station
                   </Link>
-                ) : (
-                  <Link className="btn btn-ghost btn-sm" to={`/transport?event=${event.id}`}>
-                    Assign
-                  </Link>
-                )}
+                ) : null}
               </div>
               <p className="tiny muted mb-2">
                 {group.destinations.map((entry) => entry.name).join(' · ')}
@@ -305,20 +305,20 @@ export default function WarehouseScreen() {
       </div>
       {loadingTruck ? (
         <ConfirmSheet
-          title="Mark the truck loaded?"
+          title={truck ? 'Mark the truck loaded?' : 'Mark the vehicles loaded?'}
           body={
             <>
-              Everything ticked onto the truck comes out of the warehouse count now. The stations' van
-              packs at the event will not take it out again. If more goes on the truck later, mark it
-              loaded again and only the extra comes out.
+              Everything ticked {truck ? 'onto the truck' : 'as packed'} comes out of the warehouse count
+              now, once, and nothing later takes it out again. If more goes on afterwards, mark it loaded
+              again and only the extra comes out.
             </>
           }
-          confirmLabel="Truck loaded"
+          confirmLabel={truck ? 'Truck loaded' : 'Vehicles loaded'}
           onCancel={() => setLoadingTruck(false)}
           onConfirm={() => {
             setLoadingTruck(false);
-            void loadTruck(event.id, session?.displayName ?? '').then(({ lines, units }) =>
-              toast(lines ? `Truck loaded: ${formatQty(units, 'each')} out of the warehouse` : 'Nothing new on the truck'),
+            void issueLoaded(event.id, truck, session?.displayName ?? '').then(({ lines, units }) =>
+              toast(lines ? `Loaded: ${formatQty(units, 'each')} out of the warehouse` : 'Nothing new to take out'),
             );
           }}
         />
@@ -417,7 +417,7 @@ function PullRow({
                 {going.destination.name}
                 <span className="tiny muted">
                   {' '}
-                  · {going.load ? going.load.vehicle || going.load.name : 'no run yet'}
+                  · {going.vehicle ?? 'no vehicle yet'}
                 </span>
               </span>
               <span className="strong" style={{ fontVariantNumeric: 'tabular-nums' }}>

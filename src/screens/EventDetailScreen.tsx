@@ -123,6 +123,14 @@ export default function EventDetailScreen() {
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/warehouse`}>
             📦 Warehouse list
           </Link>
+          {truckStage ? (
+            <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/vans`}>
+              🚐 Vans
+            </Link>
+          ) : null}
+          <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/home`}>
+            🏠 Home
+          </Link>
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/food`}>
             🍌 Food plan
           </Link>
@@ -353,6 +361,9 @@ function DestinationSheet({
   const [access, setAccess] = useState<AccessType>(destination?.access ?? '2wd');
   const [accessNotes, setAccessNotes] = useState(destination?.accessNotes ?? '');
   const [crewLead, setCrewLead] = useState(destination?.crewLead ?? '');
+  const [vehicle, setVehicle] = useState(destination?.vehicle ?? '');
+  // Vehicles already named on this event, so the same van is spelt the same way.
+  const vehicles = [...new Set(existing.map((entry) => entry.vehicle?.trim()).filter(Boolean))].sort();
   const [openTime, setOpenTime] = useState(destination?.openTime || '06:00');
   const [closeTime, setCloseTime] = useState(destination?.closeTime || '16:00');
 
@@ -366,6 +377,7 @@ function DestinationSheet({
         access,
         accessNotes: accessNotes.trim(),
         crewLead: crewLead.trim(),
+        vehicle: vehicle.trim(),
         openTime,
         closeTime,
       });
@@ -396,6 +408,7 @@ function DestinationSheet({
       lng: null,
       crewLead: crewLead.trim(),
       phone: '',
+      vehicle: vehicle.trim(),
       openTime,
       closeTime,
       notes: '',
@@ -492,16 +505,37 @@ function DestinationSheet({
             />
           )}
         </Field>
-        <Field label="Crew lead">
-          {(id) => (
-            <input
-              id={id}
-              className="input"
-              value={crewLead}
-              onChange={(event) => setCrewLead(event.target.value)}
-            />
-          )}
-        </Field>
+        <div className="field-row">
+          <Field label="Crew lead">
+            {(id) => (
+              <input
+                id={id}
+                className="input"
+                value={crewLead}
+                onChange={(event) => setCrewLead(event.target.value)}
+              />
+            )}
+          </Field>
+          <Field label="Vehicle" hint="Which van or ute carries this station's gear.">
+            {(id) => (
+              <>
+                <input
+                  id={id}
+                  className="input"
+                  list={`${id}-vehicles`}
+                  value={vehicle}
+                  placeholder="Van 3"
+                  onChange={(event) => setVehicle(event.target.value)}
+                />
+                <datalist id={`${id}-vehicles`}>
+                  {vehicles.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+              </>
+            )}
+          </Field>
+        </div>
         <div className="field-row">
           <Field label="Opens">
             {(id) => (

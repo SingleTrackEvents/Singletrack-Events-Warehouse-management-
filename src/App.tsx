@@ -35,6 +35,8 @@ const EventDetailScreen = lazy(() => import('./screens/EventDetailScreen'));
 const ImportPacklistScreen = lazy(() => import('./screens/ImportPacklistScreen'));
 const FoodScreen = lazy(() => import('./screens/FoodScreen'));
 const WarehouseScreen = lazy(() => import('./screens/WarehouseScreen'));
+const VansScreen = lazy(() => import('./screens/VansScreen'));
+const ReturnsScreen = lazy(() => import('./screens/ReturnsScreen'));
 const PacklistScreen = lazy(() => import('./screens/PacklistScreen'));
 const StockScreen = lazy(() => import('./screens/StockScreen'));
 const ItemScreen = lazy(() => import('./screens/ItemScreen'));
@@ -186,6 +188,8 @@ export default function App() {
               <Route path="/events" element={<Guard needs="event:read"><EventsScreen /></Guard>} />
               <Route path="/events/:eventId" element={<Guard needs="event:read"><EventDetailScreen /></Guard>} />
               <Route path="/events/:eventId/warehouse" element={<Guard needs="packlist:manage"><WarehouseScreen /></Guard>} />
+              <Route path="/events/:eventId/vans" element={<Guard needs="packlist:pack"><VansScreen /></Guard>} />
+              <Route path="/events/:eventId/home" element={<Guard needs="packlist:pack"><ReturnsScreen /></Guard>} />
               <Route path="/events/:eventId/food" element={<Guard needs="food:plan"><FoodScreen /></Guard>} />
               <Route path="/import" element={<Guard needs="packlist:manage"><ImportPacklistScreen /></Guard>} />
               <Route path="/packlists/:packlistId" element={<PacklistScreen />} />

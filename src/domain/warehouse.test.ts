@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../db/db';
 import { alive, create, liveWhere, update } from '../db/repo';
-import { byVehicle, isPulled, pullListCsv, pullListFor, setPulled } from './warehouse';
+import { adoptVehiclesFromLoads, byVehicle, isPulled, pullListCsv, pullListFor, setPulled } from './warehouse';
 import { recordMovements } from './stock';
 import { recordCount, startStocktake } from './stocktake';
 import type { Destination, Item, RaceEvent } from '../db/types';
@@ -175,20 +175,12 @@ describe('the warehouse pull list', () => {
 });
 
 describe('splitting the pull list by vehicle', () => {
-  it('groups totals under the run carrying each destination', async () => {
-    const hilux = await create(db.loads, {
-      eventId: event.id, name: 'Run 1', vehicle: 'Hilux', driver: 'Kate', phone: '',
-      status: 'planned' as const, departAt: null, departedAt: null, completedAt: null, notes: '',
-    });
-    await create(db.loadStops, {
-      loadId: hilux.id, destinationId: village.id, sort: 10, arrivedAt: null, signedBy: '', notes: '',
-    });
-    await create(db.loadStops, {
-      loadId: hilux.id, destinationId: aid1.id, sort: 20, arrivedAt: null, signedBy: '', notes: '',
-    });
+  it('groups totals under the vehicle tagged on each destination', async () => {
+    await update(db.destinations, village.id, { vehicle: 'Hilux' });
+    await update(db.destinations, aid1.id, { vehicle: 'Hilux' });
 
     const groups = byVehicle(await pullListFor(event.id));
-    const truck = groups.find((group) => group.load?.vehicle === 'Hilux')!;
+    const truck = groups.find((group) => group.vehicle === 'Hilux')!;
 
     // 20 for the village plus 6 for Aid 1 travel together.
     expect(truck.lines.find((line) => line.item?.name === 'Trestle Tables')!.qtyRequired).toBe(26);
@@ -198,14 +190,8 @@ describe('splitting the pull list by vehicle', () => {
     ]);
   });
 
-  it('puts gear with no run of its own at the end', async () => {
-    const hilux = await create(db.loads, {
-      eventId: event.id, name: 'Run 1', vehicle: 'Hilux', driver: '', phone: '',
-      status: 'planned' as const, departAt: null, departedAt: null, completedAt: null, notes: '',
-    });
-    await create(db.loadStops, {
-      loadId: hilux.id, destinationId: village.id, sort: 10, arrivedAt: null, signedBy: '', notes: '',
-    });
+  it('puts gear with no vehicle of its own at the end', async () => {
+    await update(db.destinations, village.id, { vehicle: 'Hilux' });
 
     const list = await pullListFor(event.id);
     // Packed with no way of getting there is worth seeing before race morning.
@@ -215,16 +201,44 @@ describe('splitting the pull list by vehicle', () => {
     ]);
 
     const groups = byVehicle(list);
-    expect(groups.at(-1)!.load).toBeUndefined();
+    expect(groups.at(-1)!.vehicle).toBeUndefined();
     expect(groups.at(-1)!.lines.find((line) => line.item?.name === 'Trestle Tables')!.qtyRequired)
       .toBe(10);
   });
 
-  it('reports one vehicle when nothing is on a run yet', async () => {
+  it('reports one vehicle when nothing has a vehicle yet', async () => {
     const groups = byVehicle(await pullListFor(event.id));
     expect(groups).toHaveLength(1);
-    expect(groups[0].load).toBeUndefined();
+    expect(groups[0].vehicle).toBeUndefined();
     expect(groups[0].destinations).toHaveLength(3);
+  });
+
+  it('orders vehicles the way people number them', async () => {
+    await update(db.destinations, village.id, { vehicle: 'Van 10' });
+    await update(db.destinations, aid1.id, { vehicle: 'Van 2' });
+    const list = await pullListFor(event.id);
+    expect(list.vehicles).toEqual(['Van 2', 'Van 10']);
+    expect(byVehicle(list).map((group) => group.vehicle)).toEqual(['Van 2', 'Van 10', undefined]);
+  });
+
+  it('still reads a run made before vehicles were tags, and adopts it as a tag once', async () => {
+    const hilux = await create(db.loads, {
+      eventId: event.id, name: 'Run 1', vehicle: 'Hilux', driver: 'Kate', phone: '',
+      status: 'planned' as const, departAt: null, departedAt: null, completedAt: null, notes: '',
+    });
+    await create(db.loadStops, {
+      loadId: hilux.id, destinationId: village.id, sort: 10, arrivedAt: null, signedBy: '', notes: '',
+    });
+    await update(db.destinations, aid1.id, { vehicle: 'Ute' });
+
+    const before = await pullListFor(event.id);
+    expect(before.vehicles).toEqual(['Hilux', 'Ute']);
+
+    expect(await adoptVehiclesFromLoads(event.id)).toBe(1);
+    expect((await db.destinations.get(village.id))!.vehicle).toBe('Hilux');
+    // The one that already had a tag keeps it.
+    expect((await db.destinations.get(aid1.id))!.vehicle).toBe('Ute');
+    expect(await adoptVehiclesFromLoads(event.id)).toBe(0);
   });
 });
 

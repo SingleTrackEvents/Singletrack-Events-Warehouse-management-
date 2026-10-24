@@ -393,7 +393,7 @@ function BoardAction({
       );
     case 'vans':
       return (
-        <Link className="btn btn-primary btn-block mt-3" to={`/events/${eventId}`}>
+        <Link className="btn btn-primary btn-block mt-3" to={canPack ? `/events/${eventId}/vans` : `/events/${eventId}`}>
           Pack the vans{left}
         </Link>
       );
@@ -405,7 +405,7 @@ function BoardAction({
       );
     case 'home':
       return (
-        <Link className="btn btn-primary btn-block mt-3" to={`/events/${eventId}`}>
+        <Link className="btn btn-primary btn-block mt-3" to={canPack ? `/events/${eventId}/home` : `/events/${eventId}`}>
           Count it home{left}
         </Link>
       );

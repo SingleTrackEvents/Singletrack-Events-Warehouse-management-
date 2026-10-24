@@ -145,6 +145,8 @@ export interface RaceEvent extends SyncMeta {
   truckStage?: boolean;
   /** When the truck was last marked loaded, taking its stock out of the warehouse. */
   truckLoadedAt?: string | null;
+  /** When the returns were last booked back into the warehouse. */
+  truckUnloadedAt?: string | null;
 }
 
 /** What kind of place goods are going to. Drives which templates are suggested. */
@@ -206,6 +208,12 @@ export interface Destination extends SyncMeta {
    * written before food planning existed; both read as "none linked yet".
    */
   raceVisits?: RaceVisit[];
+  /**
+   * The vehicle this station's gear travels in: "Van 3", "Hilux", "Truck".
+   * A tag, nothing more. The pick list reads by it, and a station with none
+   * shows up as gear with no way to travel. Absent or blank means unassigned.
+   */
+  vehicle?: string;
 }
 
 /* ------------------------------------------------------------------- food -- */
@@ -337,6 +345,12 @@ export interface PacklistLine extends SyncMeta {
    * issues the difference, so nothing leaves the count twice.
    */
   qtyIssued?: number;
+  /**
+   * How many of `qtyReturned` have been booked back into warehouse stock.
+   * Counting it home again only books the difference, the same guard as
+   * `qtyIssued` on the way out.
+   */
+  qtyBooked?: number;
   /**
    * Position in the van, counted in unload order (what comes out first).
    * Absent follows the default setup order by category.
