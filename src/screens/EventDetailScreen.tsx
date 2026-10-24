@@ -2,12 +2,21 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
+import { MovePill, MoveStrip } from '../components/Moves';
 import { ConfirmSheet, EmptyState, Field, Pill, ProgressBar, Sheet } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, create, nextSort, softDelete, softDeleteChildren, update } from '../db/repo';
 import { useDestinations, useEvent } from '../hooks/useDb';
-import { applyTemplate, createPacklist, primaryPacklist, progressFor, PACKLIST_STATUS_LABELS } from '../domain/packlists';
+import {
+  defaultTemplateFor,
+  describeSource,
+  primaryPacklist,
+  progressFor,
+  startPacklist,
+} from '../domain/packlists';
+import { boardCounts, currentMove, moveOf, moveProgress } from '../domain/moves';
+import type { Move } from '../domain/moves';
 import {
   ACCESS_LABELS,
   DESTINATION_ICONS,
@@ -23,20 +32,9 @@ import type {
   DestinationType,
   EventStatus,
   Packlist,
-  PacklistStatus,
   RaceEvent,
 } from '../db/types';
 import { ACCESS_TYPES, DESTINATION_TYPES, EVENT_STATUSES } from '../db/types';
-
-const STATUS_TONE: Partial<Record<PacklistStatus, 'ok' | 'warn' | 'info' | 'accent' | 'default'>> = {
-  draft: 'default',
-  picking: 'accent',
-  packed: 'ok',
-  loaded: 'info',
-  delivered: 'info',
-  returned: 'warn',
-  reconciled: 'ok',
-};
 
 /**
  * One race: its destinations, the packlist behind each, and the shortcuts to
@@ -53,10 +51,12 @@ export default function EventDetailScreen() {
   const [editing, setEditing] = useState(false);
   const [buildingLists, setBuildingLists] = useState(false);
   const [removing, setRemoving] = useState<Destination>();
+  const [showing, setShowing] = useState<Move | null>(null);
+  const truckStage = Boolean(event?.truckStage);
 
-  // Packlists and their line progress, keyed by destination for the list below.
+  // Packlists, where each one is up to, keyed by destination for the list below.
   const summaries = useLiveQuery(async () => {
-    if (!eventId) return new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number; lists: number }>();
+    if (!eventId) return new Map<string, { move: Move; percent: number; id: string; blocking: number; lists: number }>();
     const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray());
     const allLines = alive(await db.packlistLines.toArray());
     const linesOf = (packlist: Packlist) => allLines.filter((line) => line.packlistId === packlist.id);
@@ -64,21 +64,30 @@ export default function EventDetailScreen() {
     for (const packlist of packlists) {
       byDestination.set(packlist.destinationId, [...(byDestination.get(packlist.destinationId) ?? []), packlist]);
     }
-    const map = new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number; lists: number }>();
+    const map = new Map<string, { move: Move; percent: number; id: string; blocking: number; lists: number }>();
     for (const [destinationId, candidates] of byDestination) {
       const packlist = primaryPacklist(candidates, (entry) => linesOf(entry).length);
       if (!packlist) continue;
-      const progress = progressFor(linesOf(packlist));
+      const own = linesOf(packlist);
+      const move = moveOf(own, truckStage, packlist.status);
       map.set(destinationId, {
         id: packlist.id,
-        status: packlist.status,
-        percent: progress.percent,
-        blocking: progress.blocking.length,
+        move,
+        percent: moveProgress(own, move, truckStage).percent,
+        blocking: progressFor(own).blocking.length,
         lists: candidates.length,
       });
     }
     return map;
-  }, [eventId, destinations]);
+  }, [eventId, destinations, truckStage]);
+
+  // The board's strip: every station with a list sits at a move; one without
+  // a list is still being planned.
+  const rows = (destinations ?? []).map((destination) => ({
+    move: summaries?.get(destination.id)?.move ?? ('plan' as Move),
+  }));
+  const counts = boardCounts(rows);
+  const current = currentMove(rows, truckStage);
 
   if (!event) {
     return (
@@ -131,6 +140,16 @@ export default function EventDetailScreen() {
           </button>
         </div>
 
+        {destinations?.length ? (
+          <MoveStrip
+            counts={counts}
+            current={current}
+            truckStage={truckStage}
+            selected={showing}
+            onSelect={setShowing}
+          />
+        ) : null}
+
         {destinations && !destinations.length ? (
           <EmptyState
             glyph="⛺"
@@ -145,7 +164,9 @@ export default function EventDetailScreen() {
         ) : null}
 
         <div className="list">
-          {(destinations ?? []).map((destination) => {
+          {(destinations ?? [])
+            .filter((destination) => !showing || (summaries?.get(destination.id)?.move ?? 'plan') === showing)
+            .map((destination) => {
             const summary = summaries?.get(destination.id);
             return (
               <button
@@ -154,7 +175,11 @@ export default function EventDetailScreen() {
                 className="row"
                 onClick={() => {
                   if (summary) navigate(`/packlists/${summary.id}`);
-                  else void createPacklist(destination).then((packlist) => navigate(`/packlists/${packlist.id}`));
+                  else
+                    void startPacklist(destination).then(({ packlist, source }) => {
+                      toast(describeSource(source));
+                      navigate(`/packlists/${packlist.id}`);
+                    });
                 }}
               >
                 <span className="row-icon">{DESTINATION_ICONS[destination.type]}</span>
@@ -174,9 +199,7 @@ export default function EventDetailScreen() {
                 <span className="row-end">
                   {summary ? (
                     <>
-                      <Pill tone={STATUS_TONE[summary.status] ?? 'default'}>
-                        {PACKLIST_STATUS_LABELS[summary.status]}
-                      </Pill>
+                      <MovePill move={summary.move} truckStage={truckStage} />
                       {summary.blocking ? (
                         <div className="tiny" style={{ color: 'var(--danger)', marginTop: 4 }}>
                           {summary.blocking} short
@@ -191,7 +214,7 @@ export default function EventDetailScreen() {
                       ) : null}
                     </>
                   ) : (
-                    <Pill tone="accent">Build list</Pill>
+                    <Pill tone="accent">Start list</Pill>
                   )}
                 </span>
               </button>
@@ -362,7 +385,7 @@ function DestinationSheet({
       onClose();
       return;
     }
-    await create(db.destinations, {
+    const created = await create(db.destinations, {
       eventId,
       name: name.trim(),
       type,
@@ -378,7 +401,10 @@ function DestinationSheet({
       notes: '',
       sort: nextSort(existing),
     });
-    toast('Destination added');
+    // The list starts with the station, from last year's list for the same
+    // station where there was one, so nobody builds Borough Huts from nothing.
+    const { source } = await startPacklist(created);
+    toast(`Destination added. ${describeSource(source)}.`);
     onClose();
   };
 
@@ -679,31 +705,22 @@ function BuildListsSheet({
   const [choices, setChoices] = useState<Record<string, string>>({});
   const [working, setWorking] = useState(false);
 
-  const templateFor = (destination: Destination) => {
-    if (choices[destination.id] !== undefined) return choices[destination.id];
-    const ofType = (templates ?? []).filter((template) => template.appliesTo === destination.type);
-    // A per-site list first. The whole-event ones are also filed under the
-    // village, and starting a single destination from a 90-line season total is
-    // never what was meant.
-    const perSite = ofType.filter((template) => template.scope !== 'event');
-    // Then the one built for how a vehicle actually reaches this destination:
-    // a van-accessible station and a quad drop need different loads.
-    const match =
-      perSite.find((template) => template.suitsAccess?.includes(destination.access)) ??
-      perSite.find((template) => !template.suitsAccess) ??
-      perSite[0] ??
-      ofType[0];
-    return match?.id ?? '';
-  };
+  /** '' is the automatic start: last edition, then the type's template. */
+  const AUTO = '';
+  const EMPTY = '__empty';
+  const choiceFor = (destination: Destination) => choices[destination.id] ?? AUTO;
+  const fallbackName = (destination: Destination) =>
+    defaultTemplateFor(destination, templates ?? [])?.name ?? 'an empty list';
 
   const build = async () => {
     setWorking(true);
     let count = 0;
     for (const destination of destinations) {
-      const packlist = await createPacklist(destination);
-      const templateId = templateFor(destination);
-      const template = templates?.find((entry) => entry.id === templateId);
-      if (template) await applyTemplate(packlist.id, template);
+      const choice = choiceFor(destination);
+      await startPacklist(destination, {
+        templateId: choice === EMPTY ? null : choice || undefined,
+        templates: templates ?? [],
+      });
       count += 1;
     }
     onDone(count);
@@ -725,8 +742,9 @@ function BuildListsSheet({
       }
     >
       <p className="small muted mb-3">
-        Pick the starting template for each destination. You can add or drop items on the list itself
-        afterwards.
+        Each station starts from its own list at the last edition of this event where there was one,
+        otherwise from the template for its kind of station. Pick a template here to start from that
+        instead. You can add or drop items on the list itself afterwards.
       </p>
       <div className="stack">
         {destinations.map((destination) => (
@@ -735,12 +753,13 @@ function BuildListsSheet({
               <select
                 id={id}
                 className="select"
-                value={templateFor(destination)}
+                value={choiceFor(destination)}
                 onChange={(event) =>
                   setChoices((current) => ({ ...current, [destination.id]: event.target.value }))
                 }
               >
-                <option value="">Empty list</option>
+                <option value={AUTO}>Last edition, else {fallbackName(destination)}</option>
+                <option value={EMPTY}>Empty list</option>
                 {(templates ?? []).map((template) => (
                   <option key={template.id} value={template.id}>
                     {template.name}

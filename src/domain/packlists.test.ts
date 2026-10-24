@@ -15,6 +15,7 @@ import {
   primaryPacklist,
   progressFor,
   setStatus,
+  startPacklist,
   templateLineQty,
 } from './packlists';
 import type { Destination, Item, Packlist, PacklistLine, Template } from '../db/types';
@@ -509,5 +510,110 @@ describe('deleting a whole list', () => {
 
     expect(await removePacklist(packlist.id)).toBe(false);
     expect((await db.packlists.get(packlist.id))?.deletedAt).toBeNull();
+  });
+});
+
+describe('startPacklist', () => {
+  async function makeEvent(name: string, startDate: string) {
+    return create(db.events, {
+      name,
+      location: 'Halls Gap',
+      startDate,
+      endDate: startDate,
+      status: 'planning',
+      notes: '',
+    });
+  }
+  async function makeStation(eventId: string, name: string, access: Destination['access'] = '2wd') {
+    return create(db.destinations, {
+      eventId,
+      name,
+      type: 'aid_station',
+      courseKm: 10,
+      access,
+      accessNotes: '',
+      lat: null,
+      lng: null,
+      crewLead: '',
+      phone: '',
+      openTime: '06:00',
+      closeTime: '16:00',
+      notes: '',
+      sort: 10,
+    });
+  }
+  async function makeTemplate(name: string, itemId: string, suitsAccess?: Destination['access'][]) {
+    const template = await create(db.templates, {
+      name,
+      appliesTo: 'aid_station',
+      description: '',
+      scope: 'site',
+      ...(suitsAccess ? { suitsAccess } : {}),
+    });
+    await create(db.templateLines, { templateId: template.id, itemId, qty: 2, mandatory: false, perRunner: false, note: '', sort: 10 });
+    return template;
+  }
+
+  it('copies the same station from the last edition, requirements only', async () => {
+    const item = await makeItem('TBL');
+    const last = await makeEvent('GPT100 2025', '2025-11-06');
+    const older = await makeEvent('GPT100 2024', '2024-11-07');
+    const next = await makeEvent('GPT100 2026', '2026-11-05');
+    const was = await makeStation(last.id, 'Borough Huts');
+    const wasOlder = await makeStation(older.id, 'Borough huts');
+    const { packlist: lastList } = await startPacklist(was, { templateId: null });
+    await create(db.packlistLines, {
+      packlistId: lastList.id, itemId: item.id, qtyRequired: 6, qtyPacked: 6, qtyReturned: 5,
+      qtyReceived: 6, mandatory: true, containerId: null, note: 'two spares', sort: 10, vanOrder: 20,
+    });
+    const { packlist: olderList } = await startPacklist(wasOlder, { templateId: null });
+    await create(db.packlistLines, {
+      packlistId: olderList.id, itemId: item.id, qtyRequired: 3, qtyPacked: 0, qtyReturned: 0,
+      mandatory: false, containerId: null, note: '', sort: 10,
+    });
+
+    const station = await makeStation(next.id, 'Borough Huts');
+    const { packlist, source } = await startPacklist(station);
+    expect(source).toEqual({ kind: 'edition', from: 'GPT100 2025' });
+    const lines = await liveWhere(db.packlistLines, 'packlistId', packlist.id);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ qtyRequired: 6, qtyPacked: 0, qtyReturned: 0, mandatory: true, note: 'two spares', vanOrder: 20 });
+    expect(lines[0].qtyReceived).toBeUndefined();
+  });
+
+  it('never copies from a later edition or an edition with an empty list', async () => {
+    const item = await makeItem('TBL');
+    const future = await makeEvent('GPT100 2027', '2027-11-04');
+    const empty = await makeEvent('GPT100 2025', '2025-11-06');
+    const next = await makeEvent('GPT100 2026', '2026-11-05');
+    const futureStation = await makeStation(future.id, 'Borough Huts');
+    const { packlist: futureList } = await startPacklist(futureStation, { templateId: null });
+    await create(db.packlistLines, { packlistId: futureList.id, itemId: item.id, qtyRequired: 9, qtyPacked: 0, qtyReturned: 0, mandatory: false, containerId: null, note: '', sort: 10 });
+    await startPacklist(await makeStation(empty.id, 'Borough Huts'), { templateId: null });
+    await makeTemplate('Standard aid station', item.id);
+
+    const { source } = await startPacklist(await makeStation(next.id, 'Borough Huts'));
+    expect(source).toEqual({ kind: 'template', from: 'Standard aid station' });
+  });
+
+  it('falls back to the template that suits how the station is reached', async () => {
+    const item = await makeItem('TBL');
+    const event = await makeEvent('Snow Gum Run 2027', '2027-02-28');
+    await makeTemplate('Standard aid station', item.id);
+    const remote = await makeTemplate('Remote 4WD station', item.id, ['4wd']);
+    const { packlist, source } = await startPacklist(await makeStation(event.id, 'Mt Erica', '4wd'));
+    expect(source).toEqual({ kind: 'template', from: remote.name });
+    expect(await liveWhere(db.packlistLines, 'packlistId', packlist.id)).toHaveLength(1);
+  });
+
+  it('honours an explicit template or an explicit empty start', async () => {
+    const item = await makeItem('TBL');
+    const event = await makeEvent('Snow Gum Run 2027', '2027-02-28');
+    const chosen = await makeTemplate('Water drop', item.id);
+    const station = await makeStation(event.id, 'Mt Erica');
+    expect((await startPacklist(station, { templateId: chosen.id })).source).toEqual({ kind: 'template', from: 'Water drop' });
+    const { packlist, source } = await startPacklist(station, { templateId: null });
+    expect(source).toEqual({ kind: 'empty' });
+    expect(await liveWhere(db.packlistLines, 'packlistId', packlist.id)).toHaveLength(0);
   });
 });

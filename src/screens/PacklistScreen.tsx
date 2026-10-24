@@ -6,7 +6,8 @@ import { AssistantCheck } from '../components/AssistantCheck';
 import { ItemPicker } from '../components/ItemPicker';
 import { PackRuleSuggestions } from '../components/PackRuleSuggestions';
 import { SwipeToDelete } from '../components/SwipeToDelete';
-import { ConfirmSheet, Field, Pill, ProgressBar, Sheet, Stepper } from '../components/ui';
+import { MovePill } from '../components/Moves';
+import { ConfirmSheet, Field, ProgressBar, Sheet, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, byId, update } from '../db/repo';
@@ -14,9 +15,9 @@ import { useCategories, useCrewName, useEvent, usePacklist, usePacklistLines } f
 import { moveInVan, resetVanOrder, unloadOrder } from '../domain/truck';
 import { useSession } from '../hooks/sessionContext';
 import { can, isStationOnly } from '../sync/permissions';
+import { moveOf, moveState } from '../domain/moves';
 import {
   NEXT_STATUS_ACTION,
-  PACKLIST_STATUS_LABELS,
   addLine,
   applyTemplate,
   clearConfirmations,
@@ -56,16 +57,6 @@ const CHECK_FILTER_LABELS: Record<Filter, string> = {
   all: 'All',
   packed: 'Confirmed',
   musthave: 'Must-have',
-};
-
-const STATUS_TONE: Record<PacklistStatus, 'ok' | 'warn' | 'info' | 'accent' | 'default'> = {
-  draft: 'default',
-  picking: 'accent',
-  packed: 'ok',
-  loaded: 'info',
-  delivered: 'info',
-  returned: 'warn',
-  reconciled: 'ok',
 };
 
 /**
@@ -228,6 +219,9 @@ export default function PacklistScreen() {
    * checking it in sees unload order (what they need first, at the top).
    */
   const event = useEvent(packlist?.eventId);
+  const truckStage = Boolean(event?.truckStage);
+  // Where this list is, read from its lines rather than from a status button.
+  const move = moveOf(lines ?? [], truckStage, packlist?.status);
   const [view, setView] = useState<'category' | 'van'>();
   const vanView = view ? view === 'van' : Boolean(event?.truckStage);
   const loadView = canPack;
@@ -458,7 +452,7 @@ export default function PacklistScreen() {
   return (
     <Screen
       title={packlist.name}
-      subtitle={`${packlist.code} · ${PACKLIST_STATUS_LABELS[packlist.status]}`}
+      subtitle={`${packlist.code} · ${moveState(move, truckStage)}`}
       back={stationOnly ? '/' : `/events/${packlist.eventId}`}
     >
       <div className="card card-pad mb-3">
@@ -466,7 +460,7 @@ export default function PacklistScreen() {
           <span className="strong">
             {progress.linesDone} / {progress.linesTotal} {canPack ? 'lines' : 'lines confirmed'}
           </span>
-          <Pill tone={STATUS_TONE[packlist.status]}>{PACKLIST_STATUS_LABELS[packlist.status]}</Pill>
+          <MovePill move={move} truckStage={truckStage} />
         </div>
         <ProgressBar percent={progress.percent} done={progress.percent === 100} />
         {progress.blocking.length ? (

@@ -312,8 +312,20 @@ export interface PacklistLine extends SyncMeta {
    * or the server would keep it.
    */
   qtyReceived?: number | null;
-  /** How many came back after the event. */
+  /** How many came back after the event, counted in at the shed. */
   qtyReturned: number;
+  /**
+   * The station's own count of what is going home: what was left over at the
+   * end of the day for a consumable, what went back in the van for gear.
+   *
+   * Written at the station, like `qtyReceived`, and read the same way: absent
+   * or null means nobody has counted this line, not that nothing is left.
+   * Used is `qtyReceived - qtyLeft`, and what the shed should expect back is
+   * this number when it exists.
+   */
+  qtyLeft?: number | null;
+  /** Who last wrote the station's counts, for a station with more than one phone. */
+  countedBy?: string;
   /**
    * Two-stage events: how many of this station's share went into the truck
    * at the warehouse. `qtyPacked` is then the van pack at the event.
