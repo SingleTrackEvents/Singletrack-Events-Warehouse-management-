@@ -68,6 +68,20 @@ export function moveIndex(move: Move): number {
   return MOVES.indexOf(move);
 }
 
+/**
+ * What the station should expect off the van: what the shed packed, or the
+ * requirement when the shed never ticked the line (a list worked on paper).
+ */
+export function sent(line: PacklistLine): number {
+  return line.qtyPacked > 0 ? line.qtyPacked : line.qtyRequired;
+}
+
+/** What the station used: arrived less what was left, once both are known. */
+export function used(line: PacklistLine): number | null {
+  if (!hasLeft(line) || !isConfirmed(line)) return null;
+  return round2(Math.max(0, received(line) - (line.qtyLeft as number)));
+}
+
 /** True once a line has an end-of-day or pack-down count from the station. */
 export function hasLeft(line: PacklistLine): boolean {
   return line.qtyLeft !== undefined && line.qtyLeft !== null;
@@ -117,7 +131,7 @@ export function countAt(line: PacklistLine, move: Move, truckStage: boolean): { 
     case 'vans':
       return { got: line.qtyPacked, want: truckStage ? line.qtyOnTruck ?? line.qtyRequired : line.qtyRequired };
     case 'station':
-      return { got: received(line), want: line.qtyPacked };
+      return { got: received(line), want: sent(line) };
     case 'home':
       return { got: line.qtyReturned, want: expectedHome(line) };
   }

@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { BuildStamp } from '../components/BuildStamp';
 import { MovePill, MoveStrip } from '../components/Moves';
-import { EmptyState, Pill, ProgressBar } from '../components/ui';
+import { EmptyState, Pill } from '../components/ui';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useCrewName, useEvents, useItems, useShoppingLines } from '../hooks/useDb';
@@ -14,11 +14,11 @@ import { can, isStationOnly, reachable } from '../sync/permissions';
 import { countedItemIds, lowStockItems } from '../domain/stock';
 import { addLowStock, groupByShop, toBuy } from '../domain/shopping';
 import { describeSource, packlistForDestination, primaryPacklist, progressFor, receiptFor, startPacklist } from '../domain/packlists';
-import { boardCounts, currentMove, moveLabel, moveOf, moveProgress } from '../domain/moves';
+import { boardCounts, currentMove, hasLeft, moveLabel, moveOf, moveProgress } from '../domain/moves';
 import type { BoardRow, Move } from '../domain/moves';
 import { DESTINATION_ICONS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
 import { LOAD_STATUS_LABELS } from '../domain/transport';
-import type { Destination, Packlist, PacklistLine } from '../db/types';
+import type { Destination, Item, Packlist, PacklistLine } from '../db/types';
 import logo from '../assets/logo-white.png';
 import { openIntro } from '../domain/intro';
 
@@ -46,7 +46,8 @@ export default function HomeScreen() {
       const lines = packlist
         ? alive(await db.packlistLines.toArray()).filter((line) => line.packlistId === packlist.id)
         : [];
-      return { destination, packlist, lines };
+      const items = new Map(alive(await db.items.toArray()).map((item) => [item.id, item]));
+      return { destination, packlist, lines, items };
     },
     [stationOnly, session?.scope.destinationId],
   );
@@ -421,7 +422,9 @@ function BoardAction({
 function StationHome({
   station,
 }: {
-  station: { destination?: Destination; packlist?: Packlist; lines: PacklistLine[] } | undefined;
+  station:
+    | { destination?: Destination; packlist?: Packlist; lines: PacklistLine[]; items: Map<string, Item> }
+    | undefined;
 }) {
   const { session } = useSession();
 
@@ -452,32 +455,68 @@ function StationHome({
     );
   }
 
+  const packlist = station.packlist;
   // What this station has confirmed, not what the warehouse packed: the number
   // on their home screen should be the one they can change.
   const progress = receiptFor(station.lines);
+  // The three jobs at a station, in the order they happen over the day.
+  const food = station.lines.filter((line) => station.items.get(line.itemId)?.consumable);
+  const gear = station.lines.filter((line) => !station.items.get(line.itemId)?.consumable);
+  const counted = food.filter(hasLeft).length;
+  const packedDown = gear.filter(hasLeft).length;
+  const jobs: Array<{ mode: string; title: string; sub: string; done: boolean; icon: string }> = [
+    {
+      mode: 'arrived',
+      icon: '✅',
+      title: 'Arrived',
+      sub: `${progress.linesDone} of ${progress.linesTotal} lines checked in off the van`,
+      done: progress.linesTotal > 0 && progress.percent === 100,
+    },
+    {
+      mode: 'count',
+      icon: '🔢',
+      title: 'Count',
+      sub: food.length ? `${counted} of ${food.length} food and drink lines counted` : 'No food or drink on this list',
+      done: food.length > 0 && counted === food.length,
+    },
+    {
+      mode: 'packdown',
+      icon: '🚐',
+      title: 'Pack down',
+      sub: gear.length ? `${packedDown} of ${gear.length} gear lines back in the van` : 'No gear on this list',
+      done: gear.length > 0 && packedDown === gear.length,
+    },
+  ];
+  const next = jobs.find((job) => !job.done) ?? jobs[0];
 
   return (
     <Screen title={name} subtitle={session ? `Signed in as ${session.displayName}` : undefined}>
-      <div className="card card-pad mb-4">
-        <div className="spread mb-2">
-          <span className="strong">
-            {progress.linesDone} / {progress.linesTotal} lines confirmed
-          </span>
-          <Pill tone={progress.percent === 100 ? 'ok' : 'accent'}>{progress.percent}%</Pill>
-        </div>
-        <ProgressBar percent={progress.percent} done={progress.percent === 100} />
-        {station.destination?.accessNotes ? (
-          <p className="tiny muted mt-2">🚙 {station.destination.accessNotes}</p>
-        ) : null}
+      {station.destination?.accessNotes ? (
+        <p className="tiny muted mb-3">🚙 {station.destination.accessNotes}</p>
+      ) : null}
+      <div className="list mb-4">
+        {jobs.map((job) => (
+          <Link key={job.mode} to={`/packlists/${packlist.id}?mode=${job.mode}`} className="row">
+            <span className="row-icon">{job.icon}</span>
+            <span className="row-body">
+              <span className="row-title">{job.title}</span>
+              <span className="row-sub">{job.sub}</span>
+            </span>
+            <span className="row-end">
+              {job.done ? <Pill tone="ok">Done</Pill> : job === next ? <Pill tone="accent">Next</Pill> : null}
+            </span>
+          </Link>
+        ))}
       </div>
 
-      <Link className="btn btn-primary btn-lg btn-block" to={`/packlists/${station.packlist.id}`}>
-        Open the packlist
+      <Link className="btn btn-primary btn-lg btn-block" to={`/packlists/${packlist.id}?mode=${next.mode}`}>
+        {next.icon} {next.title}
       </Link>
 
       <p className="tiny muted center mt-4">
-        Tick off each item as it turns up. What was meant to be sent is set by the warehouse, so a
-        short delivery stays visible.{' '}
+        Tick off each item as it turns up, count what is left at the end of the day, and tick the
+        gear back into the van. What was sent is set by the warehouse, so a short delivery stays
+        visible.{' '}
         <button type="button" className="link-btn" onClick={openIntro}>
           How this works
         </button>{' '}

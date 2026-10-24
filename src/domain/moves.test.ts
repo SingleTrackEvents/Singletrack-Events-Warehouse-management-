@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PacklistLine } from '../db/types';
-import { boardCounts, countAt, currentMove, expectedHome, moveOf, moveProgress, movesFor } from './moves';
+import { boardCounts, countAt, currentMove, expectedHome, moveOf, moveProgress, movesFor, sent, used } from './moves';
 
 function line(partial: Partial<PacklistLine> = {}): PacklistLine {
   return {
@@ -78,6 +78,16 @@ describe('moveOf with an older list that only has a status', () => {
 describe('countAt and expectedHome', () => {
   it('checks the station in against what was sent, not what was planned', () => {
     expect(countAt(line({ qtyPacked: 3, qtyReceived: 3 }), 'station', true)).toEqual({ got: 3, want: 3 });
+    // A list the shed worked on paper never had its lines ticked: the plan stands in.
+    expect(sent(line({ qtyRequired: 4, qtyPacked: 0 }))).toBe(4);
+    expect(sent(line({ qtyRequired: 4, qtyPacked: 3 }))).toBe(3);
+  });
+
+  it('works out what the station used once both counts are in', () => {
+    expect(used(line({ qtyReceived: 120, qtyLeft: 14 }))).toBe(106);
+    expect(used(line({ qtyReceived: 120 }))).toBeNull();
+    expect(used(line({ qtyLeft: 14 }))).toBeNull();
+    expect(used(line({ qtyReceived: 10, qtyLeft: 12 }))).toBe(0);
   });
 
   it('expects home what the station counted, else what arrived, else what was sent', () => {

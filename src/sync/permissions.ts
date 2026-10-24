@@ -364,7 +364,9 @@ const WRITABLE_FIELDS: Partial<Record<TableName, Record<Role, string[] | 'all'>>
     admin: 'all',
     crew: 'all',
     driver: ['qtyReceived', 'note'],
-    volunteer: ['qtyReceived', 'qtyReturned', 'note'],
+    // What arrived, what is left at the end of the day or went back in the
+    // van, and who counted it. Never what was required or what was sent.
+    volunteer: ['qtyReceived', 'qtyLeft', 'countedBy', 'qtyReturned', 'note'],
   },
   packlists: {
     admin: 'all',
