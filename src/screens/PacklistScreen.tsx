@@ -18,27 +18,24 @@ import { can, isStationOnly } from '../sync/permissions';
 import { expectedHome, hasLeft, moveOf, moveState, sent, used } from '../domain/moves';
 import { formatTime } from '../domain/format';
 import {
-  NEXT_STATUS_ACTION,
   addLine,
   applyTemplate,
   clearConfirmations,
   clearNotes,
   hasIssued,
   isConfirmed,
-  nextStatus,
   progressFor,
   receiptFor,
   received,
   removeLine,
   removePacklist,
-  setStatus,
   statusIndex,
 } from '../domain/packlists';
 import { formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
 import { addShoppingLine, inputForItem } from '../domain/shopping';
 import { isKit, kitLines } from '../domain/kits';
-import type { PacklistLine, PacklistStatus, Unit } from '../db/types';
+import type { PacklistLine, Unit } from '../db/types';
 
 type Filter = 'todo' | 'all' | 'packed' | 'musthave';
 
@@ -110,7 +107,6 @@ export default function PacklistScreen() {
   const canPack = can(session, 'packlist:pack');
   const canReceive = can(session, 'packlist:receive');
   const canManage = can(session, 'packlist:manage');
-  const canAdvance = canManage || can(session, 'load:deliver');
   const stationOnly = isStationOnly(session);
   const [searchParams] = useSearchParams();
   // The assistant bills a real account, so it wants a signed-in admin, not
@@ -122,7 +118,6 @@ export default function PacklistScreen() {
   const [picking, setPicking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [confirmAdvance, setConfirmAdvance] = useState<PacklistStatus>();
   const [notesOpen, setNotesOpen] = useState(false);
   const [removingLine, setRemovingLine] = useState<PacklistLine>();
   const [editingRequired, setEditingRequired] = useState<PacklistLine>();
@@ -363,9 +358,6 @@ export default function PacklistScreen() {
     return <Navigate to="/" replace />;
   }
 
-  const advanceTo = nextStatus(packlist.status);
-  const advanceLabel = NEXT_STATUS_ACTION[packlist.status];
-
   /**
    * Tapping a row is all-or-nothing; the stepper handles partial counts.
    *
@@ -383,18 +375,6 @@ export default function PacklistScreen() {
       packTo(line, full ? 0 : wantOn(line));
     }
     if (!full && navigator.vibrate) navigator.vibrate(15);
-  };
-
-  const advance = async (status: PacklistStatus) => {
-    await setStatus(packlist, status, { by: crew });
-    const messages: Partial<Record<PacklistStatus, string>> = {
-      packed: 'Marked packed',
-      loaded: 'Loaded — stock deducted from the warehouse',
-      delivered: 'Marked delivered',
-      returned: 'Marked returned — count what came back',
-      reconciled: 'Returns booked back into stock',
-    };
-    toast(messages[status] ?? 'Updated');
   };
 
   /**
@@ -834,26 +814,6 @@ export default function PacklistScreen() {
         </details>
       ) : null}
 
-      {canAdvance && advanceTo && advanceLabel ? (
-        <div className="action-bar no-print">
-          <button
-            type="button"
-            className="btn btn-primary btn-lg"
-            onClick={() => {
-              // Going to `loaded` moves real stock, and short must-haves are
-              // worth a second look, so both get a confirmation step.
-              if (advanceTo === 'loaded' || (advanceTo === 'packed' && progress.blocking.length)) {
-                setConfirmAdvance(advanceTo);
-              } else {
-                void advance(advanceTo);
-              }
-            }}
-          >
-            {advanceLabel}
-          </button>
-        </div>
-      ) : null}
-
       {picking ? (
         <ItemPicker
           title="Add to packlist"
@@ -1020,39 +980,6 @@ export default function PacklistScreen() {
         />
       ) : null}
 
-      {confirmAdvance ? (
-        <ConfirmSheet
-          title={
-            confirmAdvance === 'loaded'
-              ? 'Mark as loaded?'
-              : `Mark packed with ${plural(progress.blocking.length, 'must-have')} short?`
-          }
-          body={
-            confirmAdvance === 'loaded' ? (
-              <>
-                This takes {plural(progress.qtyPacked, 'unit')} off the warehouse shelves and writes it
-                to the stock ledger.
-                {hasIssued(packlist.status) ? ' Stock was already issued, so nothing moves twice.' : ''}
-              </>
-            ) : (
-              <>
-                {progress.blocking.map((line) => (
-                  <div key={line.id}>
-                    • {items?.get(line.itemId)?.name} — {line.qtyPacked} of {line.qtyRequired}
-                  </div>
-                ))}
-              </>
-            )
-          }
-          confirmLabel="Confirm"
-          onCancel={() => setConfirmAdvance(undefined)}
-          onConfirm={() => {
-            const target = confirmAdvance;
-            setConfirmAdvance(undefined);
-            void advance(target);
-          }}
-        />
-      ) : null}
     </Screen>
   );
 }

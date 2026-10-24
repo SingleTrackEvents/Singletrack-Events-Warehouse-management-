@@ -19,11 +19,24 @@ reorder points. Every quantity change writes to a movement ledger recording who,
 why, and the balance afterwards, so a surprising number on race morning can be
 traced back rather than argued about.
 
-**Packlists** — one list per destination, built from reusable templates
-("standard aid station", "remote 4WD station", "event village core"). Packing mode
-is a full-width tap target per line so a list can be worked one-handed, with a
-stepper for partial packs. Must-have items are flagged and warned about before a
-list is marked packed.
+**The board** — the home screen is the next event: one row per station, five
+moves across the top (plan, truck, vans, station, home; four when an event loads
+straight from the shed), and the one thing to do next. Nobody reports the moves.
+They are read off the quantities the crew already write down as the crate goes
+past them: how many are needed, how many went on the truck, into the van,
+arrived, and came home. A list with everything on the truck is "on truck"
+whether or not anyone remembered to tap a button, which on race weekend nobody
+does. The three tabs are the board, Stock and More.
+
+**Packlists** — one list per station, started the moment the station is created:
+copied from the same station at the last edition of the event where there was
+one, otherwise from the template for its kind of station ("standard aid
+station", "remote 4WD station", "event village core"). A list has five jobs,
+each keeping its own number on the line: the shed packs it, the station checks
+it in, counts what is left of the food and drink at the end of the day, ticks
+the gear back into the van, and the shed counts it in. Packing is a full-width
+tap target per line so a list can be worked one-handed, with a stepper for
+partial packs. Must-have items are flagged.
 
 **Truck, then vans**: for events that go out in one big truck and are split into a van per
 station on site. Turn on Truck stage in the event's settings. The warehouse list then ticks
@@ -31,7 +44,9 @@ gear onto the truck, and "Truck loaded" takes it out of stock in one go. Each st
 packlist becomes its van pack, in van order: shelter first out, so it goes in last, then
 tables, power and light, water and ice, the kit and the food. The crew packing a van see load
 order, the station sees unload order, and any line can be moved up or down for a station
-that sets up differently. Stock never leaves the count twice.
+that sets up differently. The Vans screen shows the truck emptying: what is still on it once
+the vans start taking from it, split into gear a station is waiting for and gear with nowhere
+to go. Stock never leaves the count twice.
 
 **Pack rules**: what usually travels with what, for every event. Put 3 marquees
 on an aid station list and the app offers 12 ratchet straps, 12 steel weights
@@ -102,10 +117,14 @@ bin so you walk the racks rather than an alphabet. Expected quantities are
 re-read at the moment each line is counted, so a truck leaving mid-count doesn't
 create a phantom discrepancy. Uncounted lines are never zeroed.
 
-**Transport** — a load is one vehicle doing one trip: a driver, a run sheet in
-delivery order, access notes per stop, and a delivery confirmation with a name.
-Departing the warehouse issues everything on board out of stock; reconciling
-returns books back whatever came home.
+**Vehicles** — the vehicle a station travels in is a tag on the station ("Van 3",
+"Hilux"). The warehouse list reads by it, and a station with no vehicle shows up
+as gear with no way to travel. Stock leaves the warehouse in one place, the
+warehouse list's Loaded button, and comes back in one place, the Home screen:
+one line per item that went out, with what should come home (what each station
+counted, what arrived for gear, nothing for food nobody counted) against what
+has been counted back, and one button to book it onto the shelf. Both only ever
+move what has not been moved already.
 
 ## Running it
 
@@ -233,8 +252,8 @@ with no bars.
 | **Admin** | Everything, including the catalogue, who else has access, and the packing assistant |
 | **Crew, all events** | The warehouse: pack, adjust stock, run stocktakes, keep templates, build loads, keep the shopping list |
 | **Crew, one event** | Pack, build loads, plan food and keep the shopping list for that event; read the catalogue |
-| **Driver** | Assigned loads for one event, confirm deliveries |
-| **Volunteer** | One aid station's packlist; record what arrived |
+| **Driver** | Read the event's stations and lists, and check a delivery in |
+| **Volunteer** | One aid station's packlist: record what arrived, count what is left, pack down |
 
 An invite names an event, or for crew may name none. Crew given one event see
 that event and nothing else: the events list holds one race, the transport tab
@@ -248,8 +267,9 @@ The shopping list is the crew's and the admin's. Drivers and volunteers are
 never sent its rows, in the same way crew are never sent the assistant's notes.
 
 Volunteers are pinned to a single destination for a single event, and may only
-change what *arrived* — never what was supposed to be sent, since that would
-quietly erase the evidence of a short delivery.
+change what *arrived*, what was *left* at the end of the day and who counted it —
+never what was supposed to be sent, since that would quietly erase the evidence
+of a short delivery.
 
 Someone holding an aid station invite gets the app cut down to that one job: no
 tabs, no warehouse, no stocktake, no backups. Their packlist opens as a

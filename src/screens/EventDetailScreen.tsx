@@ -117,9 +117,6 @@ export default function EventDetailScreen() {
         </div>
         {event.notes ? <p className="small">{event.notes}</p> : null}
         <div className="btn-row mt-3">
-          <Link className="btn btn-outline btn-sm" to={`/transport?event=${event.id}`}>
-            🚚 Transport
-          </Link>
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/warehouse`}>
             📦 Warehouse list
           </Link>

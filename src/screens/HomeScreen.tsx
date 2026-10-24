@@ -10,14 +10,13 @@ import { alive } from '../db/repo';
 import { useCrewName, useEvents, useItems, useShoppingLines } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { useToast } from '../components/toastContext';
-import { can, isStationOnly, reachable } from '../sync/permissions';
+import { can, isStationOnly } from '../sync/permissions';
 import { countedItemIds, lowStockItems } from '../domain/stock';
 import { addLowStock, groupByShop, toBuy } from '../domain/shopping';
 import { describeSource, packlistForDestination, primaryPacklist, progressFor, receiptFor, startPacklist } from '../domain/packlists';
 import { boardCounts, currentMove, hasLeft, moveLabel, moveOf, moveProgress } from '../domain/moves';
 import type { BoardRow, Move } from '../domain/moves';
 import { DESTINATION_ICONS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
-import { LOAD_STATUS_LABELS } from '../domain/transport';
 import type { Destination, Item, Packlist, PacklistLine } from '../db/types';
 import logo from '../assets/logo-white.png';
 import { openIntro } from '../domain/intro';
@@ -102,16 +101,6 @@ export default function HomeScreen() {
   }, [focus?.id, truckStage]);
   const [showing, setShowing] = useState<Move | null>(null);
   const canBuild = can(session, 'packlist:manage', focus ? { eventId: focus.id } : undefined);
-
-  const activeLoads = useLiveQuery(
-    async () =>
-      alive(await db.loads.toArray())
-        .filter((load) => reachable(session, { eventId: load.eventId }))
-        .filter(
-          (load) => load.status === 'in_transit' || load.status === 'delivering' || load.status === 'loading',
-        ),
-    [session],
-  );
 
   // The shopping list is the crew's; its hook already narrows the lines to
   // what this account may see, so only the card needs gating.
@@ -240,28 +229,6 @@ export default function HomeScreen() {
           }
         />
       )}
-
-      {activeLoads?.length ? (
-        <section className="section">
-          <div className="section-head">
-            <h2>On the road</h2>
-          </div>
-          <div className="list">
-            {activeLoads.map((load) => (
-              <Link key={load.id} to={`/transport/${load.id}`} className="row">
-                <span className="row-icon">🚚</span>
-                <span className="row-body">
-                  <span className="row-title">{load.name}</span>
-                  <span className="row-sub">
-                    {load.driver || 'No driver'} · {load.vehicle || 'No vehicle'}
-                  </span>
-                </span>
-                <Pill tone="info">{LOAD_STATUS_LABELS[load.status]}</Pill>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       {openStocktakes?.length ? (
         <section className="section">

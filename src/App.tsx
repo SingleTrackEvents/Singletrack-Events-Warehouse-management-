@@ -42,8 +42,6 @@ const StockScreen = lazy(() => import('./screens/StockScreen'));
 const ItemScreen = lazy(() => import('./screens/ItemScreen'));
 const StocktakeScreen = lazy(() => import('./screens/StocktakeScreen'));
 const StocktakeDetailScreen = lazy(() => import('./screens/StocktakeDetailScreen'));
-const TransportScreen = lazy(() => import('./screens/TransportScreen'));
-const LoadScreen = lazy(() => import('./screens/LoadScreen'));
 const TemplatesScreen = lazy(() => import('./screens/TemplatesScreen'));
 const TemplateDetailScreen = lazy(() => import('./screens/TemplateDetailScreen'));
 const SettingsScreen = lazy(() => import('./screens/SettingsScreen'));
@@ -57,12 +55,13 @@ const ShoppingScreen = lazy(() => import('./screens/ShoppingScreen'));
  * Bottom tabs, each gated by the permission its screen needs. A volunteer with
  * no business in the warehouse should not be shown a Stock tab that only leads
  * to an empty or refusing screen.
+ *
+ * Three of them. The board for the next event is the first; every other event
+ * is one tap from it. The shed is the second. Everything else is under More.
  */
 const NAV: Array<{ to: string; icon: string; label: string; end: boolean; needs?: Action }> = [
-  { to: '/', icon: '🏠', label: 'Home', end: true },
-  { to: '/events', icon: '🏃', label: 'Events', end: false, needs: 'event:read' },
+  { to: '/', icon: '🏁', label: 'Event', end: true },
   { to: '/stock', icon: '📦', label: 'Stock', end: false, needs: 'item:read' },
-  { to: '/transport', icon: '🚚', label: 'Transport', end: false, needs: 'load:read' },
   { to: '/more', icon: '⚙️', label: 'More', end: false },
 ];
 
@@ -197,8 +196,6 @@ export default function App() {
               <Route path="/stock/:itemId" element={<Guard needs="item:read"><ItemScreen /></Guard>} />
               <Route path="/stocktake" element={<Guard needs="stocktake:read"><StocktakeScreen /></Guard>} />
               <Route path="/stocktake/:stocktakeId" element={<Guard needs="stocktake:read"><StocktakeDetailScreen /></Guard>} />
-              <Route path="/transport" element={<Guard needs="load:read"><TransportScreen /></Guard>} />
-              <Route path="/transport/:loadId" element={<Guard needs="load:read"><LoadScreen /></Guard>} />
               <Route path="/templates" element={<Guard needs="template:manage"><TemplatesScreen /></Guard>} />
               <Route path="/templates/:templateId" element={<Guard needs="template:manage"><TemplateDetailScreen /></Guard>} />
               <Route path="/more" element={<SettingsScreen />} />
