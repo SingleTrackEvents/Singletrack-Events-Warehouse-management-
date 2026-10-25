@@ -886,7 +886,7 @@ describe('the GPT100 starting packlists', () => {
     const packlists = alive(await db.packlists.toArray()).filter((entry) => entry.eventId === gpt);
     expect(packlists).toHaveLength(GPT_PACKLISTS.length);
     for (const spec of GPT_PACKLISTS) {
-      const packlist = packlists.find((entry) => entry.name === spec.station);
+      const packlist = packlists.find((entry) => entry.id === seedId('plist', `gpt26-${spec.station}`));
       expect(packlist, spec.station).toBeDefined();
       expect(destinations.some((entry) => entry.id === packlist!.destinationId), spec.station).toBe(true);
     }

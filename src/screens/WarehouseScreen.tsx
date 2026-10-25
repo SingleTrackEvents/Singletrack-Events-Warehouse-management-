@@ -201,8 +201,20 @@ export default function WarehouseScreen() {
           {truck
             ? '🚛 Tick gear onto the truck here. Each station\'s own list is its van pack at the event.'
             : '🚐 Tick gear as it is packed for each station\'s vehicle.'}
-          {event.truckLoadedAt ? ` Last marked loaded ${formatDateTime(event.truckLoadedAt)}.` : ''}
+          {event.truckLoadedAt && !event.truckRuns?.length ? ` Last marked loaded ${formatDateTime(event.truckLoadedAt)}.` : ''}
         </p>
+        {/* Each load is its own run: GPT goes out bulky gear first, the rest days later. */}
+        {event.truckRuns?.length ? (
+          <ol className="tiny mt-2" style={{ paddingLeft: '1.2rem' }}>
+            {event.truckRuns.map((run, index) => (
+              <li key={run.at}>
+                {truck ? `Truck run ${index + 1}` : `Load ${index + 1}`}, {formatDateTime(run.at)}
+                {run.by ? ` by ${run.by}` : ''}: {formatQty(run.units, 'each')} out
+                {run.returned ? `, ${formatQty(run.returned, 'each')} taken back off` : ''}
+              </li>
+            ))}
+          </ol>
+        ) : null}
         {canTick ? (
           <button
             type="button"

@@ -953,6 +953,7 @@ export default function PacklistScreen() {
       {notesOpen ? (
         <NotesSheet
           initial={packlist.notes}
+          appendAs={stationOnly ? me : undefined}
           onClose={() => setNotesOpen(false)}
           onSave={(notes) => {
             void update(db.packlists, packlist.id, { notes });
@@ -1258,35 +1259,63 @@ function ApplyTemplateSheet({
 
 function NotesSheet({
   initial,
+  appendAs,
   onClose,
   onSave,
 }: {
   initial: string;
+  /**
+   * A station's own phone adds to the notes rather than editing them: the
+   * warehouse's note (the vehicle, the drop bags) must survive a volunteer
+   * reporting the extra crate that turned up. Their name heads what they add.
+   */
+  appendAs?: string;
   onClose: () => void;
   onSave: (notes: string) => void;
 }) {
-  const [value, setValue] = useState(initial);
+  const [value, setValue] = useState(appendAs !== undefined ? '' : initial);
+  const stamp = new Date().toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+  const result =
+    appendAs !== undefined
+      ? [initial.trim(), value.trim() ? `${appendAs || 'Station'}, ${stamp}: ${value.trim()}` : ''].filter(Boolean).join('\n\n')
+      : value;
   return (
     <Sheet
-      title="Packlist notes"
+      title={appendAs !== undefined ? 'Tell the warehouse' : 'Packlist notes'}
       onClose={onClose}
       footer={
         <>
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => onSave(value)}>
-            Save
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={appendAs !== undefined && !value.trim()}
+            onClick={() => onSave(result)}
+          >
+            {appendAs !== undefined ? 'Add note' : 'Save'}
           </button>
         </>
       }
     >
+      {appendAs !== undefined && initial.trim() ? (
+        <p className="small mb-3" style={{ whiteSpace: 'pre-wrap' }}>
+          {initial}
+        </p>
+      ) : null}
+      {appendAs !== undefined ? (
+        <p className="tiny muted mb-2">
+          Something extra arrived, something is broken, or you need more? Say so here and it goes to the
+          warehouse with your name.
+        </p>
+      ) : null}
       <textarea
         className="textarea"
         style={{ minHeight: 160 }}
         autoFocus
         value={value}
-        placeholder="Extra water for the plateau, chairs stay in the truck…"
+        placeholder={appendAs !== undefined ? 'An extra esky arrived that was not on the list' : 'Extra water for the plateau, chairs stay in the truck…'}
         onChange={(event) => setValue(event.target.value)}
       />
     </Sheet>

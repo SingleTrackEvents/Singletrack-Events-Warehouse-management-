@@ -31,6 +31,7 @@ import {
   relativeDays,
 } from '../domain/format';
 import { gearStillOut } from '../domain/returns';
+import { ScheduleSheet } from '../components/ScheduleSheet';
 import type {
   AccessType,
   Destination,
@@ -53,6 +54,7 @@ export default function EventDetailScreen() {
   const destinations = useDestinations(eventId);
   const [addingDestination, setAddingDestination] = useState(false);
   const [editingDestination, setEditingDestination] = useState<Destination>();
+  const [scheduling, setScheduling] = useState<Destination>();
   const [editing, setEditing] = useState(false);
   const [buildingLists, setBuildingLists] = useState(false);
   const [removing, setRemoving] = useState<Destination>();
@@ -264,14 +266,29 @@ export default function EventDetailScreen() {
         <section className="section">
           <div className="section-head">
             <h2>Manage</h2>
+            <Link to={`/events/${event.id}/units`} className="small">
+              🏷️ Units
+            </Link>
           </div>
           <div className="list">
             {destinations.map((destination) => (
               <div key={destination.id} className="row row-static">
                 <span className="row-body">
                   <span className="row-title truncate">{destination.name}</span>
-                  <span className="row-sub truncate">{destination.accessNotes || 'No access notes'}</span>
+                  <span className="row-sub truncate">
+                    {destination.schedule?.windows.length
+                      ? `${plural(destination.schedule.windows.length, 'window')}${destination.vehicle ? ` · ${destination.vehicle}` : ''}`
+                      : destination.accessNotes || 'No schedule yet'}
+                  </span>
                 </span>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setScheduling(destination)}
+                  aria-label={`Schedule for ${destination.name}`}
+                >
+                  🕑
+                </button>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
@@ -312,6 +329,7 @@ export default function EventDetailScreen() {
       ) : null}
 
       {editing ? <EditEventSheet eventId={event.id} onClose={() => setEditing(false)} /> : null}
+      {scheduling ? <ScheduleSheet destination={scheduling} onClose={() => setScheduling(undefined)} /> : null}
 
       {buildingLists ? (
         <BuildListsSheet
