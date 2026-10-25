@@ -1167,3 +1167,10 @@ button, input, select, textarea {
 .run-sheet-row:last-child { border-bottom: none; }
 .run-sheet-label { font-weight: 700; }
 .block { display: block; }
+
+/* admin flows */
+/* On a laptop the bottom nav is still there, so the page has to end above it
+   or the last buttons (the warehouse list's CSV and Print) sit underneath. */
+@media (min-width: 820px) {
+  .app-main { padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + var(--space-10)); }
+}
