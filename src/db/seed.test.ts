@@ -206,8 +206,11 @@ describe('the seeded season', () => {
     );
     const rosea = destinations.find((destination) => destination.name === 'Rosea Carpark');
     expect(rosea?.courseKm).toBe(59);
-    // 13 from the race page, and 3 more from the GPT 2025 pack list.
-    expect(destinations).toHaveLength(16);
+    // 13 from the race page, and 4 more from the GPT pack lists.
+    expect(destinations).toHaveLength(17);
+    const stockyard = destinations.find((destination) => destination.name === 'Stockyard Track');
+    expect(stockyard?.vehicle).toBe('Ray Taylor 4WD');
+    expect(rosea?.vehicle).toBe('Van #2');
   });
 
   it('links Hounslow’s stations to its races, double passes included', async () => {
@@ -891,7 +894,7 @@ describe('the GPT100 starting packlists', () => {
     expect(qty('Sunscreen')).toBe(3);
     // Not box contents, so still their own lines.
     expect(qty('Ratchet Straps')).toBe(8);
-    expect(qty('Table Cloths')).toBe(2);
+    expect(qty('Table Cloths')).toBe(3);
   });
 });
 
@@ -974,6 +977,43 @@ describe('the Roller Coaster Run lists moving from the v1.5 cards to v2.1', () =
     expect((await db.packlistLines.get(doongallaIbc))?.qtyRequired).toBe(1);
     expect((await db.packlistLines.get(singletonIbc))?.deletedAt).not.toBeNull();
     expect((await db.packlistLines.get(singletonEsky))?.qtyRequired).toBe(5);
+  });
+});
+
+describe('the GPT100 lists moving to the 2026 Master Pack List', () => {
+  it('counts every Starlink once, where it starts', () => {
+    const units = (name: string) =>
+      GPT_PACKLISTS.flatMap((list) => list.lines.filter((line) => line.item === name)).reduce(
+        (sum, line) => sum + line.qty,
+        0,
+      );
+    expect(units('Starlink')).toBe(5);
+    expect(units('Starlink Mini')).toBe(3);
+    expect(units('Picket Fence')).toBe(1);
+    expect(units('Large Generator (Hired)')).toBe(2); // Borough, then Cassidys; and the village
+  });
+
+  it('retires the 2025 lines, tags the vehicle and fills the water point box', async () => {
+    await seedStarterData();
+    const firewood = seedId('pline', 'gpt26-Borough Huts-Firewood');
+    const borough = seedId('dest', 'gpt26-Borough Huts');
+    const wood = alive(await db.items.toArray()).find((item) => item.name === 'Firewood')!;
+    // As a phone holds them after the 2025 seed: raw writes keep revision 1.
+    await db.packlistLines.put({
+      ...(await db.packlistLines.get(seedId('pline', 'gpt26-Borough Huts-Tarps')))!,
+      id: firewood,
+      itemId: wood.id,
+      qtyRequired: 2,
+    });
+    const { vehicle: _, ...untagged } = (await db.destinations.get(borough))!;
+    await db.destinations.put(untagged);
+
+    await ensureSeeded();
+
+    expect((await db.packlistLines.get(firewood))?.deletedAt).not.toBeNull();
+    expect((await db.destinations.get(borough))?.vehicle).toBe('Van #3');
+    const box = alive(await db.items.toArray()).find((item) => item.name === 'Water Point Box')!;
+    expect(box.contents?.length).toBe(10);
   });
 });
 

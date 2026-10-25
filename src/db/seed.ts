@@ -6,7 +6,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
-import { GPT_PACKLISTS } from './gptSeed';
+import { GPT_PACKLISTS, GPT_RETIRED } from './gptSeed';
 import { RCR_CONSUMPTION, RCR_PACKLISTS, RCR_RETIRED } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import { makeCode } from '../domain/codes';
@@ -345,6 +345,12 @@ export async function seedStarterData(
         if (existing && !existing.deletedAt && existing.raceVisits === undefined && raceVisits.length) {
           await update(db.destinations, destinationId, { raceVisits });
         }
+        // Likewise its vehicle: absent is "never set", while any tag, blank
+        // included, is the crew's.
+        const current = await db.destinations.get(destinationId);
+        if (current && !current.deletedAt && current.vehicle === undefined && destination.vehicle) {
+          await update(db.destinations, destinationId, { vehicle: destination.vehicle });
+        }
         continue;
       }
       await create(db.destinations, {
@@ -364,6 +370,7 @@ export async function seedStarterData(
         notes: destination.notes ?? '',
         sort: destination.sort ?? (index + 1) * 10,
         ...(raceVisits.length ? { raceVisits } : {}),
+        ...(destination.vehicle ? { vehicle: destination.vehicle } : {}),
       });
     }
   }
@@ -406,8 +413,8 @@ export async function seedStarterData(
     {
       code: 'gpt26',
       lists: GPT_PACKLISTS,
-      retired: [],
-      notes: 'Starting quantities from the GPT 2025 pack list (draft).',
+      retired: GPT_RETIRED,
+      notes: 'Starting quantities from the GPT100 2026 Master Pack List v1.0.',
     },
   ];
   /*
