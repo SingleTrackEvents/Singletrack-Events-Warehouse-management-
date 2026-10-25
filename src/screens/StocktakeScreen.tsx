@@ -8,7 +8,7 @@ import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useCategories, useCrewName } from '../hooks/useDb';
-import { startStocktake, summarise } from '../domain/stocktake';
+import { overlappingStocktakes, startStocktake, summarise } from '../domain/stocktake';
 import { describeStocktakeRemoval, removeStocktake } from '../domain/remove';
 import type { StocktakeRemoval } from '../domain/remove';
 import type { Stocktake } from '../db/types';
@@ -171,6 +171,13 @@ function StartSheet({ onClose, onStarted }: { onClose: () => void; onStarted: (i
   const [name, setName] = useState(`Stocktake ${today}`);
   const [categoryId, setCategoryId] = useState('');
   const [working, setWorking] = useState(false);
+  // Two open counts over the same shelf is how a correction got applied
+  // twice. Finishing handles it now, but the crew should know before they
+  // walk the same racks again.
+  const overlapping = useLiveQuery(
+    () => overlappingStocktakes(categoryId || null),
+    [categoryId],
+  );
 
   const start = async () => {
     setWorking(true);
@@ -189,12 +196,21 @@ function StartSheet({ onClose, onStarted }: { onClose: () => void; onStarted: (i
             Cancel
           </button>
           <button type="button" className="btn btn-primary" disabled={working} onClick={() => void start()}>
-            {working ? 'Starting…' : 'Start'}
+            {working ? 'Starting…' : overlapping?.length ? 'Start anyway' : 'Start'}
           </button>
         </>
       }
     >
       <div className="stack">
+        {overlapping?.length ? (
+          <div className="card card-pad small" style={{ background: 'var(--warn-bg)' }} role="status">
+            {overlapping.length === 1
+              ? `${overlapping[0].name} is still open and covers some of the same items.`
+              : `${plural(overlapping.length, 'open stocktake')} already cover some of the same items.`}{' '}
+            Finishing that one first keeps the counts from tripping over each other. If you start
+            this one too, whichever count was taken last wins for each item.
+          </div>
+        ) : null}
         <Field label="Name">
           {(id) => (
             <input

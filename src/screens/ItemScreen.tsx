@@ -15,7 +15,9 @@ import { useCategories, useCrewName, useItem, useItems } from '../hooks/useDb';
 import { addKitContent, isKit, kitLines, removeKitContent, setKitContentQty } from '../domain/kits';
 import {
   MOVEMENT_LABELS,
+  countedItemIds,
   isLowStock,
+  isUncounted,
   itemHistory,
   recordMovements,
   setQuantity,
@@ -45,6 +47,9 @@ export default function ItemScreen() {
   const history = useLiveQuery(async () => (itemId ? itemHistory(itemId, 40) : []), [itemId]);
   // Depending on the movements table keeps the ledger live as adjustments land.
   const movementCount = useLiveQuery(async () => db.movements.count(), []);
+  // A shelf counted as empty on a stocktake writes no movement, so the ledger
+  // alone would still call it "not counted". countedItemIds knows better.
+  const counted = useLiveQuery(() => countedItemIds(), [movementCount]);
 
   // Which way the stock sheet opens: in (a delivery) or out (used, broken).
   const [adjusting, setAdjusting] = useState<1 | -1 | null>(null);
@@ -100,19 +105,24 @@ export default function ItemScreen() {
             <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, lineHeight: 1 }}>
               {formatQty(item.qtyOnHand, item.unit)}
             </div>
-            <div className="small muted mt-2">
-              {item.packSize > 1 ? `${Math.round(item.qtyOnHand * item.packSize)} pieces · ` : ''}
-              bin {item.bin || '—'}
+            {/* The shelf is what you came here for when you are standing in
+                the warehouse looking for the thing, so it reads as loud as
+                the number. */}
+            <div className="mt-2" style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, lineHeight: 1 }}>
+              {item.bin ? `Shelf ${item.bin}` : <span className="small muted">No shelf set</span>}
             </div>
+            {item.packSize > 1 ? (
+              <div className="small muted mt-2">{Math.round(item.qtyOnHand * item.packSize)} pieces</div>
+            ) : null}
           </div>
           <div className="stack-sm" style={{ alignItems: 'flex-end' }}>
-            {history && !history.length && item.qtyOnHand === 0 ? (
+            {counted && isUncounted(item, counted) ? (
               <Pill>Not counted yet</Pill>
             ) : item.qtyOnHand < 0 ? (
               // More went out than the warehouse had counted: the count is
               // wrong, and the fix is to count it, not to buy more.
               <Pill tone="danger">Count is out: count it</Pill>
-            ) : isLowStock(item) ? (
+            ) : isLowStock(item, counted) ? (
               <Pill tone="danger">Below reorder</Pill>
             ) : (
               <Pill tone="ok">In stock</Pill>

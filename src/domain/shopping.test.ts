@@ -13,7 +13,9 @@ import {
   awaitingBooking,
   bookAllBought,
   bookIntoStock,
+  bookLine,
   bought,
+  canonicalShop,
   clearBought,
   describeLine,
   groupByShop,
@@ -138,6 +140,83 @@ describe('fed from low stock', () => {
     const all = await lines();
     expect(all.every((line) => line.eventId === null && line.source === 'low_stock')).toBe(true);
   });
+
+  it('leaves gear off unless asked, since a marquee is not a supplier run', async () => {
+    const gels = await makeItem('Gels', { qtyOnHand: 3, minQty: 10 });
+    const marquee = await makeItem('Marquee 3x3', { qtyOnHand: 1, minQty: 4, consumable: false });
+    const barrier = await makeItem('Crowd barrier', { qtyOnHand: 0, minQty: 20, consumable: false });
+
+    const result = await addLowStock([gels, marquee, barrier]);
+    expect(result).toMatchObject({ added: 1, skipped: 2 });
+    expect((await lines()).map((line) => line.name)).toEqual(['Gels']);
+
+    const everything = await addLowStock([gels, marquee, barrier], '', { includeGear: true });
+    expect(everything).toMatchObject({ added: 2, skipped: 0 });
+  });
+
+  it('does not duplicate a line already open for an event', async () => {
+    const coke = await makeItem('Coke cans', { qtyOnHand: 2, minQty: 10 });
+    await addShortfalls('ev-1', [{ item: coke, total: 24, byDay: [[null, 22]], onHand: 2, toOrder: 22 }]);
+
+    const result = await addLowStock([coke]);
+    expect(result).toMatchObject({ added: 0, updated: 0, unchanged: 1 });
+    expect(await lines()).toHaveLength(1);
+  });
+
+  it('comes off the list once a booked receipt lifts the item over its reorder point', async () => {
+    const coke = await makeItem('Coke cans', { qtyOnHand: 2, minQty: 10 });
+    // Low stock first, then the food plan: two lines for one item.
+    await addLowStock([coke]);
+    await addShortfalls('ev-1', [{ item: coke, total: 24, byDay: [[null, 22]], onHand: 2, toOrder: 22 }]);
+    expect(toBuy(await lines())).toHaveLength(2);
+
+    const forEvent = (await lines()).find((line) => line.source === 'food_plan')!;
+    await markBought(forEvent.id, 'Jess');
+    const result = await bookLine(forEvent.id, 'Jess');
+
+    expect(result).toMatchObject({ status: 'booked', resolved: 1 });
+    expect(toBuy(await lines())).toHaveLength(0);
+  });
+
+  it('stays on the list when the receipt still leaves the item low', async () => {
+    const coke = await makeItem('Coke cans', { qtyOnHand: 2, minQty: 30 });
+    await addLowStock([coke]);
+    const { line } = await addShoppingLine(inputForItem(coke, 5, { eventId: 'ev-1' }));
+    await markBought(line.id);
+    expect(await bookLine(line.id)).toMatchObject({ status: 'booked', resolved: 0 });
+    expect(toBuy(await lines())).toHaveLength(1);
+  });
+});
+
+describe('shops', () => {
+  it('takes the shop given when the line it merges into has none', async () => {
+    const ice = await makeItem('Ice');
+    await addShoppingLine(inputForItem(ice, 2));
+    const again = await addShoppingLine(inputForItem(ice, 1, { shop: 'IGA' }));
+    expect(again).toMatchObject({ merged: true, changed: true });
+    expect(again.line).toMatchObject({ qty: 3, shop: 'IGA' });
+  });
+
+  it('keeps two lines for two different shops', async () => {
+    const ice = await makeItem('Ice');
+    await addShoppingLine(inputForItem(ice, 2, { shop: 'IGA' }));
+    const other = await addShoppingLine(inputForItem(ice, 1, { shop: 'Servo' }));
+    expect(other.merged).toBe(false);
+    expect(await lines()).toHaveLength(2);
+  });
+
+  it('stores a shop the way the list first spelt it, and groups whatever the case', async () => {
+    await addShoppingLine({ name: 'Zip ties', qty: 1, shop: 'Bunnings' });
+    const later = await addShoppingLine({ name: 'Tape', qty: 1, shop: ' bunnings ' });
+    expect(later.line.shop).toBe('Bunnings');
+    expect(canonicalShop('COSTCO', await lines())).toBe('COSTCO');
+
+    // Lines written before the shop was tidied still land in one group.
+    await create(db.shoppingLines, { ...later.line, id: 'old', name: 'Rope', shop: 'BUNNINGS' });
+    const groups = groupByShop(await lines());
+    expect(groups.map(([shop, group]) => [shop, group.length])).toEqual([['Bunnings', 3]]);
+    expect(shopsUsed(await lines())).toEqual(['Bunnings']);
+  });
 });
 
 describe('in the shop', () => {
@@ -189,6 +268,29 @@ describe('booking a purchase into stock', () => {
     expect((await db.items.get(coke.id))?.qtyOnHand).toBe(7);
     expect(await db.movements.count()).toBe(1);
     expect(awaitingBooking(await lines())).toHaveLength(0);
+  });
+
+  it('tells a second tap the line is already booked, rather than that it failed', async () => {
+    const coke = await makeItem('Coke cans');
+    const { line } = await addShoppingLine(inputForItem(coke, 5));
+    await markBought(line.id);
+    const [first, second] = await Promise.all([bookLine(line.id), bookLine(line.id)]);
+    expect([first.status, second.status].sort()).toEqual(['already', 'booked']);
+    expect((await db.items.get(coke.id))?.qtyOnHand).toBe(5);
+  });
+
+  it('will not book an archived item into stock', async () => {
+    const radio = await makeItem('Old radio', { archived: true });
+    const cups = await makeItem('Cups');
+    const a = await addShoppingLine(inputForItem(radio, 2));
+    const b = await addShoppingLine(inputForItem(cups, 50));
+    await markBought(a.line.id);
+    await markBought(b.line.id);
+
+    expect(await bookLine(a.line.id)).toEqual({ status: 'archived' });
+    expect(await bookAllBought(await lines())).toBe(1);
+    expect((await db.items.get(radio.id))?.qtyOnHand).toBe(0);
+    expect(await db.movements.count()).toBe(1);
   });
 
   it('has nothing to book for a free-text line', async () => {
@@ -243,6 +345,13 @@ describe('finding the item behind what was typed', () => {
   it('finds by code as well as name', async () => {
     const item = await makeItem('Electrolyte sachets', { sku: 'AS-ELEC' });
     expect(matchItems([item], 'as-elec')).toHaveLength(1);
+  });
+
+  it('knows the crew\'s words for things', async () => {
+    const ties = await makeItem('Cable Ties 300mm');
+    const foil = await makeItem('Aluminium Foil');
+    expect(matchItems([ties, foil], 'zip ties')).toEqual([ties]);
+    expect(matchItems([ties, foil], 'alfoil')).toEqual([foil]);
   });
 });
 

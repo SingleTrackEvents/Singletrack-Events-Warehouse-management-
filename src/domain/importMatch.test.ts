@@ -4,7 +4,9 @@ import {
   matchCategory,
   matchDestination,
   matchItem,
+  matchesSearch,
   nameKey,
+  searchVariants,
   similarity,
   tokens,
 } from './importMatch';
@@ -186,5 +188,32 @@ describe('headings', () => {
     expect(matchCategory('COOKING AND HEATING', categories)?.name).toBe('Cooking & Heating');
     expect(matchCategory('Cooking', categories)?.name).toBe('Cooking & Heating');
     expect(matchCategory('Trestle Tables', categories)).toBeNull();
+  });
+});
+
+describe('what the crew call things', () => {
+  it('finds the catalogue name from the everyday one when searching', () => {
+    expect(matchesSearch('Cable Ties 300mm (100)', 'zip ties')).toBe(true);
+    expect(matchesSearch('Cable Ties 300mm (100)', 'zip-tie')).toBe(true);
+    expect(matchesSearch('Aluminium Foil 30cm', 'alfoil')).toBe(true);
+    expect(matchesSearch('Aid Station Kit', 'aid station box')).toBe(true);
+    expect(matchesSearch('Cooler 60L', 'esky')).toBe(true);
+    expect(matchesSearch('Esky 60L', 'cooler')).toBe(true);
+    expect(matchesSearch('Traffic cones', 'witches hats')).toBe(true);
+  });
+
+  it('still needs every word, and leaves unrelated foil alone', () => {
+    expect(matchesSearch('Cable Ties 300mm', 'zip ties 500mm')).toBe(false);
+    expect(matchesSearch('Foil blanket (emergency)', 'alfoil')).toBe(false);
+    expect(matchesSearch('Water cube 20L', 'water cube')).toBe(true);
+    expect(searchVariants('zip ties')).toContain('cable ties');
+  });
+
+  it('matches an imported name written the everyday way', () => {
+    const items = [item('Cable Ties'), item('Aluminium Foil'), item('Aid Station Kit'), item('Foil Blanket')];
+    expect(matchItem('Zip ties', items)).toMatchObject({ item: { name: 'Cable Ties' }, confidence: 'sure' });
+    expect(matchItem('Alfoil', items)).toMatchObject({ item: { name: 'Aluminium Foil' }, confidence: 'sure' });
+    expect(matchItem('Aid station box', items)?.item.name).toBe('Aid Station Kit');
+    expect(nameKey('Esky')).toBe(nameKey('cooler'));
   });
 });

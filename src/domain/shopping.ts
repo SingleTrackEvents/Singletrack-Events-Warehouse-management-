@@ -3,6 +3,7 @@ import { alive, create, nextSort, softDelete, update } from '../db/repo';
 import type { Item, Movement, ShoppingLine, ShoppingSource, Unit } from '../db/types';
 import type { FoodTotal } from './consumption';
 import { formatQty } from './format';
+import { matchesSearch } from './importMatch';
 import { recordMovements, round2, shortfall } from './stock';
 
 /**
@@ -61,6 +62,26 @@ export function cleanShop(shop: string): string {
   return shop.replace(/\s+/g, ' ').trim();
 }
 
+/** The form two spellings of one shop share: "Bunnings" and "bunnings ". */
+function shopKey(shop: string): string {
+  return cleanShop(shop).toLowerCase();
+}
+
+/**
+ * A shop as the list already spells it, so "bunnings" typed on Thursday
+ * joins Monday's "Bunnings" rather than starting a second group. The
+ * earliest line wins; a shop the list has not seen is kept as typed.
+ */
+export function canonicalShop(shop: string, lines: ShoppingLine[]): string {
+  const cleaned = cleanShop(shop);
+  if (!cleaned) return '';
+  const key = cleaned.toLowerCase();
+  const first = lines
+    .filter((line) => !line.deletedAt && shopKey(line.shop) === key)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+  return first ? cleanShop(first.shop) : cleaned;
+}
+
 export function isBought(line: ShoppingLine): boolean {
   return Boolean(line.boughtAt);
 }
@@ -93,16 +114,30 @@ export function awaitingBooking(lines: ShoppingLine[]): ShoppingLine[] {
  *
  * Same item on the same event, or for a free-text line the same name in any
  * case. A bought line is never merged into: buying coke on Tuesday does not
- * mean Thursday's coke is bought.
+ * mean Thursday's coke is bought. Two different shops keep two lines, since
+ * the list is read one shop at a time and a merged line would lose one.
  */
 function findOpenMatch(lines: ShoppingLine[], input: ShoppingInput): ShoppingLine | undefined {
   const eventId = input.eventId ?? null;
   const name = input.name.trim().toLowerCase();
+  const shop = shopKey(input.shop ?? '');
   return toBuy(lines).find((line) => {
     if ((line.eventId ?? null) !== eventId) return false;
+    if (shop && line.shop && shopKey(line.shop) !== shop) return false;
     if (input.itemId) return line.itemId === input.itemId;
     return !line.itemId && line.name.trim().toLowerCase() === name;
   });
+}
+
+/**
+ * An open line for the same item on some other event, which a low-stock line
+ * would only duplicate. Whoever buys for the event is already buying it, and
+ * when it is booked in the low-stock alarm clears on its own if it is enough.
+ */
+function openElsewhere(lines: ShoppingLine[], input: ShoppingInput): ShoppingLine | undefined {
+  if (input.source !== 'low_stock' || !input.itemId) return undefined;
+  const eventId = input.eventId ?? null;
+  return toBuy(lines).find((line) => line.itemId === input.itemId && (line.eventId ?? null) !== eventId);
 }
 
 /** Add a line, merging into an open line for the same thing on the same event. */
@@ -111,21 +146,29 @@ export async function addShoppingLine(input: ShoppingInput, mode: MergeMode = 'a
   if (!name) throw new Error('A shopping line needs a name.');
   const qty = round2(Math.max(0, input.qty));
   const lines = alive(await db.shoppingLines.toArray());
+  const shop = canonicalShop(input.shop ?? '', lines);
   const match = findOpenMatch(lines, input);
 
   if (match) {
     const next = mode === 'set' ? qty : round2(match.qty + qty);
-    if (next === match.qty) return { line: match, merged: true, changed: false };
-    const updated = await update(db.shoppingLines, match.id, { qty: next });
+    // A line with no shop takes the one just given rather than dropping it.
+    const changes: Partial<ShoppingLine> = {};
+    if (next !== match.qty) changes.qty = next;
+    if (shop && !match.shop) changes.shop = shop;
+    if (!Object.keys(changes).length) return { line: match, merged: true, changed: false };
+    const updated = await update(db.shoppingLines, match.id, changes);
     return { line: updated ?? match, merged: true, changed: true };
   }
+
+  const elsewhere = openElsewhere(lines, input);
+  if (elsewhere) return { line: elsewhere, merged: true, changed: false };
 
   const line = await create(db.shoppingLines, {
     itemId: input.itemId ?? null,
     name,
     qty,
     unit: input.unit ?? 'each',
-    shop: cleanShop(input.shop ?? ''),
+    shop,
     note: (input.note ?? '').trim(),
     eventId: input.eventId ?? null,
     source: input.source ?? 'hand',
@@ -189,12 +232,24 @@ export function restockQty(item: Item): number {
   return Math.max(1, shortfall(item));
 }
 
-/** Put items that have fallen below their reorder point on the warehouse list. */
-export async function addLowStock(items: Item[], by = ''): Promise<FeedResult> {
-  const inputs = items.map((item) =>
+/**
+ * Put items that have fallen below their reorder point on the warehouse list.
+ *
+ * Only consumables unless told otherwise. A trestle table, a marquee or a
+ * run of crowd barrier below its reorder point is a hire or a capital
+ * purchase, not something to pick up on the supplier run, and a list padded
+ * with them is a list nobody trusts. `skipped` says how many were left off.
+ */
+export async function addLowStock(
+  items: Item[],
+  by = '',
+  options: { includeGear?: boolean } = {},
+): Promise<FeedResult & { skipped: number }> {
+  const buyable = options.includeGear ? items : items.filter((item) => item.consumable);
+  const inputs = buyable.map((item) =>
     inputForItem(item, restockQty(item), { eventId: null, source: 'low_stock', by }),
   );
-  return feed(inputs, 'set');
+  return { ...(await feed(inputs, 'set')), skipped: items.length - buyable.length };
 }
 
 /**
@@ -224,11 +279,34 @@ export async function markBought(lineId: string, by = '', isNowBought = true): P
  * the stock came from.
  */
 export async function bookIntoStock(lineId: string, by = ''): Promise<Movement | undefined> {
-  return db.transaction('rw', db.items, db.movements, db.shoppingLines, async () => {
+  const result = await bookLine(lineId, by);
+  return result.status === 'booked' ? result.movement : undefined;
+}
+
+/**
+ * What booking a line did, so the screen can say the right thing.
+ *
+ * `already` is the second tap of a double tap, or another phone getting there
+ * first: nothing went wrong. `archived` is a purchase for an item taken out of
+ * use, kept off the shelf count until somebody brings the item back.
+ * `resolved` counts the low-stock lines the receipt answered and took off.
+ */
+export type BookResult =
+  | { status: 'booked'; movement: Movement; resolved: number }
+  | { status: 'already' }
+  | { status: 'archived' }
+  | { status: 'nothing' };
+
+/** Book a line into stock, saying what happened. See `bookIntoStock`. */
+export async function bookLine(lineId: string, by = ''): Promise<BookResult> {
+  return db.transaction('rw', db.items, db.movements, db.shoppingLines, async (): Promise<BookResult> => {
     const line = await db.shoppingLines.get(lineId);
-    if (!line || line.deletedAt || !line.boughtAt || line.bookedAt || !line.itemId || line.qty <= 0) {
-      return undefined;
+    if (line && !line.deletedAt && line.bookedAt) return { status: 'already' };
+    if (!line || line.deletedAt || !line.boughtAt || !line.itemId || line.qty <= 0) {
+      return { status: 'nothing' };
     }
+    const item = await db.items.get(line.itemId);
+    if (item?.archived) return { status: 'archived' };
     const [movement] = await recordMovements([
       {
         itemId: line.itemId,
@@ -242,17 +320,34 @@ export async function bookIntoStock(lineId: string, by = ''): Promise<Movement |
     ]);
     // No ledger row means the item has gone from the catalogue; the line is
     // left unbooked so the gap is visible rather than quietly closed.
-    if (!movement) return undefined;
+    if (!movement) return { status: 'nothing' };
     await update(db.shoppingLines, line.id, { bookedAt: nowIso() });
-    return movement;
+
+    // Food bought for an event can be what lifts the item back over its
+    // reorder point. Once it has, a low-stock line for the same item is
+    // answered, and leaving it under "To buy" would send somebody back for more.
+    let resolved = 0;
+    const after = await db.items.get(line.itemId);
+    if (after && after.qtyOnHand > after.minQty) {
+      const all = await db.shoppingLines.where('itemId').equals(line.itemId).toArray();
+      for (const other of toBuy(all)) {
+        if (other.id === line.id || other.source !== 'low_stock') continue;
+        await softDelete(db.shoppingLines, other.id);
+        resolved += 1;
+      }
+    }
+    return { status: 'booked', movement, resolved };
   });
 }
 
-/** Book every bought catalogue line that is still waiting. Returns how many landed. */
+/**
+ * Book every bought catalogue line that is still waiting. Returns how many
+ * landed. Lines for archived items are left waiting, not booked.
+ */
 export async function bookAllBought(lines: ShoppingLine[], by = ''): Promise<number> {
   let booked = 0;
   for (const line of awaitingBooking(lines)) {
-    if (await bookIntoStock(line.id, by)) booked += 1;
+    if ((await bookLine(line.id, by)).status === 'booked') booked += 1;
   }
   return booked;
 }
@@ -269,34 +364,40 @@ export async function clearBought(lines: ShoppingLine[]): Promise<number> {
  *
  * The list is read standing in one shop at a time, so everything for Costco
  * wants to be together whatever order it was added in. Within a shop, list
- * order is kept.
+ * order is kept. "Bunnings" and "bunnings" are one shop, headed the way it
+ * was first spelt.
  */
 export function groupByShop(lines: ShoppingLine[]): Array<[shop: string, lines: ShoppingLine[]]> {
-  const buckets = new Map<string, ShoppingLine[]>();
+  const buckets = new Map<string, { shop: string; lines: ShoppingLine[] }>();
   for (const line of lines) {
-    const key = cleanShop(line.shop);
+    const key = shopKey(line.shop);
     const bucket = buckets.get(key);
-    if (bucket) bucket.push(line);
-    else buckets.set(key, [line]);
+    if (bucket) bucket.lines.push(line);
+    else buckets.set(key, { shop: cleanShop(line.shop), lines: [line] });
   }
-  return [...buckets.entries()].sort(([a], [b]) => {
-    if (!a) return 1;
-    if (!b) return -1;
-    return a.localeCompare(b, undefined, { sensitivity: 'base' });
-  });
+  return [...buckets.values()]
+    .map((bucket): [string, ShoppingLine[]] => [bucket.shop, bucket.lines])
+    .sort(([a], [b]) => {
+      if (!a) return 1;
+      if (!b) return -1;
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
 }
 
 /** Shops the list has used, most used first, for suggesting on a new line. */
 export function shopsUsed(lines: ShoppingLine[]): string[] {
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { shop: string; count: number }>();
   for (const line of lines) {
     if (line.deletedAt) continue;
     const shop = cleanShop(line.shop);
-    if (shop) counts.set(shop, (counts.get(shop) ?? 0) + 1);
+    if (!shop) continue;
+    const entry = counts.get(shopKey(shop));
+    if (entry) entry.count += 1;
+    else counts.set(shopKey(shop), { shop, count: 1 });
   }
-  return [...counts.entries()]
-    .sort(([a, countA], [b, countB]) => countB - countA || a.localeCompare(b))
-    .map(([shop]) => shop);
+  return [...counts.values()]
+    .sort((a, b) => b.count - a.count || a.shop.localeCompare(b.shop))
+    .map((entry) => entry.shop);
 }
 
 /**
@@ -305,6 +406,8 @@ export function shopsUsed(lines: ShoppingLine[]): string[] {
  * Every term must appear in the name or the code, so "coke can" finds
  * "Coca-Cola cans (24)" whatever order the words are typed. Names that start
  * with what was typed come first, because that is usually the one meant.
+ * The crew's words count as well as the catalogue's: "zip ties" finds the
+ * Cable Ties.
  */
 export function matchItems(items: Item[], query: string, limit = 6): Item[] {
   const text = query.trim().toLowerCase();
@@ -319,10 +422,7 @@ export function matchItems(items: Item[], query: string, limit = 6): Item[] {
   };
   return items
     .filter((item) => !item.archived && !item.deletedAt)
-    .filter((item) => {
-      const haystack = `${item.name} ${item.sku}`.toLowerCase();
-      return terms.every((term) => haystack.includes(term));
-    })
+    .filter((item) => matchesSearch(`${item.name} ${item.sku}`, text))
     .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
     .slice(0, limit);
 }
