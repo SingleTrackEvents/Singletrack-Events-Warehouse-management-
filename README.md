@@ -330,10 +330,14 @@ policies allow is allowed to anyone who cares to try.
 
 ### Two ways in
 
-Core crew sign in with an email link. Volunteers scan an invite QR at their aid
-station and type their name: no inbox, no password, nothing to remember, because
-race morning is the worst possible time to make someone set up an account. Invites
-expire on the day the admin picks.
+Core crew sign in with an email address and a password, or have a code emailed
+instead. A password is set from Accounts & sync on any signed-in device, and an
+account can be created with one on the spot: that gets as far as the account,
+and the invite code from the crew attaches the access to it. So a person, or a
+bot, with no inbox to check can still get in. Volunteers scan an invite QR at
+their aid station and type their name: no inbox, no password, nothing to
+remember, because race morning is the worst possible time to make someone set up
+an account. Invites expire on the day the admin picks.
 
 On an iPhone the app added to the home screen keeps its storage apart from
 Safari's, so someone who joined in the browser opens the app to a sign-in page.
@@ -356,9 +360,12 @@ trying the flow) and `SupabaseBackend`.
 **Setup, once:**
 
 1. Supabase → SQL Editor → run `supabase/schema.sql` whole. It is re-runnable.
-2. Authentication → Providers → enable **Email** (magic links) and **Anonymous
-   sign-ins**. Volunteers get an anonymous account behind the scenes so they
-   never have to make one.
+2. Authentication → Providers → enable **Email** (magic links and passwords)
+   and **Anonymous sign-ins**. Volunteers get an anonymous account behind the
+   scenes so they never have to make one. Under Email, leave **Confirm email**
+   and **Secure password change** switched off: with either on, creating an
+   account with a password or setting one waits on an email, which is the
+   dependency the password path is there to remove.
 3. Authentication → URL Configuration → set **Site URL** to where the app is
    served, and add the same URL under **Redirect URLs**. Miss this and sign-in
    links bounce to `http://localhost:3000`: Supabase silently ignores a redirect
@@ -388,8 +395,9 @@ so none of the failure modes email brings — undeliverable links, one-time toke
 consumed by preview scanners, a project-wide rate limit — apply at all.
 
 Registering a passkey needs a live session, so the **first** sign-in on an
-account is still by email. After that, that device never needs email again. Each
-device gets its own passkey; they are listed and revocable under Accounts & sync.
+account is still by password or email. After that, that device never needs
+either again. Each device gets its own passkey; they are listed and revocable
+under Accounts & sync.
 
 Volunteers are deliberately excluded: their access is a short-lived guest session
 tied to an invite, and a passkey would outlive the invite it came from.

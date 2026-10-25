@@ -4,6 +4,7 @@ import { SYNCED_TABLES, db } from '../db/db';
 import { getAuthNotice, setAuthNotice } from './authRedirect';
 import { forgetSession, recallSession, rememberSession } from './sessionCache';
 import { cleanDisplayName, displayNameFromEmail } from './names';
+import { passwordProblem } from './passwords';
 import type { TableName } from '../db/db';
 import type { SyncMeta } from '../db/types';
 import type {
@@ -278,6 +279,51 @@ function toPasskeyError(message: string): SyncError {
   return new SyncError(message || 'The passkey could not be used.', 'auth');
 }
 
+/**
+ * Password failures, in words. The raw messages are terse and a couple of them
+ * point at a project setting only an admin can change, so say which.
+ */
+function toPasswordError(message: string): SyncError {
+  if (/invalid login credentials|invalid_credentials/i.test(message)) {
+    return new SyncError(
+      'That email and password do not match. If you have never set a password on this account, ' +
+        'sign in with a code once and add one under Accounts & sync.',
+      'auth',
+    );
+  }
+  if (/email not confirmed/i.test(message)) {
+    return new SyncError(
+      'This account is waiting on a confirmation email. An admin can switch off "Confirm email" ' +
+        'under Authentication → Providers → Email in Supabase so passwords work without one.',
+      'auth',
+    );
+  }
+  if (/already registered|already exists/i.test(message)) {
+    return new SyncError(
+      'There is already an account for that address. Sign in with its password, or with a code if it has none.',
+      'auth',
+    );
+  }
+  if (/signups? not allowed|signup.*disabled/i.test(message)) {
+    return new SyncError(
+      'New accounts are switched off for this project. An admin needs to allow sign-ups under ' +
+        'Authentication → Providers → Email in Supabase.',
+      'permission',
+    );
+  }
+  if (/password/i.test(message) && /(short|least|weak|characters)/i.test(message)) {
+    return new SyncError(message, 'invalid');
+  }
+  if (/reauthentication|nonce/i.test(message)) {
+    return new SyncError(
+      'Supabase wants this change confirmed by email first. An admin can switch off ' +
+        '"Secure password change" under Authentication → Providers → Email so a password can be set without one.',
+      'auth',
+    );
+  }
+  return toSyncError(message);
+}
+
 export class SupabaseBackend implements SyncBackend {
   readonly name = 'Supabase';
   readonly isReal = true;
@@ -418,6 +464,77 @@ export class SupabaseBackend implements SyncBackend {
   }
 
   /**
+   * Sign in with a password. Same membership claim as the code path, so an
+   * account that exists but has not been invited is told so rather than
+   * dropped on a login form it has just completed.
+   */
+  async signInWithPassword(email: string, password: string): Promise<Session> {
+    const { data, error } = await this.client.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    if (error) throw toPasswordError(error.message);
+    if (!data.session || !data.user) {
+      throw new SyncError('That did not produce a session. Try again.', 'auth');
+    }
+    return this.settleClaimed(data.user, data.session.access_token);
+  }
+
+  /**
+   * Create the account here instead of over email.
+   *
+   * With "Confirm email" off in the project, Supabase hands back a session
+   * straight away; with it on, nothing can proceed until a confirmation email
+   * is followed, which is the exact dependency this path exists to avoid, so
+   * that case is named rather than left as a silent null.
+   */
+  async createAccountWithPassword(email: string, password: string): Promise<Session> {
+    const problem = passwordProblem(password);
+    if (problem) throw new SyncError(problem, 'invalid');
+
+    const { data, error } = await this.client.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    if (error) throw toPasswordError(error.message);
+    // With confirmations on, an address that already exists comes back as a
+    // placeholder user with no identities, to avoid revealing who has signed up.
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      throw toPasswordError('User already registered');
+    }
+    if (!data.session || !data.user) throw toPasswordError('Email not confirmed');
+    return this.settleClaimed(data.user, data.session.access_token);
+  }
+
+  /**
+   * Set or change the password on the signed-in account. Lets crew who only
+   * ever had a code sign in on a phone with no inbox, and the first account on
+   * a project pick one before anyone else arrives.
+   */
+  async setPassword(password: string): Promise<void> {
+    const problem = passwordProblem(password);
+    if (problem) throw new SyncError(problem, 'invalid');
+    const { error } = await this.client.auth.updateUser({ password });
+    if (error) throw toPasswordError(error.message);
+  }
+
+  /**
+   * An authenticated user becomes a session only once a membership is claimed.
+   * Without one the credential stays on the device, so the invite screen can
+   * attach the membership to this same account rather than a guest one.
+   */
+  private async settleClaimed(user: User, token: string): Promise<Session> {
+    const membership = await this.claimMembership(user.email ?? '');
+    if (!membership) {
+      throw new SyncError(
+        getAuthNotice() || 'No access yet — ask an admin for an invite.',
+        'permission',
+      );
+    }
+    return this.settle(user, membership, token);
+  }
+
+  /**
    * Finish a sign-in with the numeric code from the email.
    *
    * The length is a project setting in Supabase (6 to 10 digits), not something
@@ -440,14 +557,7 @@ export class SupabaseBackend implements SyncBackend {
       throw new SyncError('That code did not work. Check it and try again.', 'auth');
     }
 
-    const membership = await this.claimMembership(data.user.email ?? '');
-    if (!membership) {
-      throw new SyncError(
-        getAuthNotice() || 'No access yet — ask an admin for an invite.',
-        'permission',
-      );
-    }
-    return this.settle(data.user, membership, data.session.access_token);
+    return this.settleClaimed(data.user, data.session.access_token);
   }
 
   /**
