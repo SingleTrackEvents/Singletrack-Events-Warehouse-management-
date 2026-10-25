@@ -8,7 +8,7 @@ import { useSearch } from '../hooks/useSearch';
 import { useCategories, useEvent } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
-import { adoptVehiclesFromLoads, byVehicle, isPulled, pullListCsv, pullListFor, setPulled } from '../domain/warehouse';
+import { adoptVehiclesFromLoads, byVehicle, isPulled, pullListCsv, pullListFor, restoreLines, setPulled } from '../domain/warehouse';
 import { issueLoaded, setOnTruck } from '../domain/truck';
 import { downloadCsv, slugify } from '../domain/backup';
 import { formatDateTime, formatQty, plural } from '../domain/format';
@@ -47,6 +47,10 @@ export default function WarehouseScreen() {
   // A two-stage event ticks gear onto the truck here; the stations' own lists
   // are then the van packs at the event.
   const truck = Boolean(event?.truckStage);
+  // Items where loading now takes out more than the shelf was counted at.
+  const overdrawn = (list?.lines ?? [])
+    .map((line) => ({ ...line, going: (truck ? line.qtyOnTruck : line.qtyPacked) - line.qtyIssued }))
+    .filter((line) => !line.uncounted && line.going > 0 && line.going > line.qtyOnHand);
   const [loadingTruck, setLoadingTruck] = useState(false);
   // A transport plan made before vehicles were tags is written onto the
   // stations once, by whoever may edit them, so it keeps reading the same.
@@ -309,17 +313,33 @@ export default function WarehouseScreen() {
           body={
             <>
               Everything ticked {truck ? 'onto the truck' : 'as packed'} comes out of the warehouse count
-              now, once, and nothing later takes it out again. If more goes on afterwards, mark it loaded
-              again and only the extra comes out.
+              now, once, and nothing later takes it out again. If more goes on afterwards, or something
+              comes off to make room, mark it loaded again and only the difference changes.
+              {overdrawn.length ? (
+                <span className="block mt-2" style={{ color: 'var(--danger)' }}>
+                  ⚠ More is going than the warehouse has counted:{' '}
+                  {overdrawn
+                    .slice(0, 5)
+                    .map((entry) => `${entry.item?.name ?? 'item'} (${formatQty(entry.going, entry.item?.unit ?? 'each')} going, ${formatQty(entry.qtyOnHand, entry.item?.unit ?? 'each')} counted)`)
+                    .join(', ')}
+                  {overdrawn.length > 5 ? ` and ${overdrawn.length - 5} more` : ''}. Their counts will go below zero
+                  until someone counts them.
+                </span>
+              ) : null}
             </>
           }
           confirmLabel={truck ? 'Truck loaded' : 'Vehicles loaded'}
           onCancel={() => setLoadingTruck(false)}
           onConfirm={() => {
             setLoadingTruck(false);
-            void issueLoaded(event.id, truck, session?.displayName ?? '').then(({ lines, units }) =>
-              toast(lines ? `Loaded: ${formatQty(units, 'each')} out of the warehouse` : 'Nothing new to take out'),
-            );
+            void issueLoaded(event.id, truck, session?.displayName ?? '').then(({ lines, units, returned }) => {
+              const run = (event.truckRuns?.length ?? 0) + 1;
+              const parts = [
+                lines ? `${formatQty(units, 'each')} out of the warehouse` : '',
+                returned ? `${formatQty(returned, 'each')} back on the shelf` : '',
+              ].filter(Boolean);
+              toast(parts.length ? `${truck ? `Truck run ${run}` : 'Loaded'}: ${parts.join(', ')}` : 'Nothing has changed since it was loaded');
+            });
           }}
         />
       ) : null}
@@ -348,8 +368,17 @@ function PullRow({
   const verb = truck ? 'on the truck' : 'packed';
   // A loaded list's count is fixed, so a line that is all loaded cannot be ticked.
   const tickable = canTick && line.going.some((going) => going.canPack);
+  const toast = useToast();
   const tick = (shares: PullDestination[], packed: boolean) => {
-    void (truck ? setOnTruck(shares, packed) : setPulled(shares, packed));
+    void (truck ? setOnTruck(shares, packed) : setPulled(shares, packed)).then((before) => {
+      // One tap here writes to every station's list, so a mis-tap gets one
+      // tap back rather than a dozen stations recounted.
+      if (before.length > 1 || !packed) {
+        toast(`${line.item?.name ?? 'Item'} ${packed ? verb : `taken off ${plural(before.length, 'list')}`}`, 'ok', {
+          undo: () => restoreLines(truck ? 'qtyOnTruck' : 'qtyPacked', before),
+        });
+      }
+    });
     if (packed && navigator.vibrate) navigator.vibrate(15);
   };
   return (

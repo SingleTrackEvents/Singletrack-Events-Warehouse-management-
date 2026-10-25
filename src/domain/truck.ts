@@ -2,8 +2,8 @@ import { db } from '../db/db';
 import { alive, update } from '../db/repo';
 import { hasIssued } from './packlists';
 import { recordMovements, round2 } from './stock';
-import type { Category, Destination, Item, PacklistLine } from '../db/types';
-import type { PullDestination } from './warehouse';
+import type { Category, Destination, Item, PacklistLine, TruckRun } from '../db/types';
+import type { LineSnapshot, PullDestination } from './warehouse';
 
 /**
  * Two-stage packing: the truck, then the vans.
@@ -16,16 +16,16 @@ import type { PullDestination } from './warehouse';
  */
 
 /** Tick a share of an item onto the truck, or off it. */
-export async function setOnTruck(shares: PullDestination[], onTruck: boolean): Promise<number> {
-  let changed = 0;
+export async function setOnTruck(shares: PullDestination[], onTruck: boolean): Promise<LineSnapshot[]> {
+  const before: LineSnapshot[] = [];
   for (const share of shares) {
-    if (!share.canPack) continue;
+    if (!share.canPack || share.fromDestination) continue;
     const qty = onTruck ? share.qtyRequired : 0;
     if ((share.qtyOnTruck ?? 0) === qty) continue;
+    before.push({ lineId: share.lineId, qty: share.qtyOnTruck ?? 0 });
     await update(db.packlistLines, share.lineId, { qtyOnTruck: qty });
-    changed += 1;
   }
-  return changed;
+  return before;
 }
 
 /**
@@ -34,44 +34,78 @@ export async function setOnTruck(shares: PullDestination[], onTruck: boolean): P
  * On a truck-then-vans event that is what is on the truck; on an event
  * loaded straight into each station's vehicle it is what is packed. Safe to
  * press again after a late addition: each line only issues what is loaded
- * beyond what has already gone out against it. Lists loaded the old way, by
- * their own status, took their own stock and are left alone.
+ * beyond what has already gone out against it, and gear taken back off the
+ * truck before it left (to make room for the Beechworth pallet) goes back on
+ * the count. Lists loaded the old way, by their own status, took their own
+ * stock and are left alone, and gear moving on from another station never
+ * left the warehouse a second time.
+ *
+ * One transaction, so two phones pressing it together, or one finger
+ * pressing it three times, take the stock out once.
  */
 export async function issueLoaded(
   eventId: string,
   truckStage: boolean,
   by = '',
-): Promise<{ lines: number; units: number }> {
-  const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray()).filter(
-    (packlist) => !hasIssued(packlist.status),
-  );
-  const byId = new Map(packlists.map((packlist) => [packlist.id, packlist]));
-  const lines = alive(await db.packlistLines.toArray()).filter((line) => byId.has(line.packlistId));
-  const loaded = (line: PacklistLine) => (truckStage ? line.qtyOnTruck ?? 0 : line.qtyPacked);
+): Promise<{ lines: number; units: number; returned: number }> {
+  return db.transaction('rw', [db.packlistLines, db.packlists, db.items, db.movements, db.events], async () => {
+    const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray()).filter(
+      (packlist) => !hasIssued(packlist.status),
+    );
+    const byId = new Map(packlists.map((packlist) => [packlist.id, packlist]));
+    const lines = alive(await db.packlistLines.toArray()).filter(
+      (line) => byId.has(line.packlistId) && !line.fromDestinationId,
+    );
+    const loaded = (line: PacklistLine) => (truckStage ? line.qtyOnTruck ?? 0 : line.qtyPacked);
 
-  const owed = lines
-    .map((line) => ({ line, qty: round2(loaded(line) - (line.qtyIssued ?? 0)) }))
-    .filter(({ qty }) => qty > 0);
+    // Taken back off only while nothing of the line has been booked home:
+    // after that the return count is the record of where it went.
+    const changed = lines
+      .map((line) => ({ line, qty: round2(loaded(line) - (line.qtyIssued ?? 0)) }))
+      .filter(({ line, qty }) => qty > 0 || (qty < 0 && !(line.qtyBooked ?? 0)));
+    const owed = changed.filter(({ qty }) => qty > 0);
+    const offTruck = changed.filter(({ qty }) => qty < 0);
+    const where = truckStage ? 'Truck' : 'Loaded';
 
-  await recordMovements(
-    owed.map(({ line, qty }) => ({
-      itemId: line.itemId,
-      qty: -qty,
-      reason: 'issue' as const,
-      refType: 'packlist' as const,
-      refId: line.packlistId,
-      note: `${truckStage ? 'Truck' : 'Loaded'} · ${byId.get(line.packlistId)?.name ?? ''}`,
-      by,
-    })),
-  );
-  for (const { line } of owed) await update(db.packlistLines, line.id, { qtyIssued: loaded(line) });
-  await update(db.events, eventId, { truckLoadedAt: new Date().toISOString() });
+    await recordMovements([
+      ...owed.map(({ line, qty }) => ({
+        itemId: line.itemId,
+        qty: -qty,
+        reason: 'issue' as const,
+        refType: 'packlist' as const,
+        refId: line.packlistId,
+        note: `${where} · ${byId.get(line.packlistId)?.name ?? ''}`,
+        by,
+      })),
+      ...offTruck.map(({ line, qty }) => ({
+        itemId: line.itemId,
+        qty: -qty,
+        reason: 'return' as const,
+        refType: 'packlist' as const,
+        refId: line.packlistId,
+        note: `Taken off before it left · ${byId.get(line.packlistId)?.name ?? ''}`,
+        by,
+      })),
+    ]);
+    for (const { line } of changed) await update(db.packlistLines, line.id, { qtyIssued: loaded(line) });
 
-  return { lines: owed.length, units: round2(owed.reduce((sum, { qty }) => sum + qty, 0)) };
+    const result = {
+      lines: owed.length,
+      units: round2(owed.reduce((sum, { qty }) => sum + qty, 0)),
+      returned: round2(offTruck.reduce((sum, { qty }) => sum - qty, 0)),
+    };
+    if (changed.length) {
+      const event = await db.events.get(eventId);
+      const at = new Date().toISOString();
+      const run: TruckRun = { at, by, ...result };
+      await update(db.events, eventId, { truckLoadedAt: at, truckRuns: [...(event?.truckRuns ?? []), run] });
+    }
+    return result;
+  });
 }
 
 /** Mark the truck loaded: take what is on it out of the warehouse count. */
-export async function loadTruck(eventId: string, by = ''): Promise<{ lines: number; units: number }> {
+export async function loadTruck(eventId: string, by = ''): Promise<{ lines: number; units: number; returned: number }> {
   return issueLoaded(eventId, true, by);
 }
 
@@ -129,6 +163,8 @@ export async function remainderFor(eventId: string): Promise<{ lines: RemainderL
   const grouped = new Map<string, RemainderLine>();
   const vans = new Map<string, VanSummary>();
   for (const line of lines) {
+    // Gear moving on from another station never rides the truck.
+    if (line.fromDestinationId) continue;
     const packlist = packlistById.get(line.packlistId)!;
     const destination = byDestination.get(packlist.destinationId);
     if (!destination) continue;

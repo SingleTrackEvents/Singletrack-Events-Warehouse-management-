@@ -108,6 +108,10 @@ export default function ItemScreen() {
           <div className="stack-sm" style={{ alignItems: 'flex-end' }}>
             {history && !history.length && item.qtyOnHand === 0 ? (
               <Pill>Not counted yet</Pill>
+            ) : item.qtyOnHand < 0 ? (
+              // More went out than the warehouse had counted: the count is
+              // wrong, and the fix is to count it, not to buy more.
+              <Pill tone="danger">Count is out: count it</Pill>
             ) : isLowStock(item) ? (
               <Pill tone="danger">Below reorder</Pill>
             ) : (

@@ -20,9 +20,16 @@ export interface MovementInput {
   by?: string;
 }
 
-/** Compute the balance after a change, never letting stock go negative. */
+/**
+ * Compute the balance after a change.
+ *
+ * Allowed below zero on purpose. Thirteen Starlinks loaded against a count of
+ * five used to stop at zero while the ledger said thirteen went out, and the
+ * thirteen coming home then made eight Starlinks out of nothing. A negative
+ * balance is the honest answer: the count was wrong, so count it.
+ */
 export function applyDelta(current: number, delta: number): number {
-  return Math.max(0, round2(current + delta));
+  return round2(current + delta);
 }
 
 /** Quantities are whole units in practice, but weights can be fractional. */

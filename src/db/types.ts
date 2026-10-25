@@ -145,8 +145,24 @@ export interface RaceEvent extends SyncMeta {
   truckStage?: boolean;
   /** When the truck was last marked loaded, taking its stock out of the warehouse. */
   truckLoadedAt?: string | null;
+  /**
+   * Each time the truck (or the vehicles) was marked loaded, in order. GPT
+   * goes out in two runs, bulky gear first and the rest days later, and each
+   * run is its own load with its own manifest.
+   */
+  truckRuns?: TruckRun[];
   /** When the returns were last booked back into the warehouse. */
   truckUnloadedAt?: string | null;
+}
+
+export interface TruckRun {
+  at: string;
+  by: string;
+  /** Lines and units taken out of the warehouse by this run. */
+  lines: number;
+  units: number;
+  /** Units put back because they came off the truck before it left. */
+  returned: number;
 }
 
 /** What kind of place goods are going to. Drives which templates are suggested. */
@@ -388,6 +404,17 @@ export interface PacklistLine extends SyncMeta {
    * `qtyIssued` on the way out.
    */
   qtyBooked?: number;
+  /**
+   * The station this line's gear comes from, when it is not the warehouse.
+   *
+   * On a long course the northern stations are packed down and their gear
+   * rebuilt in the south: seven or eight stations' worth of marquees and
+   * tables serve twelve. A line that names its source is that gear moving on.
+   * It is not picked in the warehouse, does not take stock out a second time,
+   * and comes home once, from wherever it ends up. Absent or null means the
+   * warehouse supplies it.
+   */
+  fromDestinationId?: string | null;
   /**
    * Position in the van, counted in unload order (what comes out first).
    * Absent follows the default setup order by category.

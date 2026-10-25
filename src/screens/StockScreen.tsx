@@ -173,6 +173,8 @@ export default function StockScreen() {
                 </div>
                 {isUncounted(item, counted) ? (
                   <Pill>Not counted</Pill>
+                ) : item.qtyOnHand < 0 ? (
+                  <Pill tone="danger">Count it</Pill>
                 ) : isLowStock(item, counted) ? (
                   <Pill tone="danger">Low</Pill>
                 ) : (

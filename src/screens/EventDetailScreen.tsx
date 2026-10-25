@@ -23,9 +23,11 @@ import {
   DESTINATION_LABELS,
   EVENT_STATUS_LABELS,
   formatDateRange,
+  formatQty,
   plural,
   relativeDays,
 } from '../domain/format';
+import { gearStillOut } from '../domain/returns';
 import type {
   AccessType,
   Destination,
@@ -313,6 +315,13 @@ export default function EventDetailScreen() {
             const target = removing;
             setRemoving(undefined);
             void (async () => {
+              // Gear out against this station comes home on its list; without
+              // the list it drops off the count for good.
+              const out = await gearStillOut(target.id);
+              if (out > 0) {
+                toast(`${formatQty(out, 'each')} of this station's gear is still out of the warehouse. Count it home first.`, 'warn');
+                return;
+              }
               const packlists = alive(await db.packlists.where('destinationId').equals(target.id).toArray());
               for (const packlist of packlists) {
                 await softDeleteChildren(db.packlistLines, 'packlistId', packlist.id);

@@ -58,12 +58,13 @@ describe('recording movements', () => {
     expect((await db.items.get(b.id))!.qtyOnHand).toBe(9);
   });
 
-  it('never drives a balance below zero', async () => {
+  it('lets a balance go below zero so the ledger always adds up', async () => {
     const item = await makeItem({ qtyOnHand: 2 });
     const [movement] = await recordMovements([{ itemId: item.id, qty: -9, reason: 'issue' }]);
-
-    expect(movement.balanceAfter).toBe(0);
-    expect((await db.items.get(item.id))!.qtyOnHand).toBe(0);
+    expect(movement.balanceAfter).toBe(-7);
+    // The same nine coming home leaves the two that were really there.
+    await recordMovements([{ itemId: item.id, qty: 9, reason: 'return' }]);
+    expect((await db.items.get(item.id))!.qtyOnHand).toBe(2);
   });
 
   it('ignores zero-quantity movements rather than cluttering the ledger', async () => {

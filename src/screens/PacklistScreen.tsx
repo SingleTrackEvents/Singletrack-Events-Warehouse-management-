@@ -25,6 +25,7 @@ import {
   clearNotes,
   hasIssued,
   isConfirmed,
+  stillOut,
   progressFor,
   receiptFor,
   received,
@@ -36,7 +37,7 @@ import { formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
 import { addShoppingLine, inputForItem } from '../domain/shopping';
 import { isKit, kitLines } from '../domain/kits';
-import type { PacklistLine, Unit } from '../db/types';
+import type { Destination, PacklistLine, Unit } from '../db/types';
 
 type Filter = 'todo' | 'all' | 'packed' | 'musthave';
 
@@ -93,6 +94,15 @@ export default function PacklistScreen() {
   const destination = useLiveQuery(
     async () => (packlist ? db.destinations.get(packlist.destinationId) : undefined),
     [packlist?.destinationId],
+  );
+  const eventStations = useLiveQuery(
+    async () =>
+      packlist
+        ? alive(await db.destinations.where('eventId').equals(packlist.eventId).toArray()).sort(
+            (a, b) => (a.courseKm ?? 0) - (b.courseKm ?? 0) || a.sort - b.sort,
+          )
+        : [],
+    [packlist?.eventId],
   );
 
   const { session } = useSession();
@@ -200,12 +210,20 @@ export default function PacklistScreen() {
   const modes = useMemo(() => {
     const available: Mode[] = [];
     if (canPack) available.push('pack');
-    if (canReceive) available.push('arrived', 'count', 'packdown');
+    // The station's jobs, for the station. Warehouse crew get them only once
+    // the list has left the warehouse: a packer tapping Arrived in Lavington
+    // otherwise moves the list to "at station" before it has gone anywhere.
+    const leftWarehouse =
+      move === 'station' ||
+      move === 'home' ||
+      (lines ?? []).some((line) => (line.qtyIssued ?? 0) > 0) ||
+      Boolean(packlist && hasIssued(packlist.status));
+    if (canReceive && (!canPack || leftWarehouse)) available.push('arrived', 'count', 'packdown');
     if (canPack && (move === 'home' || (packlist && statusIndex(packlist.status) >= statusIndex('delivered')))) {
       available.push('home');
     }
     return available;
-  }, [canPack, canReceive, move, packlist]);
+  }, [canPack, canReceive, move, packlist, lines]);
   const [chosenMode, setChosenMode] = useState<Mode>();
   const asked = searchParams.get('mode');
   const mode: Mode = (() => {
@@ -241,8 +259,11 @@ export default function PacklistScreen() {
       case 'pack':
         return line.qtyRequired;
       case 'arrived':
-      case 'packdown':
         return sent(line);
+      case 'packdown':
+        // What goes back in the van is at most what arrived: packing down
+        // against what was sent would hide a short delivery.
+        return isConfirmed(line) ? received(line) : sent(line);
       case 'count':
         return received(line);
       case 'home':
@@ -260,7 +281,9 @@ export default function PacklistScreen() {
       ? hasLeft(line)
       : mode === 'arrived'
         ? isConfirmed(line)
-        : countOn(line) >= wantOn(line);
+        : mode === 'pack' && line.fromDestinationId
+          ? true
+          : countOn(line) >= wantOn(line);
 
   /** Only the lines this job is about: the food and drink to count, the gear to pack down. */
   const forMode = (line: PacklistLine): boolean => {
@@ -375,6 +398,12 @@ export default function PacklistScreen() {
    */
   /** A swipe is deliberate, so the line goes at once, with Undo on the toast. */
   const removeWithUndo = (line: PacklistLine) => {
+    if (stillOut(line)) {
+      // Gone out of the warehouse on this line: removing it would drop the
+      // gear off the count home for good.
+      toast('This went out of the warehouse on this line. Count it home before removing it.', 'warn');
+      return;
+    }
     void removeLine(line.id).then(() =>
       toast(`${items?.get(line.itemId)?.name ?? 'Line'} removed`, 'ok', {
         undo: () => restore(db.packlistLines, line.id),
@@ -420,6 +449,7 @@ export default function PacklistScreen() {
   ) => {
             const item = items?.get(line.itemId);
             const unit = item?.unit ?? 'each';
+            const whole = unit !== 'litre' && unit !== 'kg';
             const count = countOn(line);
             // Checked in but fewer than were sent reads as short, not as done.
             const shortArrival = mode === 'arrived' && isConfirmed(line) && count < wantOn(line);
@@ -498,6 +528,11 @@ export default function PacklistScreen() {
                     {item ? `${item.bin || 'no bin'} · ${item.sku}` : ''}
                     {line.note ? ` · ${line.note}` : ''}
                   </span>
+                  {line.fromDestinationId ? (
+                    <span className="row-sub strong">
+                      ↪ Comes from {eventStations?.find((entry) => entry.id === line.fromDestinationId)?.name ?? 'another station'}, not the warehouse
+                    </span>
+                  ) : null}
                   {kit ? (
                     <button
                       type="button"
@@ -546,7 +581,8 @@ export default function PacklistScreen() {
                     <Stepper
                       label="returned"
                       value={line.qtyReturned}
-                      max={sent(line)}
+                      whole={whole}
+                      max={Math.max(sent(line), wantOn(line))}
                       onChange={(value) => void update(db.packlistLines, line.id, { qtyReturned: value })}
                     />
                   </span>
@@ -557,7 +593,9 @@ export default function PacklistScreen() {
                       label={mode === 'count' ? `left over ${item?.name ?? ''}` : `back in the van ${item?.name ?? ''}`}
                       value={hasLeft(line) ? (line.qtyLeft as number) : null}
                       placeholder="?"
-                      max={mode === 'packdown' ? wantOn(line) : undefined}
+                      whole={whole}
+                      // No more can be left over, or go back in the van, than arrived.
+                      max={mode === 'packdown' ? wantOn(line) : isConfirmed(line) ? received(line) : sent(line)}
                       onChange={(value) => packTo(line, value)}
                     />
                   </span>
@@ -585,6 +623,9 @@ export default function PacklistScreen() {
                     <Stepper
                       label={mode === 'pack' ? 'packed' : 'arrived'}
                       value={count}
+                      whole={whole}
+                      // Room for spares, not for a thumb resting on a key.
+                      max={Math.max(wantOn(line) * 3, wantOn(line) + 10)}
                       onChange={(value) => packTo(line, value)}
                     />
                   </span>
@@ -851,7 +892,7 @@ export default function PacklistScreen() {
               Clear notes{notedLines ? ` (${notedLines})` : ''}
             </button>
           </div>
-          {!hasIssued(packlist.status) ? (
+          {!hasIssued(packlist.status) && !(lines ?? []).some(stillOut) ? (
             <>
               <p className="tiny muted mt-3">
                 For a second list this station should not have. Nothing has left the warehouse
@@ -944,9 +985,10 @@ export default function PacklistScreen() {
                 }
               : undefined
           }
+          stations={(eventStations ?? []).filter((entry) => entry.id !== packlist.destinationId)}
           onClose={() => setEditingRequired(undefined)}
-          onSave={(qtyRequired) => {
-            void update(db.packlistLines, editingRequired.id, { qtyRequired }).then(() => {
+          onSave={(qtyRequired, fromDestinationId) => {
+            void update(db.packlistLines, editingRequired.id, { qtyRequired, fromDestinationId }).then(() => {
               toast(`Now needs ${formatQty(qtyRequired, items?.get(editingRequired.itemId)?.unit ?? 'each')}`);
               setEditingRequired(undefined);
             });
@@ -1127,6 +1169,7 @@ function RequiredSheet({
   line,
   itemName,
   unit,
+  stations,
   onShop,
   onClose,
   onSave,
@@ -1134,12 +1177,18 @@ function RequiredSheet({
   line: PacklistLine;
   itemName: string;
   unit: Unit;
+  /** The event's other stations, for gear that moves on from one of them. */
+  stations: Destination[];
   /** Put the shortfall on the shopping list. Absent when this account cannot. */
   onShop?: (qty: number) => void;
   onClose: () => void;
-  onSave: (qtyRequired: number) => void;
+  onSave: (qtyRequired: number, fromDestinationId: string | null) => void;
 }) {
   const [qty, setQty] = useState(line.qtyRequired);
+  const [from, setFrom] = useState(line.fromDestinationId ?? '');
+  // Once stock has gone out on this line it is warehouse gear, whatever it
+  // says now: switching it would take it out of the count home.
+  const fromLocked = (line.qtyIssued ?? 0) > 0;
   // What the shelf could not supply: the requirement less what is in the crate.
   const missing = Math.max(0, qty - line.qtyPacked);
 
@@ -1152,7 +1201,7 @@ function RequiredSheet({
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => onSave(qty)}>
+          <button type="button" className="btn btn-primary" onClick={() => onSave(qty, from || null)}>
             Save
           </button>
         </>
@@ -1190,6 +1239,23 @@ function RequiredSheet({
           Changes this stop only — the template it came from is left alone, so one busy station does
           not re-plan the rest of the race.
         </p>
+        {stations.length && !fromLocked ? (
+          <Field
+            label="Comes from"
+            hint="Gear packed down at another station and rebuilt here. It is not picked in the warehouse, does not come out of stock again, and comes home once, from here."
+          >
+            {(id) => (
+              <select id={id} className="select" value={from} onChange={(event) => setFrom(event.target.value)}>
+                <option value="">The warehouse</option>
+                {stations.map((station) => (
+                  <option key={station.id} value={station.id}>
+                    {station.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        ) : null}
         {line.qtyPacked > qty ? (
           <p className="tiny" style={{ color: 'var(--warn)' }}>
             {formatQty(line.qtyPacked, unit)} already packed, which is more than this. The extra
