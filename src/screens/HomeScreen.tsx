@@ -13,6 +13,7 @@ import { useToast } from '../components/toastContext';
 import { can, isStationOnly } from '../sync/permissions';
 import { countedItemIds, lowStockItems } from '../domain/stock';
 import { addLowStock, awaitingBooking, groupByShop, toBuy } from '../domain/shopping';
+import { uncountedSummary } from '../domain/stocktake';
 import { describeSource, packlistForDestination, primaryPacklist, progressFor, startPacklist } from '../domain/packlists';
 import { boardCounts, currentMove, hasLeft, moveLabel, moveOf, moveProgress, sent } from '../domain/moves';
 import { DELIVERY_LABELS, checkInFor, deliveryOf, describeCheckIn } from '../domain/runSheet';
@@ -131,6 +132,9 @@ export default function HomeScreen() {
   // A volunteer has one packlist and nothing else to do. Sending them through a
   // dashboard of races they cannot open is a lap of the app for no reason. The
   // branch sits below every hook so the order never changes between renders.
+  // The stocktake is how shelves and real counts get recorded, so while
+  // anything is uncounted it has a card here rather than a button under More.
+  const uncounted = useLiveQuery(() => (canRestock ? uncountedSummary() : null), [canRestock]);
   if (stationOnly) return <StationHome station={station} />;
 
   // Without the counted set every shelf nobody has looked at yet reads as
@@ -283,6 +287,17 @@ export default function HomeScreen() {
         </section>
       ) : null}
 
+      {uncounted ? (
+        <Link to={uncounted.href} className="row card mb-3">
+          <span className="row-icon">🔢</span>
+          <span className="row-body">
+            <span className="row-title">{uncounted.title}</span>
+            <span className="row-sub">{uncounted.detail}</span>
+          </span>
+          <span className="row-chevron">›</span>
+        </Link>
+      ) : null}
+
       {low.length ? (
         <section className="section">
           <div className="section-head">
@@ -291,7 +306,7 @@ export default function HomeScreen() {
               {plural(low.length, 'item')}
             </Link>
           </div>
-          {canRestock ? (
+          {canRestock && low.some((item) => item.consumable) ? (
             <div className="btn-row mb-2 no-print">
               <button
                 type="button"
@@ -308,7 +323,8 @@ export default function HomeScreen() {
                   });
                 }}
               >
-                🛒 Put all {low.length} on the shopping list
+                {/* Consumables only: nobody buys marquees at Bunnings. */}
+                🛒 Put {plural(low.filter((item) => item.consumable).length, 'consumable')} on the shopping list
               </button>
             </div>
           ) : null}
