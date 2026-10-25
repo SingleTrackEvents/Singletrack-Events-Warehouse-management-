@@ -359,8 +359,10 @@ export async function seedStarterData(
         lng: null,
         crewLead: '',
         phone: '',
-        openTime: '06:00',
-        closeTime: '16:00',
+        // Unknown until someone enters the real hours: a guess on a run sheet
+        // reads as a fact.
+        openTime: '',
+        closeTime: '',
         notes: destination.notes ?? '',
         sort: destination.sort ?? (index + 1) * 10,
         ...(raceVisits.length ? { raceVisits } : {}),
@@ -578,6 +580,27 @@ export async function seedStarterData(
   }
 
   if (!options.onlyMissing) await liftSeedRevisions(previous);
+  await clearPlaceholderHours();
+}
+
+/**
+ * Earlier builds seeded every station open 06:00 to 16:00, which was never
+ * anyone's real hours. A seeded station still at its first revision with
+ * exactly those hours has never been edited, so the guess is cleared. One
+ * that anyone has touched is left as it is.
+ */
+async function clearPlaceholderHours(): Promise<void> {
+  const placeholders = await db.destinations
+    .filter(
+      (row) =>
+        row.id.startsWith('stw-') &&
+        row.rev === 1 &&
+        !row.deletedAt &&
+        row.openTime === '06:00' &&
+        row.closeTime === '16:00',
+    )
+    .toArray();
+  for (const row of placeholders) await update(db.destinations, row.id, { openTime: '', closeTime: '' });
 }
 
 /** Current revision of every seeded row, tombstoned ones included. */

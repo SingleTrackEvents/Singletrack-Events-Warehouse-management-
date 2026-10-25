@@ -39,7 +39,7 @@ const WAREHOUSE: IntroStep = {
   title: 'The warehouse list',
   body: [
     'From an event, Warehouse list totals every item across every station, in shelf order, so the racks get walked once.',
-    'Tick an item and it is packed on every station\'s list at once. Open the item to tick one station at a time. "To pack" hides what is done. Loaded is the one button that takes stock out of the shed.',
+    'Tick an item and it is packed on every station\'s list at once. Open the item to tick one station at a time. "To pack" hides what is done. Loaded is the one button that takes stock out of the warehouse.',
     'Going out in one big truck? Turn on Truck stage in Edit event. The warehouse list then ticks gear onto the truck, each station\'s list becomes its van pack at the event, and Vans shows what is still on the truck once the vans start taking from it.',
     'After the event, Home mirrors the warehouse list: what each station counted against what has come back, and one button to book it onto the shelf.',
   ],
@@ -51,7 +51,7 @@ const STEPS: Record<Role, IntroStep[]> = {
       glyph: '👋',
       title: 'Welcome, admin',
       body: [
-        'This is where SingleTrack\'s gear gets packed, moved and counted for every event, from the shed to the last aid station.',
+        'This is where SingleTrack\'s gear gets packed, moved and counted for every event, from the warehouse to the last aid station.',
         'You can do everything, including the catalogue and who else gets access. Here is the tour.',
       ],
     },
@@ -108,7 +108,7 @@ const STEPS: Record<Role, IntroStep[]> = {
       title: 'Out and home',
       body: [
         'The warehouse list is the pick list for the whole event, by item or by vehicle. Loaded takes the stock out, once. Home counts it back in, once.',
-        'Stock shows what is in the shed. If something is short, add it to the shopping list from the item or the packlist line.',
+        'Stock shows what is in the warehouse. If something is short, add it to the shopping list from the item or the packlist line.',
       ],
     },
     INSTALL,
@@ -126,7 +126,7 @@ const STEPS: Record<Role, IntroStep[]> = {
       title: 'Your stations',
       body: [
         'The board shows the event\'s stations and the vehicle each one travels in.',
-        'Open a station to see its packlist, so you can check the crates before you leave the shed.',
+        'Open a station to see its packlist, so you can check the crates before you leave the warehouse.',
       ],
     },
     {

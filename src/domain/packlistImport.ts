@@ -245,8 +245,8 @@ export async function commitImport(plan: ImportPlan, options: CommitOptions): Pr
         lng: null,
         crewLead: '',
         phone: '',
-        openTime: '06:00',
-        closeTime: '16:00',
+        openTime: '',
+        closeTime: '',
         notes: sourceNote,
         sort: destinationSort,
       });

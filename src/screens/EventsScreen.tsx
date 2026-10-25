@@ -9,7 +9,7 @@ import { create } from '../db/repo';
 import { useEvents } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
-import { EVENT_STATUS_LABELS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
+import { EVENT_STATUS_LABELS, daysUntil, formatDateRange, localIsoDate, plural, relativeDays } from '../domain/format';
 import { describeEventRemoval, removeEvent } from '../domain/remove';
 import type { RemovalSummary } from '../domain/remove';
 import type { RaceEvent } from '../db/types';
@@ -185,7 +185,7 @@ function Deletable({
 /** Create-event form. Kept to the fields you actually know when a race is booked. */
 function EventSheet({ onClose }: { onClose: () => void }) {
   const toast = useToast();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIsoDate();
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [startDate, setStartDate] = useState(today);

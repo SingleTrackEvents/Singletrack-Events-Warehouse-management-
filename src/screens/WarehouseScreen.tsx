@@ -20,7 +20,7 @@ type Filter = 'all' | 'todo' | 'short' | 'noRun';
 const FILTER_LABELS: Record<Filter, string> = {
   all: 'Everything',
   todo: 'To pack',
-  short: 'Short in the shed',
+  short: 'Short in the warehouse',
   noRun: 'No vehicle yet',
 };
 
@@ -254,7 +254,7 @@ export default function WarehouseScreen() {
             </div>
           ) : (
             <div className="card card-pad center muted">
-              {filter === 'short' ? '✅ The shed covers everything on this list.' : 'Nothing to show.'}
+              {filter === 'short' ? '✅ The warehouse covers everything on this list.' : 'Nothing to show.'}
             </div>
           )}
         </>

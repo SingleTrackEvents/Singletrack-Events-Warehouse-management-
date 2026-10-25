@@ -12,7 +12,7 @@ import { useSession } from '../hooks/sessionContext';
 import { useToast } from '../components/toastContext';
 import { can, isStationOnly } from '../sync/permissions';
 import { countedItemIds, lowStockItems } from '../domain/stock';
-import { addLowStock, groupByShop, toBuy } from '../domain/shopping';
+import { addLowStock, awaitingBooking, groupByShop, toBuy } from '../domain/shopping';
 import { describeSource, packlistForDestination, primaryPacklist, progressFor, receiptFor, startPacklist } from '../domain/packlists';
 import { boardCounts, currentMove, hasLeft, moveLabel, moveOf, moveProgress } from '../domain/moves';
 import type { BoardRow, Move } from '../domain/moves';
@@ -107,6 +107,9 @@ export default function HomeScreen() {
   const canShop = can(session, 'shopping:manage');
   const shopping = useShoppingLines();
   const shoppingOpen = shopping ? toBuy(shopping) : [];
+  // Bought but not yet in stock: the card stays until that is done too, or
+  // booking the shop into the warehouse hides under More.
+  const shoppingToBook = shopping ? awaitingBooking(shopping) : [];
   const shoppingShops = groupByShop(shoppingOpen)
     .map(([shop]) => shop)
     .filter(Boolean);
@@ -250,7 +253,7 @@ export default function HomeScreen() {
         </section>
       ) : null}
 
-      {canShop && shoppingOpen.length ? (
+      {canShop && (shoppingOpen.length || shoppingToBook.length) ? (
         <section className="section">
           <div className="section-head">
             <h2>Shopping list</h2>
@@ -259,9 +262,17 @@ export default function HomeScreen() {
             <Link to="/shopping" className="row">
               <span className="row-icon">🛒</span>
               <span className="row-body">
-                <span className="row-title">{plural(shoppingOpen.length, 'line')} to buy</span>
+                <span className="row-title">
+                  {shoppingOpen.length
+                    ? `${plural(shoppingOpen.length, 'line')} to buy`
+                    : `${plural(shoppingToBook.length, 'thing')} bought, not in stock yet`}
+                </span>
                 <span className="row-sub">
-                  {shoppingShops.length ? `At ${shoppingShops.join(', ')}` : 'Tap to open the list'}
+                  {!shoppingOpen.length
+                    ? 'Tap to book them into the warehouse'
+                    : shoppingShops.length
+                      ? `At ${shoppingShops.join(', ')}`
+                      : 'Tap to open the list'}
                 </span>
               </span>
               <span className="row-chevron">›</span>

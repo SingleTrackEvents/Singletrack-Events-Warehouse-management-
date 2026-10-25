@@ -100,7 +100,7 @@ export const ACCESS_OPTIONS: AccessOption[] = [
   { key: 'events', label: 'Edit event and stations', hint: 'Names, dates, access notes and station details.' },
   { key: 'shopping', label: 'Shopping list', hint: 'Add to it, tick it off, book it into stock.' },
   { key: 'stock', label: 'Edit stock', hint: 'Add items and adjust quantities.', warehouse: true },
-  { key: 'stocktakes', label: 'Run stocktakes', hint: 'Count the shed and correct the numbers.', warehouse: true },
+  { key: 'stocktakes', label: 'Run stocktakes', hint: 'Count the warehouse and correct the numbers.', warehouse: true },
   { key: 'templates', label: 'Edit templates', hint: 'The reusable lists packlists are built from.', warehouse: true },
 ];
 

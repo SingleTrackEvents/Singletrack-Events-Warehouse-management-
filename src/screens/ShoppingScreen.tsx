@@ -29,7 +29,7 @@ import {
   toBuy,
 } from '../domain/shopping';
 import { downloadCsv } from '../domain/backup';
-import { formatQty, plural } from '../domain/format';
+import { formatQty, localIsoDate, plural } from '../domain/format';
 import type { ShoppingLine } from '../db/types';
 
 type Filter = 'todo' | 'bought' | 'all';
@@ -177,7 +177,7 @@ export default function ShoppingScreen() {
   const exportCsv = () => {
     downloadCsv(
       shoppingCsv(visible, eventName, (itemId) => (itemId ? itemById.get(itemId)?.sku ?? '' : '')),
-      `shopping-list-${new Date().toISOString().slice(0, 10)}.csv`,
+      `shopping-list-${localIsoDate()}.csv`,
     );
     toast('Shopping list saved to downloads');
   };

@@ -267,7 +267,7 @@ export default function StockScreen() {
         </div>
       ) : null}
 
-      {/* The shed's other jobs live here rather than on a tab of their own. */}
+      {/* The warehouse's other jobs live here rather than on a tab of their own. */}
       {canCount || can(session, 'shopping:manage') || can(session, 'template:manage') ? (
         <div className="btn-row mt-4 no-print">
           {canCount ? (

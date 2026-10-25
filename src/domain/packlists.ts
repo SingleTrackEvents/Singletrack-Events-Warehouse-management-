@@ -26,23 +26,23 @@ const ORDER: PacklistStatus[] = [
 ];
 
 export const PACKLIST_STATUS_LABELS: Record<PacklistStatus, string> = {
-  draft: 'Draft',
-  picking: 'Picking',
+  draft: 'Not started',
+  picking: 'Packing',
   packed: 'Packed',
   loaded: 'Loaded',
   delivered: 'Delivered',
-  returned: 'Returned',
-  reconciled: 'Reconciled',
+  returned: 'Back from the race course',
+  reconciled: 'Put away',
 };
 
 /** Wording for the button that moves a packlist to the next stage. */
 export const NEXT_STATUS_ACTION: Partial<Record<PacklistStatus, string>> = {
-  draft: 'Start picking',
+  draft: 'Start packing',
   picking: 'Mark packed',
   packed: 'Mark loaded',
   loaded: 'Mark delivered',
-  delivered: 'Mark returned',
-  returned: 'Reconcile returns',
+  delivered: 'It’s back from the race course',
+  returned: 'Put returns away',
 };
 
 export function statusIndex(status: PacklistStatus): number {

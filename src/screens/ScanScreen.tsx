@@ -6,7 +6,7 @@ import { Scanner } from '../components/Scanner';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
-import { normaliseCode, parseScan } from '../domain/codes';
+import { canReadBarcodes, normaliseCode, parseScan } from '../domain/codes';
 import { PACKLIST_STATUS_LABELS } from '../domain/packlists';
 import { useSession } from '../hooks/sessionContext';
 import { reachable } from '../sync/permissions';
@@ -94,8 +94,9 @@ export default function ScanScreen() {
   return (
     <Screen title="Scan" back="-1">
       <p className="small muted mb-3">
-        Point the camera at a barcode on a carton, or type a packlist code in — handy when the lens
-        is covered in mud.
+        {canReadBarcodes()
+          ? 'Point the camera at a list’s QR code or the barcode on a carton, or type a packlist code in. Handy when the lens is covered in mud.'
+          : 'Point the camera at a list’s QR code, or type a packlist code in. This phone reads QR codes only, so type a carton’s barcode number in.'}
       </p>
 
       <Scanner onDetect={(value) => void handle(value)} />

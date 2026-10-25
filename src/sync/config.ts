@@ -11,11 +11,22 @@
  * company running their own) needs no code change.
  */
 
+const PRODUCTION_URL = 'https://mizwsarhveepdwknupky.supabase.co';
+const PRODUCTION_KEY = 'sb_publishable_5aknaLXSWZl87yylnCytvA_N90af4Uy';
+
+/*
+ * A dev server never falls back to production: one tap on "Connect" from a
+ * laptop running `npm run dev` would otherwise write test packlists into the
+ * crew's real data. Point a dev server at a project on purpose with
+ * VITE_SUPABASE_URL and VITE_SUPABASE_KEY, or use the on-device demo server.
+ */
+const DEV_SERVER = import.meta.env.DEV && import.meta.env.MODE !== 'test';
+
 export const SUPABASE_URL: string =
-  import.meta.env.VITE_SUPABASE_URL ?? 'https://mizwsarhveepdwknupky.supabase.co';
+  import.meta.env.VITE_SUPABASE_URL ?? (DEV_SERVER ? '' : PRODUCTION_URL);
 
 export const SUPABASE_KEY: string =
-  import.meta.env.VITE_SUPABASE_KEY ?? 'sb_publishable_5aknaLXSWZl87yylnCytvA_N90af4Uy';
+  import.meta.env.VITE_SUPABASE_KEY ?? (DEV_SERVER ? '' : PRODUCTION_KEY);
 
 /** False when the project has been blanked out, so the UI can say so plainly. */
 export const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_KEY);

@@ -93,3 +93,11 @@ export function parseInviteScan(raw: string): string | null {
   const code = normaliseCode(decoded);
   return /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code) ? code : null;
 }
+
+/**
+ * Whether this phone's camera can read carton barcodes, or only QR codes.
+ * Without the native BarcodeDetector (iPhones) the scanner reads QR alone.
+ */
+export function canReadBarcodes(): boolean {
+  return 'BarcodeDetector' in globalThis;
+}

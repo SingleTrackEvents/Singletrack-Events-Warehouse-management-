@@ -205,7 +205,7 @@ function StartSheet({ onClose, onStarted }: { onClose: () => void; onStarted: (i
             />
           )}
         </Field>
-        <Field label="Scope" hint="Counting one category at a time is far quicker than the whole shed.">
+        <Field label="Scope" hint="Counting one category at a time is far quicker than the whole warehouse.">
           {(id) => (
             <select
               id={id}

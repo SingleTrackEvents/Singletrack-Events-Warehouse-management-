@@ -159,7 +159,7 @@ export const MOVEMENT_LABELS: Record<MovementReason, string> = {
   return: 'Returned from event',
   stocktake: 'Stocktake correction',
   adjustment: 'Manual adjustment',
-  consumed: 'Consumed at event',
+  consumed: 'Used at an event',
   damaged: 'Damaged / written off',
   transfer: 'Transferred',
 };

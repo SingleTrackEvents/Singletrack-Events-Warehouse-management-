@@ -116,7 +116,7 @@ export default function EventDetailScreen() {
           <Pill tone={event.status === 'live' ? 'ok' : 'info'}>{EVENT_STATUS_LABELS[event.status]}</Pill>
         </div>
         {event.notes ? <p className="small">{event.notes}</p> : null}
-        <div className="btn-row mt-3">
+        <div className="btn-grid mt-3">
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/warehouse`}>
             📦 Warehouse list
           </Link>
@@ -361,8 +361,8 @@ function DestinationSheet({
   const [vehicle, setVehicle] = useState(destination?.vehicle ?? '');
   // Vehicles already named on this event, so the same van is spelt the same way.
   const vehicles = [...new Set(existing.map((entry) => entry.vehicle?.trim()).filter(Boolean))].sort();
-  const [openTime, setOpenTime] = useState(destination?.openTime || '06:00');
-  const [closeTime, setCloseTime] = useState(destination?.closeTime || '16:00');
+  const [openTime, setOpenTime] = useState(destination?.openTime ?? '');
+  const [closeTime, setCloseTime] = useState(destination?.closeTime ?? '');
 
   const save = async () => {
     if (!name.trim()) return;

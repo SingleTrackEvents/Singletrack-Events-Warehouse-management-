@@ -85,7 +85,9 @@ export default function AccessScreen() {
             ☁️ Connect to the SingleTrack server
           </button>
           <p className="tiny muted mt-2">
-            The first person to sign in becomes the admin. Everyone after that needs an invite.
+            {SUPABASE_CONFIGURED
+              ? 'The first person to sign in becomes the admin. Everyone after that needs an invite.'
+              : 'This build has no server set up, so nothing it does can reach the real data. Use the demo server below to try sign-in.'}
           </p>
         </div>
 
