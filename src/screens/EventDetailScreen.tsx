@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
@@ -8,6 +8,8 @@ import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, create, nextSort, softDelete, softDeleteChildren, update } from '../db/repo';
 import { useDestinations, useEvent } from '../hooks/useDb';
+import { useSession } from '../hooks/sessionContext';
+import { accessPointingAt } from '../sync/types';
 import {
   defaultTemplateFor,
   describeSource,
@@ -15,6 +17,7 @@ import {
   progressFor,
   startPacklist,
 } from '../domain/packlists';
+import { parseAmount } from '../domain/consumption';
 import { boardCounts, currentMove, moveOf, moveProgress } from '../domain/moves';
 import type { Move } from '../domain/moves';
 import {
@@ -51,6 +54,23 @@ export default function EventDetailScreen() {
   const [editing, setEditing] = useState(false);
   const [buildingLists, setBuildingLists] = useState(false);
   const [removing, setRemoving] = useState<Destination>();
+  const { backend, session } = useSession();
+  // Invites and people that open the station about to go, so the confirm can
+  // say so. Only an admin can see them; for anyone else it stays unsaid.
+  const [pointing, setPointing] = useState<{ id: string; invites: number; members: number }>();
+  useEffect(() => {
+    if (!removing || !backend || session?.role !== 'admin') return;
+    let live = true;
+    void Promise.all([backend.listInvites(session), backend.listMembers(session)])
+      .then(([invites, members]) => {
+        if (live) setPointing({ id: removing.id, ...accessPointingAt(removing.id, invites, members) });
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [removing, backend, session]);
+  const stillOpen = removing && pointing?.id === removing.id ? pointing : undefined;
   const [showing, setShowing] = useState<Move | null>(null);
   const truckStage = Boolean(event?.truckStage);
 
@@ -305,7 +325,18 @@ export default function EventDetailScreen() {
       {removing ? (
         <ConfirmSheet
           title={`Remove ${removing.name}?`}
-          body="Its packlist is removed too. Stock already issued stays on the ledger."
+          body={
+            'Its packlist is removed too. Stock already issued stays on the ledger.' +
+            (stillOpen && (stillOpen.invites || stillOpen.members)
+              ? ` ${[
+                  stillOpen.invites ? plural(stillOpen.invites, 'invite') : '',
+                  stillOpen.members ? plural(stillOpen.members, 'person', 'people') : '',
+                ]
+                  .filter(Boolean)
+                  .join(' and ')} still ${stillOpen.invites + stillOpen.members === 1 ? 'opens' : 'open'} this station. ` +
+                'Revoke them in More → Accounts & sync, or they are left pointing at nothing.'
+              : '')
+          }
           confirmLabel="Remove"
           tone="danger"
           onCancel={() => setRemoving(undefined)}
@@ -358,22 +389,43 @@ function DestinationSheet({
   const [access, setAccess] = useState<AccessType>(destination?.access ?? '2wd');
   const [accessNotes, setAccessNotes] = useState(destination?.accessNotes ?? '');
   const [crewLead, setCrewLead] = useState(destination?.crewLead ?? '');
+  const [phone, setPhone] = useState(destination?.phone ?? '');
   const [vehicle, setVehicle] = useState(destination?.vehicle ?? '');
   // Vehicles already named on this event, so the same van is spelt the same way.
   const vehicles = [...new Set(existing.map((entry) => entry.vehicle?.trim()).filter(Boolean))].sort();
   const [openTime, setOpenTime] = useState(destination?.openTime ?? '');
   const [closeTime, setCloseTime] = useState(destination?.closeTime ?? '');
+  // "27,5" is 27.5 km; words and negatives are turned away rather than saved
+  // as a station at NaN km.
+  const km = parseAmount(courseKm);
+  const kmError = 'error' in km ? km.error : undefined;
+  const kmValue = 'value' in km ? km.value : null;
+  // One station per tap on Add, however fast the second tap comes.
+  const saving = useRef(false);
+  const [busy, setBusy] = useState(false);
 
   const save = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || kmError || saving.current) return;
+    saving.current = true;
+    setBusy(true);
+    try {
+      await write();
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
+  };
+
+  const write = async () => {
     if (destination) {
       await update(db.destinations, destination.id, {
         name: name.trim(),
         type,
-        courseKm: courseKm.trim() ? Number(courseKm) : null,
+        courseKm: kmValue,
         access,
         accessNotes: accessNotes.trim(),
         crewLead: crewLead.trim(),
+        phone: phone.trim(),
         vehicle: vehicle.trim(),
         openTime,
         closeTime,
@@ -398,13 +450,13 @@ function DestinationSheet({
       eventId,
       name: name.trim(),
       type,
-      courseKm: courseKm.trim() ? Number(courseKm) : null,
+      courseKm: kmValue,
       access,
       accessNotes: accessNotes.trim(),
       lat: null,
       lng: null,
       crewLead: crewLead.trim(),
-      phone: '',
+      phone: phone.trim(),
       vehicle: vehicle.trim(),
       openTime,
       closeTime,
@@ -427,7 +479,12 @@ function DestinationSheet({
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" disabled={!name.trim()} onClick={() => void save()}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!name.trim() || Boolean(kmError) || busy}
+            onClick={() => void save()}
+          >
             {destination ? 'Save' : 'Add'}
           </button>
         </>
@@ -471,11 +528,17 @@ function DestinationSheet({
                 inputMode="decimal"
                 value={courseKm}
                 placeholder="42"
+                aria-invalid={kmError ? true : undefined}
                 onChange={(event) => setCourseKm(event.target.value)}
               />
             )}
           </Field>
         </div>
+        {kmError ? (
+          <p className="small" style={{ color: 'var(--danger)' }}>
+            Course km: {kmError}. Use a number like 27.5 or 27,5.
+          </p>
+        ) : null}
         <Field label="Vehicle access">
           {(id) => (
             <select
@@ -513,6 +576,22 @@ function DestinationSheet({
               />
             )}
           </Field>
+          <Field label="Crew lead phone">
+            {(id) => (
+              <input
+                id={id}
+                className="input"
+                type="tel"
+                inputMode="tel"
+                autoComplete="off"
+                value={phone}
+                placeholder="0412 345 678"
+                onChange={(event) => setPhone(event.target.value)}
+              />
+            )}
+          </Field>
+        </div>
+        <div className="field-row">
           <Field label="Vehicle" hint="Which van or ute carries this station's gear.">
             {(id) => (
               <>

@@ -11,7 +11,7 @@ import { MovePill } from '../components/Moves';
 import { ConfirmSheet, Field, ProgressBar, Sheet, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { alive, byId, restore, update } from '../db/repo';
+import { alive, byId, liveWhere, restore, softDelete, update } from '../db/repo';
 import { useCategories, useCrewName, useEvent, usePacklist, usePacklistLines } from '../hooks/useDb';
 import { moveInVan, resetVanOrder, unloadOrder } from '../domain/truck';
 import { useSession } from '../hooks/sessionContext';
@@ -31,12 +31,13 @@ import {
   removeLine,
   removePacklist,
   statusIndex,
+  templateLineQty,
 } from '../domain/packlists';
 import { formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
 import { addShoppingLine, inputForItem } from '../domain/shopping';
 import { isKit, kitLines } from '../domain/kits';
-import type { PacklistLine, Unit } from '../db/types';
+import type { PacklistLine, Template, TemplateLine, Unit } from '../db/types';
 
 type Filter = 'todo' | 'all' | 'packed' | 'musthave';
 
@@ -365,6 +366,10 @@ export default function PacklistScreen() {
   if (!can(session, 'packlist:read', { eventId: packlist.eventId, destinationId: packlist.destinationId })) {
     return <Navigate to="/" replace />;
   }
+
+  // A deleted list is still in the database as a tombstone, so Back or an old
+  // link would open it as if nothing happened. Off to the event instead.
+  if (packlist.deletedAt) return <Navigate to={`/events/${packlist.eventId}`} replace />;
 
   /**
    * Tapping a row is all-or-nothing; the stepper handles partial counts.
@@ -897,8 +902,8 @@ export default function PacklistScreen() {
         <ApplyTemplateSheet
           packlistId={packlist.id}
           onClose={() => setApplying(false)}
-          onApplied={(count) => {
-            toast(`${plural(count, 'template line')} merged in`);
+          onApplied={(name, undo) => {
+            toast(`${name} applied`, 'ok', { undo });
             setApplying(false);
           }}
         />
@@ -1022,6 +1027,34 @@ export default function PacklistScreen() {
   );
 }
 
+/** What applying a template would do to a list, before anyone commits to it. */
+function templatePreview(
+  templateLines: TemplateLine[],
+  existing: PacklistLine[],
+  runners: number,
+): { adds: number; topUps: number } {
+  // Mirrors applyTemplate: an item already on the list is topped up, anything
+  // else becomes a new line.
+  const have = new Set(existing.map((line) => line.itemId));
+  let adds = 0;
+  let topUps = 0;
+  for (const line of templateLines) {
+    if (templateLineQty(line, runners) <= 0) continue;
+    if (have.has(line.itemId)) topUps += 1;
+    else adds += 1;
+  }
+  return { adds, topUps };
+}
+
+/**
+ * Pick a template, see what it will do, then apply it.
+ *
+ * One tap used to merge a template straight in, and a whole-event list landed
+ * ninety lines on one aid station. Now the tap shows how many lines it adds
+ * and tops up first, the whole-event lists stay out of the way unless asked
+ * for, and the toast carries an Undo that takes the new lines off and puts
+ * the topped-up amounts back.
+ */
 function ApplyTemplateSheet({
   packlistId,
   onClose,
@@ -1029,15 +1062,109 @@ function ApplyTemplateSheet({
 }: {
   packlistId: string;
   onClose: () => void;
-  onApplied: (count: number) => void;
+  onApplied: (name: string, undo: () => Promise<void>) => void;
 }) {
   const templates = useLiveQuery(async () => alive(await db.templates.toArray()), []);
   const [runners, setRunners] = useState(0);
+  const [showEvent, setShowEvent] = useState(false);
+  const [chosen, setChosen] = useState<Template>();
+  const applyingNow = useRef(false);
+  const [busy, setBusy] = useState(false);
+
+  const preview = useLiveQuery(async () => {
+    if (!chosen) return undefined;
+    const [templateLines, existing] = await Promise.all([
+      liveWhere(db.templateLines, 'templateId', chosen.id),
+      liveWhere(db.packlistLines, 'packlistId', packlistId),
+    ]);
+    return templatePreview(templateLines, existing, runners);
+  }, [chosen?.id, packlistId, runners]);
+
+  const wholeEvent = (templates ?? []).filter((template) => template.scope === 'event');
+  const shown = (templates ?? []).filter((template) => showEvent || template.scope !== 'event');
+
+  const apply = async (template: Template) => {
+    if (applyingNow.current) return;
+    applyingNow.current = true;
+    setBusy(true);
+    try {
+      const before = new Map(
+        (await liveWhere(db.packlistLines, 'packlistId', packlistId)).map((line) => [line.id, line]),
+      );
+      await applyTemplate(packlistId, template, runners);
+      const after = await liveWhere(db.packlistLines, 'packlistId', packlistId);
+      const added = after.filter((line) => !before.has(line.id));
+      const topped = after.filter((line) => {
+        const was = before.get(line.id);
+        return was && (was.qtyRequired !== line.qtyRequired || was.mandatory !== line.mandatory);
+      });
+      const undo = async () => {
+        for (const line of added) await softDelete(db.packlistLines, line.id);
+        for (const line of topped) {
+          const was = before.get(line.id)!;
+          const now = await db.packlistLines.get(line.id);
+          // Only put back what the template set. A line someone has changed
+          // since keeps their number.
+          if (!now || now.deletedAt || now.qtyRequired !== line.qtyRequired) continue;
+          await update(db.packlistLines, line.id, { qtyRequired: was.qtyRequired, mandatory: was.mandatory });
+        }
+      };
+      onApplied(template.name, undo);
+    } finally {
+      applyingNow.current = false;
+      setBusy(false);
+    }
+  };
+
+  if (chosen) {
+    return (
+      <Sheet
+        title={`Apply ${chosen.name}?`}
+        onClose={onClose}
+        footer={
+          <>
+            <button type="button" className="btn btn-outline" onClick={() => setChosen(undefined)}>
+              Back
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !preview || !(preview.adds + preview.topUps)}
+              onClick={() => void apply(chosen)}
+            >
+              {busy ? 'Applying…' : 'Apply'}
+            </button>
+          </>
+        }
+      >
+        <p className="small">
+          {!preview
+            ? 'Working it out…'
+            : !(preview.adds + preview.topUps)
+              ? 'This template adds nothing to the list.'
+              : [
+                  preview.adds ? `Adds ${plural(preview.adds, 'new line')}` : '',
+                  preview.topUps
+                    ? `${preview.adds ? 'tops up' : 'Tops up'} ${plural(preview.topUps, 'line')} already on the list`
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(' and ') + '.'}
+        </p>
+        {chosen.scope === 'event' ? (
+          <p className="small mt-2" style={{ color: 'var(--danger)' }}>
+            This is a whole-event list, the totals for every station together, not one station&rsquo;s.
+          </p>
+        ) : null}
+        <p className="tiny muted mt-2">You can undo it from the message that follows.</p>
+      </Sheet>
+    );
+  }
 
   return (
     <Sheet title="Apply a template" onClose={onClose}>
       <p className="small muted mb-3">
-        Template quantities are added to what is already on the list — the same item is topped up, not
+        Template quantities are added to what is already on the list. The same item is topped up, not
         duplicated.
       </p>
       <Field label="Expected runners" hint="Used only by per-runner template lines.">
@@ -1053,24 +1180,36 @@ function ApplyTemplateSheet({
         )}
       </Field>
       <div className="list">
-        {(templates ?? []).map((template) => (
+        {shown.map((template) => (
           <button
             key={template.id}
             type="button"
             className="row"
-            onClick={() => {
-              void applyTemplate(packlistId, template, runners).then(onApplied);
-            }}
+            onClick={() => setChosen(template)}
           >
             <span className="row-icon">📋</span>
             <span className="row-body">
               <span className="row-title">{template.name}</span>
-              <span className="row-sub truncate">{template.description}</span>
+              <span className="row-sub truncate">
+                {template.scope === 'event' ? 'Whole event · ' : ''}
+                {template.description}
+              </span>
             </span>
             <span className="row-chevron">›</span>
           </button>
         ))}
       </div>
+      {wholeEvent.length ? (
+        <label className="checkbox mt-3">
+          <input type="checkbox" checked={showEvent} onChange={(event) => setShowEvent(event.target.checked)} />
+          <span>
+            Show whole-event lists too
+            <span className="small muted" style={{ display: 'block' }}>
+              {plural(wholeEvent.length, 'list')} with the totals for every station, not one.
+            </span>
+          </span>
+        </label>
+      ) : null}
     </Sheet>
   );
 }

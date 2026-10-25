@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
@@ -63,7 +63,7 @@ export default function TemplatesScreen() {
               <span className="row-sub truncate">{template.description || 'No description'}</span>
             </span>
             <span className="row-end">
-              <Pill>{DESTINATION_LABELS[template.appliesTo]}</Pill>
+              <Pill>{template.scope === 'event' ? 'Whole event' : DESTINATION_LABELS[template.appliesTo]}</Pill>
               <div className="tiny muted mt-2">{plural(counts?.get(template.id) ?? 0, 'line')}</div>
             </span>
           </Link>
@@ -88,6 +88,9 @@ function NewTemplateSheet({
   const [name, setName] = useState('');
   const [appliesTo, setAppliesTo] = useState<DestinationType>('aid_station');
   const [description, setDescription] = useState('');
+  // One template per tap on Create, however fast the second tap comes.
+  const creating = useRef(false);
+  const [busy, setBusy] = useState(false);
 
   return (
     <Sheet
@@ -101,16 +104,24 @@ function NewTemplateSheet({
           <button
             type="button"
             className="btn btn-primary"
-            disabled={!name.trim()}
+            disabled={!name.trim() || busy}
             onClick={() => {
+              if (creating.current) return;
+              creating.current = true;
+              setBusy(true);
               void create(db.templates, {
                 name: name.trim(),
                 appliesTo,
                 description: description.trim(),
-              }).then((template) => {
-                toast('Template created');
-                onCreated(template.id);
-              });
+              })
+                .then((template) => {
+                  toast('Template created');
+                  onCreated(template.id);
+                })
+                .finally(() => {
+                  creating.current = false;
+                  setBusy(false);
+                });
             }}
           >
             Create

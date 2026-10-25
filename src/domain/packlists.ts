@@ -221,30 +221,37 @@ export async function applyTemplate(
   return templateLines.length;
 }
 
-/** Add a single item to a packlist, merging with an existing line for it. */
+/**
+ * Add a single item to a packlist, merging with an existing line for it.
+ *
+ * Read and write share one transaction, so two taps on Add in quick
+ * succession top up one line instead of both finding no line and making two.
+ */
 export async function addLine(
   packlistId: string,
   itemId: string,
   qty = 1,
 ): Promise<PacklistLine> {
-  const existing = await liveWhere(db.packlistLines, 'packlistId', packlistId);
-  const match = existing.find((line) => line.itemId === itemId);
-  if (match) {
-    const updated = await update(db.packlistLines, match.id, {
-      qtyRequired: round2(match.qtyRequired + qty),
+  return db.transaction('rw', db.packlistLines, async () => {
+    const existing = await liveWhere(db.packlistLines, 'packlistId', packlistId);
+    const match = existing.find((line) => line.itemId === itemId);
+    if (match) {
+      const updated = await update(db.packlistLines, match.id, {
+        qtyRequired: round2(match.qtyRequired + qty),
+      });
+      return updated ?? match;
+    }
+    return create(db.packlistLines, {
+      packlistId,
+      itemId,
+      qtyRequired: qty,
+      qtyPacked: 0,
+      qtyReturned: 0,
+      mandatory: false,
+      containerId: null,
+      note: '',
+      sort: nextSort(existing),
     });
-    return updated ?? match;
-  }
-  return create(db.packlistLines, {
-    packlistId,
-    itemId,
-    qtyRequired: qty,
-    qtyPacked: 0,
-    qtyReturned: 0,
-    mandatory: false,
-    containerId: null,
-    note: '',
-    sort: nextSort(existing),
   });
 }
 

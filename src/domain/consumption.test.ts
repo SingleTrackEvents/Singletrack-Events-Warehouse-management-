@@ -10,6 +10,7 @@ import {
   lineQtyByDay,
   lineTotal,
   loadFoodPlan,
+  parseAmount,
   stationRunners,
   stationRunnersByDay,
   totalsToOrder,
@@ -381,6 +382,43 @@ describe('applyPlanToPacklists', () => {
     expect(await liveWhere(db.packlistLines, 'packlistId', stray.id)).toHaveLength(0);
   });
 
+  it('adds each item once when two sends run at the same moment', async () => {
+    const { event, station, water } = await planned();
+    await Promise.all([
+      applyPlanToPacklists(event.id, [station]),
+      applyPlanToPacklists(event.id, [station]),
+    ]);
+    const packlists = alive(await db.packlists.where('destinationId').equals(station.id).toArray());
+    expect(packlists).toHaveLength(1);
+    const lines = await liveWhere(db.packlistLines, 'packlistId', packlists[0].id);
+    expect(lines.filter((line) => line.itemId === water.id)).toHaveLength(1);
+  });
+
+  it('folds two lines for a planned item back into one', async () => {
+    const { event, station, water } = await planned();
+    const packlist = await createPacklist(station);
+    const base = {
+      packlistId: packlist.id, itemId: water.id, qtyRequired: 1095, qtyReturned: 0,
+      mandatory: false, containerId: null, note: '',
+    };
+    const first = await create(db.packlistLines, { ...base, qtyPacked: 300, sort: 10 });
+    await create(db.packlistLines, { ...base, qtyPacked: 200, sort: 20 });
+
+    await applyPlanToPacklists(event.id, [station]);
+    const lines = await liveWhere(db.packlistLines, 'packlistId', packlist.id);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].id).toBe(first.id);
+    // What was already packed on the copy is not lost.
+    expect(lines[0].qtyPacked).toBe(500);
+    expect(lines[0].qtyRequired).toBe(360 + 735);
+    expect(lines[0].qtyReceived).toBeUndefined();
+
+    // And the next send has one line to set.
+    await db.races.toCollection().modify({ projection: 1 });
+    await applyPlanToPacklists(event.id, [station]);
+    expect(await liveWhere(db.packlistLines, 'packlistId', packlist.id)).toHaveLength(1);
+  });
+
   it('skips a station whose plan computes to nothing', async () => {
     const event = await makeEvent();
     const destination = await makeDestination(event.id);
@@ -405,5 +443,24 @@ describe('loadFoodPlan', () => {
     const plan = await loadFoodPlan(event.id);
     expect(plan.races).toHaveLength(3);
     expect(plan.lines).toHaveLength(1);
+  });
+});
+
+describe('parseAmount', () => {
+  it('reads a comma as the decimal point', () => {
+    expect(parseAmount('1,5')).toEqual({ value: 1.5 });
+    expect(parseAmount(' 27,5 ')).toEqual({ value: 27.5 });
+    expect(parseAmount('0.2')).toEqual({ value: 0.2 });
+    expect(parseAmount('.5')).toEqual({ value: 0.5 });
+  });
+
+  it('treats blank as nothing typed', () => {
+    expect(parseAmount('  ')).toEqual({ value: null });
+  });
+
+  it('turns away words and negatives with a reason', () => {
+    expect(parseAmount('abc')).toHaveProperty('error');
+    expect(parseAmount('1,5,2')).toHaveProperty('error');
+    expect(parseAmount('-3')).toHaveProperty('error');
   });
 });
