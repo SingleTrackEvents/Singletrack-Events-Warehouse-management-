@@ -1,28 +1,34 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { BuildStamp } from '../components/BuildStamp';
-import { EmptyState, Pill, ProgressBar } from '../components/ui';
+import { MovePill, MoveStrip } from '../components/Moves';
+import { EmptyState, Pill } from '../components/ui';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
 import { useCrewName, useEvents, useItems, useShoppingLines } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { useToast } from '../components/toastContext';
-import { can, isStationOnly, reachable } from '../sync/permissions';
+import { can, isStationOnly } from '../sync/permissions';
 import { countedItemIds, lowStockItems } from '../domain/stock';
 import { addLowStock, groupByShop, toBuy } from '../domain/shopping';
-import { packlistForDestination, progressFor, receiptFor } from '../domain/packlists';
-import { daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
-import { LOAD_STATUS_LABELS } from '../domain/transport';
-import type { Destination, Packlist, PacklistLine } from '../db/types';
+import { describeSource, packlistForDestination, primaryPacklist, progressFor, receiptFor, startPacklist } from '../domain/packlists';
+import { boardCounts, currentMove, hasLeft, moveLabel, moveOf, moveProgress } from '../domain/moves';
+import type { BoardRow, Move } from '../domain/moves';
+import { DESTINATION_ICONS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
+import type { Destination, Item, Packlist, PacklistLine } from '../db/types';
 import logo from '../assets/logo-white.png';
 import { openIntro } from '../domain/intro';
 
 /**
- * The screen the crew lands on. It answers the three questions asked most often
- * in the week before a race: what is next, how far through packing are we, and
- * what are we short of. Account and sync state live in the header chip, and
- * everything else has a tab, so nothing here repeats what is a tap away.
+ * The screen the crew lands on: the board for the next event.
+ *
+ * One row per station and five moves across the top, so the first glance says
+ * where the weekend is up to and the second says which station is holding it
+ * up. Under that, what the shed is short of. Account and sync state live in
+ * the header chip, and everything else has a tab, so nothing here repeats
+ * what is a tap away.
  */
 export default function HomeScreen() {
   const navigate = useNavigate();
@@ -39,7 +45,8 @@ export default function HomeScreen() {
       const lines = packlist
         ? alive(await db.packlistLines.toArray()).filter((line) => line.packlistId === packlist.id)
         : [];
-      return { destination, packlist, lines };
+      const items = new Map(alive(await db.items.toArray()).map((item) => [item.id, item]));
+      return { destination, packlist, lines, items };
     },
     [stationOnly, session?.scope.destinationId],
   );
@@ -60,33 +67,40 @@ export default function HomeScreen() {
     return upcoming[0] ?? events[events.length - 1];
   })();
 
-  const packlists = useLiveQuery(
-    async () =>
-      focus ? alive(await db.packlists.where('eventId').equals(focus.id).toArray()) : [],
-    [focus?.id],
-  );
-
-  const packProgress = useLiveQuery(async () => {
-    if (!packlists?.length) return null;
+  const truckStage = Boolean(focus?.truckStage);
+  const board = useLiveQuery(async () => {
+    if (!focus) return undefined;
+    const destinations = alive(await db.destinations.where('eventId').equals(focus.id).toArray()).sort(
+      (a, b) => a.sort - b.sort || a.name.localeCompare(b.name),
+    );
+    const packlists = alive(await db.packlists.where('eventId').equals(focus.id).toArray());
     const ids = new Set(packlists.map((packlist) => packlist.id));
     const lines = alive(await db.packlistLines.toArray()).filter((line) => ids.has(line.packlistId));
-    const done = packlists.filter((packlist) => packlist.status !== 'draft' && packlist.status !== 'picking');
-    return {
-      lists: packlists.length,
-      listsReady: done.length,
-      lines: progressFor(lines),
-    };
-  }, [packlists]);
-
-  const activeLoads = useLiveQuery(
-    async () =>
-      alive(await db.loads.toArray())
-        .filter((load) => reachable(session, { eventId: load.eventId }))
-        .filter(
-          (load) => load.status === 'in_transit' || load.status === 'delivering' || load.status === 'loading',
-        ),
-    [session],
-  );
+    const linesOf = (packlist: Packlist) => lines.filter((line) => line.packlistId === packlist.id);
+    const rows: Array<BoardRow & { destination: Destination }> = destinations.map((destination) => {
+      const candidates = packlists.filter((packlist) => packlist.destinationId === destination.id);
+      const packlist = primaryPacklist(candidates, (entry) => linesOf(entry).length);
+      const own = packlist ? linesOf(packlist) : [];
+      const move = packlist ? moveOf(own, truckStage, packlist.status) : 'plan';
+      return {
+        destination,
+        destinationId: destination.id,
+        packlistId: packlist?.id ?? null,
+        move,
+        progress: moveProgress(own, move, truckStage),
+        blocking: progressFor(own).blocking.length,
+        lists: candidates.length,
+      };
+    });
+    const current = currentMove(rows, truckStage);
+    // What is left to do at the move the event is at, across every station.
+    const remaining = rows
+      .filter((row) => row.move === current)
+      .reduce((sum, row) => sum + row.progress.short, 0);
+    return { rows, counts: boardCounts(rows), current, remaining };
+  }, [focus?.id, truckStage]);
+  const [showing, setShowing] = useState<Move | null>(null);
+  const canBuild = can(session, 'packlist:manage', focus ? { eventId: focus.id } : undefined);
 
   // The shopping list is the crew's; its hook already narrows the lines to
   // what this account may see, so only the card needs gating.
@@ -131,44 +145,77 @@ export default function HomeScreen() {
       {focus ? (
         <section className="section">
           <div className="section-head">
-            <h2>Next up</h2>
+            <h2>
+              <Link to={`/events/${focus.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+                {focus.name}
+              </Link>
+            </h2>
             <Link to="/events" className="small">
               All events
             </Link>
           </div>
-          <Link to={`/events/${focus.id}`} className="card card-pad" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
-            <div className="spread mb-2">
-              <div className="grow">
-                <h3 style={{ fontSize: 'var(--text-xl)' }}>{focus.name}</h3>
-                <p className="small muted mt-0">
-                  {focus.location} · {formatDateRange(focus.startDate, focus.endDate)}
-                </p>
-              </div>
-              <Pill tone={daysUntil(focus.startDate) <= 7 ? 'accent' : 'info'}>
-                {relativeDays(focus.startDate)}
-              </Pill>
-            </div>
+          <div className="spread mb-3">
+            <p className="small muted mt-0">
+              {focus.location} · {formatDateRange(focus.startDate, focus.endDate)}
+            </p>
+            <Pill tone={daysUntil(focus.startDate) <= 7 ? 'accent' : 'info'}>{relativeDays(focus.startDate)}</Pill>
+          </div>
 
-            {packProgress ? (
-              <>
-                <div className="spread small mb-2">
-                  <span className="muted">
-                    {packProgress.lines.linesDone} of {packProgress.lines.linesTotal} lines packed
-                  </span>
-                  <span className="strong">{packProgress.lines.percent}%</span>
+          {board ? (
+            <>
+              <MoveStrip
+                counts={board.counts}
+                current={board.current}
+                truckStage={truckStage}
+                selected={showing}
+                onSelect={setShowing}
+              />
+              {board.rows.length ? (
+                <div className="list">
+                  {board.rows
+                    .filter((row) => !showing || row.move === showing)
+                    .map((row) => (
+                      <button
+                        key={row.destinationId}
+                        type="button"
+                        className="row"
+                        onClick={() => {
+                          if (row.packlistId) navigate(`/packlists/${row.packlistId}`);
+                          else if (canBuild) {
+                            void startPacklist(row.destination).then(({ packlist, source }) => {
+                              toast(describeSource(source));
+                              navigate(`/packlists/${packlist.id}`);
+                            });
+                          } else navigate(`/events/${focus.id}`);
+                        }}
+                      >
+                        <span className="row-icon">{DESTINATION_ICONS[row.destination.type]}</span>
+                        <span className="row-body">
+                          <span className="row-title truncate">{row.destination.name}</span>
+                          <span className="row-sub">
+                            {row.packlistId
+                              ? `${row.progress.done} of ${row.progress.total} lines ${moveLabel(row.move, truckStage).toLowerCase() === 'plan' ? 'planned' : 'done'}`
+                              : 'No list yet'}
+                            {row.lists > 1 ? ` · ${row.lists} lists` : ''}
+                          </span>
+                        </span>
+                        <span className="row-end">
+                          {row.packlistId ? <MovePill move={row.move} truckStage={truckStage} /> : <Pill tone="accent">Start list</Pill>}
+                          {row.blocking ? (
+                            <div className="tiny" style={{ color: 'var(--danger)', marginTop: 4 }}>
+                              {row.blocking} must-have short
+                            </div>
+                          ) : null}
+                        </span>
+                      </button>
+                    ))}
                 </div>
-                <ProgressBar percent={packProgress.lines.percent} done={packProgress.lines.percent === 100} />
-                <p className="tiny muted mt-2">
-                  {plural(packProgress.listsReady, 'packlist')} of {packProgress.lists} ready to load
-                  {packProgress.lines.blocking.length
-                    ? ` · ${plural(packProgress.lines.blocking.length, 'must-have item')} still short`
-                    : ''}
-                </p>
-              </>
-            ) : (
-              <p className="small muted">No packlists yet — open the event to build them.</p>
-            )}
-          </Link>
+              ) : (
+                <p className="small muted">No stations yet. Open the event to add them.</p>
+              )}
+              <BoardAction eventId={focus.id} current={board.current} remaining={board.remaining} truckStage={truckStage} />
+            </>
+          ) : null}
         </section>
       ) : (
         <EmptyState
@@ -182,28 +229,6 @@ export default function HomeScreen() {
           }
         />
       )}
-
-      {activeLoads?.length ? (
-        <section className="section">
-          <div className="section-head">
-            <h2>On the road</h2>
-          </div>
-          <div className="list">
-            {activeLoads.map((load) => (
-              <Link key={load.id} to={`/transport/${load.id}`} className="row">
-                <span className="row-icon">🚚</span>
-                <span className="row-body">
-                  <span className="row-title">{load.name}</span>
-                  <span className="row-sub">
-                    {load.driver || 'No driver'} · {load.vehicle || 'No vehicle'}
-                  </span>
-                </span>
-                <Pill tone="info">{LOAD_STATUS_LABELS[load.status]}</Pill>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       {openStocktakes?.length ? (
         <section className="section">
@@ -296,6 +321,65 @@ export default function HomeScreen() {
 }
 
 /**
+ * The one thing to do next, under the board.
+ *
+ * Which screen that is depends on the move the event is at: the stations
+ * while planning, the shed's pick list while loading, the event's stations
+ * from there. Crew who cannot pack get the event instead of the pick list.
+ */
+function BoardAction({
+  eventId,
+  current,
+  remaining,
+  truckStage,
+}: {
+  eventId: string;
+  current: Move;
+  remaining: number;
+  truckStage: boolean;
+}) {
+  const { session } = useSession();
+  const canPack = can(session, 'packlist:pack', { eventId });
+  const left = remaining ? ` · ${plural(remaining, 'line')} to go` : '';
+  switch (current) {
+    case 'plan':
+      return (
+        <Link className="btn btn-primary btn-block mt-3" to={`/events/${eventId}`}>
+          Plan the stations{left}
+        </Link>
+      );
+    case 'truck':
+      return canPack ? (
+        <Link className="btn btn-primary btn-block mt-3" to={`/events/${eventId}/warehouse`}>
+          {truckStage ? 'Load the truck' : 'Load the vehicles'}{left}
+        </Link>
+      ) : (
+        <Link className="btn btn-primary btn-block mt-3" to={`/events/${eventId}`}>
+          Open the event
+        </Link>
+      );
+    case 'vans':
+      return (
+        <Link className="btn btn-primary btn-block mt-3" to={canPack ? `/events/${eventId}/vans` : `/events/${eventId}`}>
+          Pack the vans{left}
+        </Link>
+      );
+    case 'station':
+      return (
+        <Link className="btn btn-primary btn-block mt-3" to={`/events/${eventId}`}>
+          Stations checking in{left}
+        </Link>
+      );
+    case 'home':
+      return (
+        <Link className="btn btn-primary btn-block mt-3" to={canPack ? `/events/${eventId}/home` : `/events/${eventId}`}>
+          Count it home{left}
+        </Link>
+      );
+  }
+}
+
+/**
  * The whole app, for someone working one aid station.
  *
  * Their packlist and a way back to it. No races to browse, no warehouse, no
@@ -305,7 +389,9 @@ export default function HomeScreen() {
 function StationHome({
   station,
 }: {
-  station: { destination?: Destination; packlist?: Packlist; lines: PacklistLine[] } | undefined;
+  station:
+    | { destination?: Destination; packlist?: Packlist; lines: PacklistLine[]; items: Map<string, Item> }
+    | undefined;
 }) {
   const { session } = useSession();
 
@@ -336,32 +422,68 @@ function StationHome({
     );
   }
 
+  const packlist = station.packlist;
   // What this station has confirmed, not what the warehouse packed: the number
   // on their home screen should be the one they can change.
   const progress = receiptFor(station.lines);
+  // The three jobs at a station, in the order they happen over the day.
+  const food = station.lines.filter((line) => station.items.get(line.itemId)?.consumable);
+  const gear = station.lines.filter((line) => !station.items.get(line.itemId)?.consumable);
+  const counted = food.filter(hasLeft).length;
+  const packedDown = gear.filter(hasLeft).length;
+  const jobs: Array<{ mode: string; title: string; sub: string; done: boolean; icon: string }> = [
+    {
+      mode: 'arrived',
+      icon: '✅',
+      title: 'Arrived',
+      sub: `${progress.linesDone} of ${progress.linesTotal} lines checked in off the van`,
+      done: progress.linesTotal > 0 && progress.percent === 100,
+    },
+    {
+      mode: 'count',
+      icon: '🔢',
+      title: 'Count',
+      sub: food.length ? `${counted} of ${food.length} food and drink lines counted` : 'No food or drink on this list',
+      done: food.length > 0 && counted === food.length,
+    },
+    {
+      mode: 'packdown',
+      icon: '🚐',
+      title: 'Pack down',
+      sub: gear.length ? `${packedDown} of ${gear.length} gear lines back in the van` : 'No gear on this list',
+      done: gear.length > 0 && packedDown === gear.length,
+    },
+  ];
+  const next = jobs.find((job) => !job.done) ?? jobs[0];
 
   return (
     <Screen title={name} subtitle={session ? `Signed in as ${session.displayName}` : undefined}>
-      <div className="card card-pad mb-4">
-        <div className="spread mb-2">
-          <span className="strong">
-            {progress.linesDone} / {progress.linesTotal} lines confirmed
-          </span>
-          <Pill tone={progress.percent === 100 ? 'ok' : 'accent'}>{progress.percent}%</Pill>
-        </div>
-        <ProgressBar percent={progress.percent} done={progress.percent === 100} />
-        {station.destination?.accessNotes ? (
-          <p className="tiny muted mt-2">🚙 {station.destination.accessNotes}</p>
-        ) : null}
+      {station.destination?.accessNotes ? (
+        <p className="tiny muted mb-3">🚙 {station.destination.accessNotes}</p>
+      ) : null}
+      <div className="list mb-4">
+        {jobs.map((job) => (
+          <Link key={job.mode} to={`/packlists/${packlist.id}?mode=${job.mode}`} className="row">
+            <span className="row-icon">{job.icon}</span>
+            <span className="row-body">
+              <span className="row-title">{job.title}</span>
+              <span className="row-sub">{job.sub}</span>
+            </span>
+            <span className="row-end">
+              {job.done ? <Pill tone="ok">Done</Pill> : job === next ? <Pill tone="accent">Next</Pill> : null}
+            </span>
+          </Link>
+        ))}
       </div>
 
-      <Link className="btn btn-primary btn-lg btn-block" to={`/packlists/${station.packlist.id}`}>
-        Open the packlist
+      <Link className="btn btn-primary btn-lg btn-block" to={`/packlists/${packlist.id}?mode=${next.mode}`}>
+        {next.icon} {next.title}
       </Link>
 
       <p className="tiny muted center mt-4">
-        Tick off each item as it turns up. What was meant to be sent is set by the warehouse, so a
-        short delivery stays visible.{' '}
+        Tick off each item as it turns up, count what is left at the end of the day, and tick the
+        gear back into the van. What was sent is set by the warehouse, so a short delivery stays
+        visible.{' '}
         <button type="button" className="link-btn" onClick={openIntro}>
           How this works
         </button>{' '}

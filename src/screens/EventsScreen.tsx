@@ -63,7 +63,7 @@ export default function EventsScreen() {
           title="No events yet"
           body={
             canAdd
-              ? 'An event holds the aid stations, packlists and transport runs for one race.'
+              ? 'An event holds the aid stations and their packlists for one race.'
               : 'The event you were given has not reached this phone yet. It will appear once the phone has signal.'
           }
           action={

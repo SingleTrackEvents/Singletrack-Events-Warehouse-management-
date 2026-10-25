@@ -2,12 +2,21 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
+import { MovePill, MoveStrip } from '../components/Moves';
 import { ConfirmSheet, EmptyState, Field, Pill, ProgressBar, Sheet } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, create, nextSort, softDelete, softDeleteChildren, update } from '../db/repo';
 import { useDestinations, useEvent } from '../hooks/useDb';
-import { applyTemplate, createPacklist, primaryPacklist, progressFor, PACKLIST_STATUS_LABELS } from '../domain/packlists';
+import {
+  defaultTemplateFor,
+  describeSource,
+  primaryPacklist,
+  progressFor,
+  startPacklist,
+} from '../domain/packlists';
+import { boardCounts, currentMove, moveOf, moveProgress } from '../domain/moves';
+import type { Move } from '../domain/moves';
 import {
   ACCESS_LABELS,
   DESTINATION_ICONS,
@@ -23,20 +32,9 @@ import type {
   DestinationType,
   EventStatus,
   Packlist,
-  PacklistStatus,
   RaceEvent,
 } from '../db/types';
 import { ACCESS_TYPES, DESTINATION_TYPES, EVENT_STATUSES } from '../db/types';
-
-const STATUS_TONE: Partial<Record<PacklistStatus, 'ok' | 'warn' | 'info' | 'accent' | 'default'>> = {
-  draft: 'default',
-  picking: 'accent',
-  packed: 'ok',
-  loaded: 'info',
-  delivered: 'info',
-  returned: 'warn',
-  reconciled: 'ok',
-};
 
 /**
  * One race: its destinations, the packlist behind each, and the shortcuts to
@@ -49,13 +47,16 @@ export default function EventDetailScreen() {
   const event = useEvent(eventId);
   const destinations = useDestinations(eventId);
   const [addingDestination, setAddingDestination] = useState(false);
+  const [editingDestination, setEditingDestination] = useState<Destination>();
   const [editing, setEditing] = useState(false);
   const [buildingLists, setBuildingLists] = useState(false);
   const [removing, setRemoving] = useState<Destination>();
+  const [showing, setShowing] = useState<Move | null>(null);
+  const truckStage = Boolean(event?.truckStage);
 
-  // Packlists and their line progress, keyed by destination for the list below.
+  // Packlists, where each one is up to, keyed by destination for the list below.
   const summaries = useLiveQuery(async () => {
-    if (!eventId) return new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number; lists: number }>();
+    if (!eventId) return new Map<string, { move: Move; percent: number; id: string; blocking: number; lists: number }>();
     const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray());
     const allLines = alive(await db.packlistLines.toArray());
     const linesOf = (packlist: Packlist) => allLines.filter((line) => line.packlistId === packlist.id);
@@ -63,21 +64,30 @@ export default function EventDetailScreen() {
     for (const packlist of packlists) {
       byDestination.set(packlist.destinationId, [...(byDestination.get(packlist.destinationId) ?? []), packlist]);
     }
-    const map = new Map<string, { status: PacklistStatus; percent: number; id: string; blocking: number; lists: number }>();
+    const map = new Map<string, { move: Move; percent: number; id: string; blocking: number; lists: number }>();
     for (const [destinationId, candidates] of byDestination) {
       const packlist = primaryPacklist(candidates, (entry) => linesOf(entry).length);
       if (!packlist) continue;
-      const progress = progressFor(linesOf(packlist));
+      const own = linesOf(packlist);
+      const move = moveOf(own, truckStage, packlist.status);
       map.set(destinationId, {
         id: packlist.id,
-        status: packlist.status,
-        percent: progress.percent,
-        blocking: progress.blocking.length,
+        move,
+        percent: moveProgress(own, move, truckStage).percent,
+        blocking: progressFor(own).blocking.length,
         lists: candidates.length,
       });
     }
     return map;
-  }, [eventId, destinations]);
+  }, [eventId, destinations, truckStage]);
+
+  // The board's strip: every station with a list sits at a move; one without
+  // a list is still being planned.
+  const rows = (destinations ?? []).map((destination) => ({
+    move: summaries?.get(destination.id)?.move ?? ('plan' as Move),
+  }));
+  const counts = boardCounts(rows);
+  const current = currentMove(rows, truckStage);
 
   if (!event) {
     return (
@@ -107,11 +117,16 @@ export default function EventDetailScreen() {
         </div>
         {event.notes ? <p className="small">{event.notes}</p> : null}
         <div className="btn-row mt-3">
-          <Link className="btn btn-outline btn-sm" to={`/transport?event=${event.id}`}>
-            🚚 Transport
-          </Link>
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/warehouse`}>
             📦 Warehouse list
+          </Link>
+          {truckStage ? (
+            <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/vans`}>
+              🚐 Vans
+            </Link>
+          ) : null}
+          <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/home`}>
+            🏠 Home
           </Link>
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/food`}>
             🍌 Food plan
@@ -130,6 +145,16 @@ export default function EventDetailScreen() {
           </button>
         </div>
 
+        {destinations?.length ? (
+          <MoveStrip
+            counts={counts}
+            current={current}
+            truckStage={truckStage}
+            selected={showing}
+            onSelect={setShowing}
+          />
+        ) : null}
+
         {destinations && !destinations.length ? (
           <EmptyState
             glyph="⛺"
@@ -144,7 +169,9 @@ export default function EventDetailScreen() {
         ) : null}
 
         <div className="list">
-          {(destinations ?? []).map((destination) => {
+          {(destinations ?? [])
+            .filter((destination) => !showing || (summaries?.get(destination.id)?.move ?? 'plan') === showing)
+            .map((destination) => {
             const summary = summaries?.get(destination.id);
             return (
               <button
@@ -153,7 +180,11 @@ export default function EventDetailScreen() {
                 className="row"
                 onClick={() => {
                   if (summary) navigate(`/packlists/${summary.id}`);
-                  else void createPacklist(destination).then((packlist) => navigate(`/packlists/${packlist.id}`));
+                  else
+                    void startPacklist(destination).then(({ packlist, source }) => {
+                      toast(describeSource(source));
+                      navigate(`/packlists/${packlist.id}`);
+                    });
                 }}
               >
                 <span className="row-icon">{DESTINATION_ICONS[destination.type]}</span>
@@ -173,9 +204,7 @@ export default function EventDetailScreen() {
                 <span className="row-end">
                   {summary ? (
                     <>
-                      <Pill tone={STATUS_TONE[summary.status] ?? 'default'}>
-                        {PACKLIST_STATUS_LABELS[summary.status]}
-                      </Pill>
+                      <MovePill move={summary.move} truckStage={truckStage} />
                       {summary.blocking ? (
                         <div className="tiny" style={{ color: 'var(--danger)', marginTop: 4 }}>
                           {summary.blocking} short
@@ -190,7 +219,7 @@ export default function EventDetailScreen() {
                       ) : null}
                     </>
                   ) : (
-                    <Pill tone="accent">Build list</Pill>
+                    <Pill tone="accent">Start list</Pill>
                   )}
                 </span>
               </button>
@@ -224,6 +253,14 @@ export default function EventDetailScreen() {
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
+                  onClick={() => setEditingDestination(destination)}
+                  aria-label={`Edit ${destination.name}`}
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
                   onClick={() => setRemoving(destination)}
                   aria-label={`Remove ${destination.name}`}
                 >
@@ -240,6 +277,15 @@ export default function EventDetailScreen() {
           eventId={event.id}
           existing={destinations ?? []}
           onClose={() => setAddingDestination(false)}
+        />
+      ) : null}
+
+      {editingDestination ? (
+        <DestinationSheet
+          eventId={event.id}
+          existing={destinations ?? []}
+          destination={editingDestination}
+          onClose={() => setEditingDestination(undefined)}
         />
       ) : null}
 
@@ -283,28 +329,72 @@ export default function EventDetailScreen() {
 }
 
 /** Add a destination. Access and timings matter as much as the name out here. */
+/**
+ * Add a destination, or change one that exists.
+ *
+ * Stations get renamed when the council moves the carpark, the course km
+ * shifts with a reroute, and the crew lead changes the week before. None of
+ * that should mean removing the station and losing its packlist, so the same
+ * form that creates a destination edits it when given one.
+ */
 function DestinationSheet({
   eventId,
   existing,
+  destination,
   onClose,
 }: {
   eventId: string;
   existing: Destination[];
+  /** When set, the sheet edits this destination instead of adding a new one. */
+  destination?: Destination;
   onClose: () => void;
 }) {
   const toast = useToast();
-  const [name, setName] = useState('');
-  const [type, setType] = useState<DestinationType>('aid_station');
-  const [courseKm, setCourseKm] = useState('');
-  const [access, setAccess] = useState<AccessType>('2wd');
-  const [accessNotes, setAccessNotes] = useState('');
-  const [crewLead, setCrewLead] = useState('');
-  const [openTime, setOpenTime] = useState('06:00');
-  const [closeTime, setCloseTime] = useState('16:00');
+  const [name, setName] = useState(destination?.name ?? '');
+  const [type, setType] = useState<DestinationType>(destination?.type ?? 'aid_station');
+  const [courseKm, setCourseKm] = useState(
+    destination?.courseKm === null || destination?.courseKm === undefined ? '' : String(destination.courseKm),
+  );
+  const [access, setAccess] = useState<AccessType>(destination?.access ?? '2wd');
+  const [accessNotes, setAccessNotes] = useState(destination?.accessNotes ?? '');
+  const [crewLead, setCrewLead] = useState(destination?.crewLead ?? '');
+  const [vehicle, setVehicle] = useState(destination?.vehicle ?? '');
+  // Vehicles already named on this event, so the same van is spelt the same way.
+  const vehicles = [...new Set(existing.map((entry) => entry.vehicle?.trim()).filter(Boolean))].sort();
+  const [openTime, setOpenTime] = useState(destination?.openTime || '06:00');
+  const [closeTime, setCloseTime] = useState(destination?.closeTime || '16:00');
 
   const save = async () => {
     if (!name.trim()) return;
-    await create(db.destinations, {
+    if (destination) {
+      await update(db.destinations, destination.id, {
+        name: name.trim(),
+        type,
+        courseKm: courseKm.trim() ? Number(courseKm) : null,
+        access,
+        accessNotes: accessNotes.trim(),
+        crewLead: crewLead.trim(),
+        vehicle: vehicle.trim(),
+        openTime,
+        closeTime,
+      });
+      // A packlist still called what the station used to be called follows the
+      // rename. One given its own name is left alone.
+      if (name.trim() !== destination.name) {
+        const packlists = alive(
+          await db.packlists.where('destinationId').equals(destination.id).toArray(),
+        );
+        for (const packlist of packlists) {
+          if (packlist.name === destination.name) {
+            await update(db.packlists, packlist.id, { name: name.trim() });
+          }
+        }
+      }
+      toast('Destination updated');
+      onClose();
+      return;
+    }
+    const created = await create(db.destinations, {
       eventId,
       name: name.trim(),
       type,
@@ -315,18 +405,22 @@ function DestinationSheet({
       lng: null,
       crewLead: crewLead.trim(),
       phone: '',
+      vehicle: vehicle.trim(),
       openTime,
       closeTime,
       notes: '',
       sort: nextSort(existing),
     });
-    toast('Destination added');
+    // The list starts with the station, from last year's list for the same
+    // station where there was one, so nobody builds Borough Huts from nothing.
+    const { source } = await startPacklist(created);
+    toast(`Destination added. ${describeSource(source)}.`);
     onClose();
   };
 
   return (
     <Sheet
-      title="New destination"
+      title={destination ? 'Edit destination' : 'New destination'}
       onClose={onClose}
       footer={
         <>
@@ -334,7 +428,7 @@ function DestinationSheet({
             Cancel
           </button>
           <button type="button" className="btn btn-primary" disabled={!name.trim()} onClick={() => void save()}>
-            Add
+            {destination ? 'Save' : 'Add'}
           </button>
         </>
       }
@@ -408,16 +502,37 @@ function DestinationSheet({
             />
           )}
         </Field>
-        <Field label="Crew lead">
-          {(id) => (
-            <input
-              id={id}
-              className="input"
-              value={crewLead}
-              onChange={(event) => setCrewLead(event.target.value)}
-            />
-          )}
-        </Field>
+        <div className="field-row">
+          <Field label="Crew lead">
+            {(id) => (
+              <input
+                id={id}
+                className="input"
+                value={crewLead}
+                onChange={(event) => setCrewLead(event.target.value)}
+              />
+            )}
+          </Field>
+          <Field label="Vehicle" hint="Which van or ute carries this station's gear.">
+            {(id) => (
+              <>
+                <input
+                  id={id}
+                  className="input"
+                  list={`${id}-vehicles`}
+                  value={vehicle}
+                  placeholder="Van 3"
+                  onChange={(event) => setVehicle(event.target.value)}
+                />
+                <datalist id={`${id}-vehicles`}>
+                  {vehicles.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+              </>
+            )}
+          </Field>
+        </div>
         <div className="field-row">
           <Field label="Opens">
             {(id) => (
@@ -621,31 +736,22 @@ function BuildListsSheet({
   const [choices, setChoices] = useState<Record<string, string>>({});
   const [working, setWorking] = useState(false);
 
-  const templateFor = (destination: Destination) => {
-    if (choices[destination.id] !== undefined) return choices[destination.id];
-    const ofType = (templates ?? []).filter((template) => template.appliesTo === destination.type);
-    // A per-site list first. The whole-event ones are also filed under the
-    // village, and starting a single destination from a 90-line season total is
-    // never what was meant.
-    const perSite = ofType.filter((template) => template.scope !== 'event');
-    // Then the one built for how a vehicle actually reaches this destination:
-    // a van-accessible station and a quad drop need different loads.
-    const match =
-      perSite.find((template) => template.suitsAccess?.includes(destination.access)) ??
-      perSite.find((template) => !template.suitsAccess) ??
-      perSite[0] ??
-      ofType[0];
-    return match?.id ?? '';
-  };
+  /** '' is the automatic start: last edition, then the type's template. */
+  const AUTO = '';
+  const EMPTY = '__empty';
+  const choiceFor = (destination: Destination) => choices[destination.id] ?? AUTO;
+  const fallbackName = (destination: Destination) =>
+    defaultTemplateFor(destination, templates ?? [])?.name ?? 'an empty list';
 
   const build = async () => {
     setWorking(true);
     let count = 0;
     for (const destination of destinations) {
-      const packlist = await createPacklist(destination);
-      const templateId = templateFor(destination);
-      const template = templates?.find((entry) => entry.id === templateId);
-      if (template) await applyTemplate(packlist.id, template);
+      const choice = choiceFor(destination);
+      await startPacklist(destination, {
+        templateId: choice === EMPTY ? null : choice || undefined,
+        templates: templates ?? [],
+      });
       count += 1;
     }
     onDone(count);
@@ -667,8 +773,9 @@ function BuildListsSheet({
       }
     >
       <p className="small muted mb-3">
-        Pick the starting template for each destination. You can add or drop items on the list itself
-        afterwards.
+        Each station starts from its own list at the last edition of this event where there was one,
+        otherwise from the template for its kind of station. Pick a template here to start from that
+        instead. You can add or drop items on the list itself afterwards.
       </p>
       <div className="stack">
         {destinations.map((destination) => (
@@ -677,12 +784,13 @@ function BuildListsSheet({
               <select
                 id={id}
                 className="select"
-                value={templateFor(destination)}
+                value={choiceFor(destination)}
                 onChange={(event) =>
                   setChoices((current) => ({ ...current, [destination.id]: event.target.value }))
                 }
               >
-                <option value="">Empty list</option>
+                <option value={AUTO}>Last edition, else {fallbackName(destination)}</option>
+                <option value={EMPTY}>Empty list</option>
                 {(templates ?? []).map((template) => (
                   <option key={template.id} value={template.id}>
                     {template.name}

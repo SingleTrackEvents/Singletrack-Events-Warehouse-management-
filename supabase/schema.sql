@@ -189,7 +189,7 @@ returns text[] language sql immutable as $$
     when p_table = 'packlistLines' and p_role = 'driver'
       then array['qtyReceived', 'note']
     when p_table = 'packlistLines' and p_role = 'volunteer'
-      then array['qtyReceived', 'qtyReturned', 'note']
+      then array['qtyReceived', 'qtyLeft', 'countedBy', 'qtyReturned', 'note']
     when p_table = 'packlists' and p_role = 'driver'
       then array['status', 'notes']
     when p_table = 'packlists' and p_role = 'volunteer'

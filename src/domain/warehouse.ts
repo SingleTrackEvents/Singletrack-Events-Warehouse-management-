@@ -14,9 +14,9 @@ import type { Destination, Item, Load, Packlist } from '../db/types';
  * and which vehicle takes them.
  *
  * Entirely derived. No new records, nothing to keep in step: change a packlist
- * and the pull list is already right. The vehicle a thing travels in comes from
- * the run its destination is on, so this cannot contradict the transport plan —
- * a destination on no run yet says exactly that instead of guessing.
+ * and the pull list is already right. The vehicle a thing travels in is the
+ * tag on its destination ("Van 3", "Hilux"), so a destination with no vehicle
+ * yet says exactly that instead of guessing.
  */
 
 /** Where a share of an item is going, and how it gets there. */
@@ -31,8 +31,8 @@ export interface PullDestination {
   lineId: string;
   /** False once the list has been loaded: stock has left, so the count is fixed. */
   canPack: boolean;
-  /** The run carrying this destination, if it is on one yet. */
-  load: Load | undefined;
+  /** The vehicle carrying this destination, if it has one yet. */
+  vehicle: string | undefined;
 }
 
 export interface PullLine {
@@ -53,12 +53,55 @@ export interface PullLine {
 
 export interface PullList {
   lines: PullLine[];
-  /** Destinations with a packlist but no run yet — gear with no way to travel. */
+  /** Destinations with a packlist but no vehicle yet — gear with no way to travel. */
   unassigned: Destination[];
-  /** Runs for this event, in the order they were created. */
-  loads: Load[];
+  /** Every vehicle named on this event's destinations. */
+  vehicles: string[];
   destinationsCovered: number;
   packlistsCounted: number;
+}
+
+/**
+ * The vehicle a destination travels in: its own tag, or the run it was put on
+ * before vehicles were tags. The run is read, never written, so a transport
+ * plan made the old way still shows up until the tags take over.
+ */
+export function vehicleOf(destination: Destination, run?: Load): string | undefined {
+  const tag = destination.vehicle?.trim();
+  if (tag) return tag;
+  if (run) return run.vehicle.trim() || run.name.trim() || undefined;
+  return undefined;
+}
+
+/** Vehicle names in a sensible order: Van 2 before Van 10, unassigned last. */
+export function compareVehicles(a: string | undefined, b: string | undefined): number {
+  if (!a) return b ? 1 : 0;
+  if (!b) return -1;
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+/**
+ * Write the old transport plan onto the destinations as vehicle tags, once.
+ *
+ * A destination that already carries a tag is left alone; one on a run and
+ * without a tag takes the run's vehicle. Returns how many were tagged.
+ */
+export async function adoptVehiclesFromLoads(eventId: string): Promise<number> {
+  const destinations = alive(await db.destinations.where('eventId').equals(eventId).toArray());
+  const loads = alive(await db.loads.where('eventId').equals(eventId).toArray());
+  if (!loads.length) return 0;
+  const stops = alive(await db.loadStops.toArray());
+  const loadById = new Map(loads.map((load) => [load.id, load]));
+  let tagged = 0;
+  for (const destination of destinations) {
+    if (destination.vehicle?.trim()) continue;
+    const stop = stops.find((entry) => entry.destinationId === destination.id && loadById.has(entry.loadId));
+    const vehicle = stop ? vehicleOf(destination, loadById.get(stop.loadId)) : undefined;
+    if (!vehicle) continue;
+    await update(db.destinations, destination.id, { vehicle });
+    tagged += 1;
+  }
+  return tagged;
 }
 
 /** Everything the event needs out of the warehouse, one line per item. */
@@ -77,15 +120,15 @@ export async function pullListFor(eventId: string): Promise<PullList> {
   const itemById = new Map(items.map((item) => [item.id, item]));
   const counted = await countedItemIds();
 
-  // Destination to the run carrying it. A destination on two runs takes the
-  // first: splitting one station across vehicles is a transport decision the
-  // pull list reports rather than makes.
+  // Destination to the run carrying it, for destinations tagged before
+  // vehicles were tags. A destination on two runs takes the first.
   const loadById = new Map(loads.map((load) => [load.id, load]));
   const carriedBy = new Map<string, Load>();
   for (const stop of stops) {
     const load = loadById.get(stop.loadId);
     if (load && !carriedBy.has(stop.destinationId)) carriedBy.set(stop.destinationId, load);
   }
+  const vehicleFor = (destination: Destination) => vehicleOf(destination, carriedBy.get(destination.id));
 
   const packlistById = new Map(packlists.map((packlist) => [packlist.id, packlist]));
   const lines = alive(await db.packlistLines.toArray()).filter((line) =>
@@ -126,7 +169,7 @@ export async function pullListFor(eventId: string): Promise<PullList> {
       packlistId: packlist.id,
       lineId: line.id,
       canPack: !hasIssued(packlist.status),
-      load: carriedBy.get(destination.id),
+      vehicle: vehicleFor(destination),
     });
   }
 
@@ -155,9 +198,11 @@ export async function pullListFor(eventId: string): Promise<PullList> {
         (a.item?.name ?? '').localeCompare(b.item?.name ?? ''),
     ),
     unassigned: destinations.filter(
-      (destination) => withPacklists.has(destination.id) && !carriedBy.has(destination.id),
+      (destination) => withPacklists.has(destination.id) && !vehicleFor(destination),
     ),
-    loads,
+    vehicles: [...new Set(destinations.map(vehicleFor).filter((name): name is string => Boolean(name)))].sort(
+      compareVehicles,
+    ),
     destinationsCovered: withPacklists.size,
     packlistsCounted: packlists.length,
   };
@@ -165,7 +210,8 @@ export async function pullListFor(eventId: string): Promise<PullList> {
 
 /** One vehicle's share of the pull list. */
 export interface VehicleLoad {
-  load: Load | undefined;
+  /** The vehicle's tag, or undefined for gear with no vehicle yet. */
+  vehicle: string | undefined;
   /** Total per item for the destinations this vehicle carries. */
   lines: Array<{ item: Item | undefined; itemId: string; qtyRequired: number; qtyPacked: number }>;
   destinations: Destination[];
@@ -174,20 +220,20 @@ export interface VehicleLoad {
 /**
  * The same totals split by vehicle, for loading rather than picking.
  *
- * The undefined load at the end holds anything whose destination is not on a
- * run yet — gear that has been packed with no way of getting there, which is
- * worth seeing before race morning rather than on it.
+ * The undefined vehicle at the end holds anything whose destination has no
+ * vehicle yet — gear that has been packed with no way of getting there, which
+ * is worth seeing before race morning rather than on it.
  */
 export function byVehicle(list: PullList): VehicleLoad[] {
   const groups = new Map<string, VehicleLoad>();
-  const key = (load: Load | undefined) => load?.id ?? '__none';
+  const key = (vehicle: string | undefined) => vehicle ?? '__none';
 
   for (const line of list.lines) {
     for (const going of line.going) {
-      const id = key(going.load);
+      const id = key(going.vehicle);
       let group = groups.get(id);
       if (!group) {
-        group = { load: going.load, lines: [], destinations: [] };
+        group = { vehicle: going.vehicle, lines: [], destinations: [] };
         groups.set(id, group);
       }
       if (!group.destinations.some((entry) => entry.id === going.destination.id)) {
@@ -208,11 +254,7 @@ export function byVehicle(list: PullList): VehicleLoad[] {
     }
   }
 
-  const ordered = [...groups.values()].sort((a, b) => {
-    if (!a.load) return 1;
-    if (!b.load) return -1;
-    return a.load.createdAt.localeCompare(b.load.createdAt);
-  });
+  const ordered = [...groups.values()].sort((a, b) => compareVehicles(a.vehicle, b.vehicle));
   for (const group of ordered) {
     group.lines.sort(
       (a, b) =>

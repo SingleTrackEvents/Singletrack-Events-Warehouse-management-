@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { AssistantCheck } from '../components/AssistantCheck';
 import { ItemPicker } from '../components/ItemPicker';
 import { PackRuleSuggestions } from '../components/PackRuleSuggestions';
 import { SwipeToDelete } from '../components/SwipeToDelete';
-import { ConfirmSheet, Field, Pill, ProgressBar, Sheet, Stepper } from '../components/ui';
+import { MovePill } from '../components/Moves';
+import { ConfirmSheet, Field, ProgressBar, Sheet, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
 import { alive, byId, update } from '../db/repo';
@@ -14,59 +15,63 @@ import { useCategories, useCrewName, useEvent, usePacklist, usePacklistLines } f
 import { moveInVan, resetVanOrder, unloadOrder } from '../domain/truck';
 import { useSession } from '../hooks/sessionContext';
 import { can, isStationOnly } from '../sync/permissions';
+import { expectedHome, hasLeft, moveOf, moveState, sent, used } from '../domain/moves';
+import { formatTime } from '../domain/format';
 import {
-  NEXT_STATUS_ACTION,
-  PACKLIST_STATUS_LABELS,
   addLine,
   applyTemplate,
   clearConfirmations,
   clearNotes,
   hasIssued,
   isConfirmed,
-  nextStatus,
   progressFor,
   receiptFor,
   received,
   removeLine,
   removePacklist,
-  setStatus,
   statusIndex,
 } from '../domain/packlists';
 import { formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
 import { addShoppingLine, inputForItem } from '../domain/shopping';
 import { isKit, kitLines } from '../domain/kits';
-import type { PacklistLine, PacklistStatus, Unit } from '../db/types';
+import type { PacklistLine, Unit } from '../db/types';
 
 type Filter = 'todo' | 'all' | 'packed' | 'musthave';
+
+/**
+ * The jobs one list is worked through, in the order they happen.
+ *
+ * The shed packs it. The station checks it in off the van, counts what is
+ * left of the food and drink at the end of the day, and ticks the gear back
+ * into the van. The shed counts it in. Each job keeps its own number on the
+ * line, so a short crate stays visible from whichever side you look at it.
+ */
+type Mode = 'pack' | 'arrived' | 'count' | 'packdown' | 'home';
+
+const MODE_LABELS: Record<Mode, string> = {
+  pack: '📦 Pack',
+  arrived: '✅ Arrived',
+  count: '🔢 Count',
+  packdown: '🚐 Pack down',
+  home: '🏠 Home',
+};
 
 /** How long a completed line stays on the "To pack" list before it goes. */
 const LINGER_MS = 1000;
 
-const FILTER_LABELS: Record<Filter, string> = {
-  todo: 'To pack',
-  all: 'All',
-  packed: 'Packed',
-  musthave: 'Must-have',
+/** The same four filters, worded for each job. */
+const FILTER_LABELS: Record<Mode, Record<Filter, string>> = {
+  pack: { todo: 'To pack', all: 'All', packed: 'Packed', musthave: 'Must-have' },
+  arrived: { todo: 'To check', all: 'All', packed: 'Confirmed', musthave: 'Must-have' },
+  count: { todo: 'To count', all: 'All', packed: 'Counted', musthave: 'Must-have' },
+  packdown: { todo: 'To pack down', all: 'All', packed: 'In the van', musthave: 'Must-have' },
+  home: { todo: 'To count in', all: 'All', packed: 'Counted in', musthave: 'Must-have' },
 };
 
-/** The same four filters, worded for someone checking a delivery in. */
-const CHECK_FILTER_LABELS: Record<Filter, string> = {
-  todo: 'To check',
-  all: 'All',
-  packed: 'Confirmed',
-  musthave: 'Must-have',
-};
-
-const STATUS_TONE: Record<PacklistStatus, 'ok' | 'warn' | 'info' | 'accent' | 'default'> = {
-  draft: 'default',
-  picking: 'accent',
-  packed: 'ok',
-  loaded: 'info',
-  delivered: 'info',
-  returned: 'warn',
-  reconciled: 'ok',
-};
+function isMode(value: string | null): value is Mode {
+  return value !== null && value in MODE_LABELS;
+}
 
 /**
  * Packing mode.
@@ -100,9 +105,10 @@ export default function PacklistScreen() {
    * recording what actually turned up against what the list says.
    */
   const canPack = can(session, 'packlist:pack');
+  const canReceive = can(session, 'packlist:receive');
   const canManage = can(session, 'packlist:manage');
-  const canAdvance = canManage || can(session, 'load:deliver');
   const stationOnly = isStationOnly(session);
+  const [searchParams] = useSearchParams();
   // The assistant bills a real account, so it wants a signed-in admin, not
   // the one-phone-on-its-own mode where every check passes for want of anyone
   // to check.
@@ -112,7 +118,6 @@ export default function PacklistScreen() {
   const [picking, setPicking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [confirmAdvance, setConfirmAdvance] = useState<PacklistStatus>();
   const [notesOpen, setNotesOpen] = useState(false);
   const [removingLine, setRemovingLine] = useState<PacklistLine>();
   const [editingRequired, setEditingRequired] = useState<PacklistLine>();
@@ -176,21 +181,122 @@ export default function PacklistScreen() {
     );
   };
 
-  /** Whichever count this view is keeping: packed by the warehouse, or arrived. */
-  const countOn = (line: PacklistLine) => (canPack ? line.qtyPacked : received(line));
+  /*
+   * Van order. A two-stage event opens its station lists this way: the crew
+   * packing the van see load order (first in goes to the back), the station
+   * checking it in sees unload order (what they need first, at the top).
+   */
+  const event = useEvent(packlist?.eventId);
+  const truckStage = Boolean(event?.truckStage);
+  // Where this list is, read from its lines rather than from a status button.
+  const move = moveOf(lines ?? [], truckStage, packlist?.status);
+
+  /*
+   * Which job this screen is doing. The address can name one (the station's
+   * home screen sends people straight to Count), otherwise the shed packs
+   * until the list is at the station, and the station checks in until it is
+   * time to pack down.
+   */
+  const modes = useMemo(() => {
+    const available: Mode[] = [];
+    if (canPack) available.push('pack');
+    if (canReceive) available.push('arrived', 'count', 'packdown');
+    if (canPack && (move === 'home' || (packlist && statusIndex(packlist.status) >= statusIndex('delivered')))) {
+      available.push('home');
+    }
+    return available;
+  }, [canPack, canReceive, move, packlist]);
+  const [chosenMode, setChosenMode] = useState<Mode>();
+  const asked = searchParams.get('mode');
+  const mode: Mode = (() => {
+    if (chosenMode && modes.includes(chosenMode)) return chosenMode;
+    if (isMode(asked) && modes.includes(asked)) return asked;
+    if (canPack && move !== 'station' && move !== 'home') return 'pack';
+    if (move === 'home' && modes.includes('home')) return 'home';
+    if (move === 'home' && modes.includes('packdown')) return 'packdown';
+    return modes.includes('arrived') ? 'arrived' : modes[0] ?? 'pack';
+  })();
+  const returning = mode === 'home';
+  // Who is writing the station's counts, for a station with more than one phone.
+  const me = session?.displayName || crew;
+
+  /** Whichever count this job keeps on the line. */
+  const countOn = (line: PacklistLine): number => {
+    switch (mode) {
+      case 'pack':
+        return line.qtyPacked;
+      case 'arrived':
+        return received(line);
+      case 'count':
+      case 'packdown':
+        return line.qtyLeft ?? 0;
+      case 'home':
+        return line.qtyReturned;
+    }
+  };
+
+  /** The number this job is working towards on the line. */
+  const wantOn = (line: PacklistLine): number => {
+    switch (mode) {
+      case 'pack':
+        return line.qtyRequired;
+      case 'arrived':
+      case 'packdown':
+        return sent(line);
+      case 'count':
+        return received(line);
+      case 'home':
+        return expectedHome(line, Boolean(items?.get(line.itemId)?.consumable));
+    }
+  };
+
+  /** True when this job is finished with the line. */
+  const doneOn = (line: PacklistLine): boolean =>
+    mode === 'count' || mode === 'packdown' ? hasLeft(line) : countOn(line) >= wantOn(line);
+
+  /** Only the lines this job is about: the food and drink to count, the gear to pack down. */
+  const forMode = (line: PacklistLine): boolean => {
+    if (mode === 'count') return Boolean(items?.get(line.itemId)?.consumable);
+    if (mode === 'packdown') return !items?.get(line.itemId)?.consumable;
+    return true;
+  };
 
   /** Hold the row if this change is what completed the line. */
   const packTo = (line: PacklistLine, qty: number) => {
-    void update(db.packlistLines, line.id, canPack ? { qtyPacked: qty } : { qtyReceived: qty });
-    if (qty >= line.qtyRequired && countOn(line) < line.qtyRequired) linger(line.id);
+    const changes: Partial<PacklistLine> = (() => {
+      switch (mode) {
+        case 'pack':
+          return { qtyPacked: qty };
+        case 'arrived':
+          return { qtyReceived: qty };
+        case 'count':
+        case 'packdown':
+          return { qtyLeft: qty, countedBy: me };
+        case 'home':
+          return { qtyReturned: qty };
+      }
+    })();
+    // Two phones at one station: a count somebody else already entered is
+    // replaced, never silently.
+    if ((mode === 'count' || mode === 'packdown') && hasLeft(line) && line.countedBy && line.countedBy !== me) {
+      toast(`Replaced ${line.countedBy}'s count of ${line.qtyLeft}`, 'warn');
+    }
+    void update(db.packlistLines, line.id, changes);
+    if (!doneOn(line) && (mode === 'count' || mode === 'packdown' || qty >= wantOn(line))) linger(line.id);
   };
 
-  const progress = useMemo(
-    () => (canPack ? progressFor(lines ?? []) : receiptFor(lines ?? [])),
-    [lines, canPack],
-  );
-  const returning =
-    canPack && packlist ? statusIndex(packlist.status) >= statusIndex('delivered') : false;
+  const progress = useMemo(() => {
+    const mine = (lines ?? []).filter(forMode);
+    const done = mine.filter(doneOn).length;
+    const base = mode === 'pack' ? progressFor(mine) : receiptFor(mine);
+    return {
+      ...base,
+      linesDone: done,
+      linesTotal: mine.length,
+      percent: mine.length ? Math.round((done / mine.length) * 100) : 0,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, mode, items]);
 
   // What each reset would actually touch, so the offer can be honest about it
   // — and so a list with nothing to clear says so rather than pretending.
@@ -198,13 +304,13 @@ export default function PacklistScreen() {
   const notedLines = (lines ?? []).filter((line) => line.note).length;
 
   const visible = useMemo(() => {
-    const all = lines ?? [];
-    const got = (line: PacklistLine) => (canPack ? line.qtyPacked : received(line));
+    const all = (lines ?? []).filter(forMode);
     if (filter === 'all') return all;
-    if (filter === 'packed') return all.filter((line) => got(line) >= line.qtyRequired);
+    if (filter === 'packed') return all.filter(doneOn);
     if (filter === 'musthave') return all.filter((line) => line.mandatory);
-    return all.filter((line) => got(line) < line.qtyRequired || lingering.has(line.id));
-  }, [lines, filter, lingering, canPack]);
+    return all.filter((line) => !doneOn(line) || lingering.has(line.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, filter, lingering, mode, items]);
 
   /*
    * Lines grouped under their item's category, in catalogue order, so a
@@ -222,15 +328,9 @@ export default function PacklistScreen() {
     [visible, items, categories],
   );
 
-  /*
-   * Van order. A two-stage event opens its station lists this way: the crew
-   * packing the van see load order (first in goes to the back), the station
-   * checking it in sees unload order (what they need first, at the top).
-   */
-  const event = useEvent(packlist?.eventId);
   const [view, setView] = useState<'category' | 'van'>();
   const vanView = view ? view === 'van' : Boolean(event?.truckStage);
-  const loadView = canPack;
+  const loadView = mode === 'pack';
   const unloaded = useMemo(() => {
     const byId = new Map((categories ?? []).map((category) => [category.id, category]));
     return unloadOrder(lines ?? [], (line) => byId.get(items?.get(line.itemId)?.categoryId ?? ''));
@@ -258,26 +358,23 @@ export default function PacklistScreen() {
     return <Navigate to="/" replace />;
   }
 
-  const advanceTo = nextStatus(packlist.status);
-  const advanceLabel = NEXT_STATUS_ACTION[packlist.status];
-
-  /** Tapping a row is all-or-nothing; the stepper handles partial counts. */
+  /**
+   * Tapping a row is all-or-nothing; the stepper handles partial counts.
+   *
+   * Counting food is never all-or-nothing, so there the row does nothing and
+   * the number box is the control: a tap that quietly wrote "none left"
+   * would be a tap that wrote the wrong number most of the time.
+   */
   const toggleLine = (line: PacklistLine) => {
-    const full = countOn(line) >= line.qtyRequired;
-    packTo(line, full ? 0 : line.qtyRequired);
+    if (mode === 'count') return;
+    const full = doneOn(line) && countOn(line) >= wantOn(line);
+    if (mode === 'packdown') {
+      if (hasLeft(line)) void update(db.packlistLines, line.id, { qtyLeft: null, countedBy: me });
+      else packTo(line, wantOn(line));
+    } else {
+      packTo(line, full ? 0 : wantOn(line));
+    }
     if (!full && navigator.vibrate) navigator.vibrate(15);
-  };
-
-  const advance = async (status: PacklistStatus) => {
-    await setStatus(packlist, status, { by: crew });
-    const messages: Partial<Record<PacklistStatus, string>> = {
-      packed: 'Marked packed',
-      loaded: 'Loaded — stock deducted from the warehouse',
-      delivered: 'Marked delivered',
-      returned: 'Marked returned — count what came back',
-      reconciled: 'Returns booked back into stock',
-    };
-    toast(messages[status] ?? 'Updated');
   };
 
   /**
@@ -289,10 +386,16 @@ export default function PacklistScreen() {
     van?: { position: number; onUp?: () => void; onDown?: () => void },
   ) => {
             const item = items?.get(line.itemId);
+            const unit = item?.unit ?? 'each';
             const count = countOn(line);
-            const packed = count >= line.qtyRequired;
-            const short = count > 0 && !packed;
+            const packed = doneOn(line);
+            const short = !packed && (mode === 'count' || mode === 'packdown' ? false : count > 0);
             const kit = isKit(item);
+            const counting = mode === 'count' || mode === 'packdown';
+            const stamp =
+              counting && hasLeft(line)
+                ? `${line.countedBy ? `${line.countedBy} · ` : ''}${formatTime(line.updatedAt)}`
+                : null;
             const row = (
               <>
               <div
@@ -307,7 +410,7 @@ export default function PacklistScreen() {
                   }
                 }}
               >
-                {!returning ? (
+                {!returning && mode !== 'count' ? (
                   <span className="pack-check" aria-hidden>
                     ✓
                   </span>
@@ -371,9 +474,19 @@ export default function PacklistScreen() {
                       📦 {kitsOpen.has(line.id) ? 'Hide' : 'What’s inside'} · {item?.contents?.length}
                     </button>
                   ) : null}
+                  {/* The station's own numbers, where this job has them. */}
+                  {counting && isConfirmed(line) ? (
+                    <span className="row-sub">
+                      Arrived {formatQty(received(line), unit)}
+                      {mode === 'count' && used(line) !== null ? ` · used ${formatQty(used(line) as number, unit)}` : ''}
+                    </span>
+                  ) : counting ? (
+                    <span className="row-sub">Sent {formatQty(sent(line), unit)} · not checked in</span>
+                  ) : null}
+                  {stamp ? <span className="row-sub">Counted {stamp}</span> : null}
                   {/* What the station counted, so a short delivery is visible
                       back at the warehouse rather than only recorded. */}
-                  {canPack && isConfirmed(line) ? (
+                  {mode === 'pack' && isConfirmed(line) ? (
                     <span
                       className="row-sub"
                       style={
@@ -390,18 +503,29 @@ export default function PacklistScreen() {
                 {returning ? (
                   <span className="row-end">
                     <div className="tiny muted mb-2">
-                      Sent {formatQty(line.qtyPacked, item?.unit ?? 'each')}
+                      Expect {formatQty(wantOn(line), unit)}
                     </div>
                     <Stepper
                       label="returned"
                       value={line.qtyReturned}
-                      max={line.qtyPacked}
+                      max={sent(line)}
                       onChange={(value) => void update(db.packlistLines, line.id, { qtyReturned: value })}
+                    />
+                  </span>
+                ) : counting ? (
+                  <span className="row-end">
+                    <div className="tiny muted mb-2">{mode === 'count' ? 'left over' : 'back in the van'}</div>
+                    <Stepper
+                      label={mode === 'count' ? `left over ${item?.name ?? ''}` : `back in the van ${item?.name ?? ''}`}
+                      value={hasLeft(line) ? (line.qtyLeft as number) : null}
+                      placeholder="?"
+                      max={mode === 'packdown' ? wantOn(line) : undefined}
+                      onChange={(value) => packTo(line, value)}
                     />
                   </span>
                 ) : (
                   <span className="row-end">
-                    {canManage ? (
+                    {canManage && mode === 'pack' ? (
                       <button
                         type="button"
                         className="pack-qty need-btn mb-2"
@@ -412,16 +536,16 @@ export default function PacklistScreen() {
                           setEditingRequired(line);
                         }}
                       >
-                        of {formatQty(line.qtyRequired, item?.unit ?? 'each')}{' '}
+                        of {formatQty(wantOn(line), unit)}{' '}
                         <span aria-hidden>✎</span>
                       </button>
                     ) : (
                       <span className="pack-qty mb-2">
-                        of {formatQty(line.qtyRequired, item?.unit ?? 'each')}
+                        of {formatQty(wantOn(line), unit)}
                       </span>
                     )}
                     <Stepper
-                      label={canPack ? 'packed' : 'arrived'}
+                      label={mode === 'pack' ? 'packed' : 'arrived'}
                       value={count}
                       onChange={(value) => packTo(line, value)}
                     />
@@ -446,7 +570,7 @@ export default function PacklistScreen() {
             );
             // Swiping a line off the list is the crew's job; a driver checking a
             // delivery in gets the plain row.
-            return canManage && !returning ? (
+            return canManage && mode === 'pack' ? (
               <SwipeToDelete key={line.id} label="Remove" onDelete={() => setRemovingLine(line)}>
                 {row}
               </SwipeToDelete>
@@ -458,21 +582,33 @@ export default function PacklistScreen() {
   return (
     <Screen
       title={packlist.name}
-      subtitle={`${packlist.code} · ${PACKLIST_STATUS_LABELS[packlist.status]}`}
+      subtitle={`${packlist.code} · ${moveState(move, truckStage)}`}
       back={stationOnly ? '/' : `/events/${packlist.eventId}`}
     >
       <div className="card card-pad mb-3">
         <div className="spread mb-2">
           <span className="strong">
-            {progress.linesDone} / {progress.linesTotal} {canPack ? 'lines' : 'lines confirmed'}
+            {progress.linesDone} / {progress.linesTotal}{' '}
+            {mode === 'pack' ? 'lines' : mode === 'arrived' ? 'lines confirmed' : mode === 'count' ? 'counted' : mode === 'packdown' ? 'in the van' : 'counted in'}
           </span>
-          <Pill tone={STATUS_TONE[packlist.status]}>{PACKLIST_STATUS_LABELS[packlist.status]}</Pill>
+          <MovePill move={move} truckStage={truckStage} />
         </div>
         <ProgressBar percent={progress.percent} done={progress.percent === 100} />
-        {progress.blocking.length ? (
+        {(mode === 'pack' || mode === 'arrived') && progress.blocking.length ? (
           <p className="tiny mt-2" style={{ color: 'var(--danger)' }}>
             ⚠ {plural(progress.blocking.length, 'must-have item')}{' '}
-            {canPack ? 'still short' : 'not confirmed yet'}
+            {mode === 'pack' ? 'still short' : 'not confirmed yet'}
+          </p>
+        ) : null}
+        {mode === 'count' ? (
+          <p className="tiny muted mt-2">
+            End of day: how much of each is left. Used is worked out from what arrived. A box left
+            empty means not counted yet.
+          </p>
+        ) : null}
+        {mode === 'packdown' ? (
+          <p className="tiny muted mt-2">
+            Tap a line as it goes back in the van. The number is what came home from the station.
           </p>
         ) : null}
         {destination?.accessNotes ? (
@@ -493,8 +629,27 @@ export default function PacklistScreen() {
         ) : null}
       </div>
 
+      {modes.length > 1 ? (
+        <div className="chip-row mb-3" role="group" aria-label="Job">
+          {modes.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className="chip"
+              aria-pressed={mode === option}
+              onClick={() => {
+                setChosenMode(option);
+                setFilter('todo');
+              }}
+            >
+              {MODE_LABELS[option]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="chip-row mb-3">
-        {(Object.keys(FILTER_LABELS) as Filter[]).map((option) => (
+        {(Object.keys(FILTER_LABELS.pack) as Filter[]).map((option) => (
           <button
             key={option}
             type="button"
@@ -502,12 +657,12 @@ export default function PacklistScreen() {
             aria-pressed={filter === option}
             onClick={() => setFilter(option)}
           >
-            {(canPack ? FILTER_LABELS : CHECK_FILTER_LABELS)[option]}
+            {FILTER_LABELS[mode][option]}
           </button>
         ))}
       </div>
 
-      {canManage ? (
+      {canManage && mode === 'pack' ? (
         <div className="btn-row mb-3 no-print">
           <button type="button" className="btn btn-outline" onClick={() => setPicking(true)}>
             + Add items
@@ -524,7 +679,7 @@ export default function PacklistScreen() {
       ) : null}
 
       {/* The pack rules, while the list can still change before stock leaves. */}
-      {canManage && !hasIssued(packlist.status) && items ? (
+      {canManage && mode === 'pack' && !hasIssued(packlist.status) && items ? (
         <PackRuleSuggestions
           packlistId={packlist.id}
           lines={lines ?? []}
@@ -597,8 +752,18 @@ export default function PacklistScreen() {
       ) : (
         <div className="card card-pad center muted">
           {filter === 'todo' && progress.linesTotal
-            ? '🎉 Everything on this list is packed.'
-            : 'Nothing here yet.'}
+            ? mode === 'pack'
+              ? '🎉 Everything on this list is packed.'
+              : mode === 'arrived'
+                ? '🎉 Everything is checked in.'
+                : mode === 'count'
+                  ? '🎉 Every line is counted.'
+                  : mode === 'packdown'
+                    ? '🎉 Everything is back in the van.'
+                    : '🎉 Everything is counted in.'
+            : mode === 'count'
+              ? 'No food or drink on this list.'
+              : 'Nothing here yet.'}
         </div>
       )}
 
@@ -647,26 +812,6 @@ export default function PacklistScreen() {
             </>
           ) : null}
         </details>
-      ) : null}
-
-      {canAdvance && advanceTo && advanceLabel ? (
-        <div className="action-bar no-print">
-          <button
-            type="button"
-            className="btn btn-primary btn-lg"
-            onClick={() => {
-              // Going to `loaded` moves real stock, and short must-haves are
-              // worth a second look, so both get a confirmation step.
-              if (advanceTo === 'loaded' || (advanceTo === 'packed' && progress.blocking.length)) {
-                setConfirmAdvance(advanceTo);
-              } else {
-                void advance(advanceTo);
-              }
-            }}
-          >
-            {advanceLabel}
-          </button>
-        </div>
       ) : null}
 
       {picking ? (
@@ -835,39 +980,6 @@ export default function PacklistScreen() {
         />
       ) : null}
 
-      {confirmAdvance ? (
-        <ConfirmSheet
-          title={
-            confirmAdvance === 'loaded'
-              ? 'Mark as loaded?'
-              : `Mark packed with ${plural(progress.blocking.length, 'must-have')} short?`
-          }
-          body={
-            confirmAdvance === 'loaded' ? (
-              <>
-                This takes {plural(progress.qtyPacked, 'unit')} off the warehouse shelves and writes it
-                to the stock ledger.
-                {hasIssued(packlist.status) ? ' Stock was already issued, so nothing moves twice.' : ''}
-              </>
-            ) : (
-              <>
-                {progress.blocking.map((line) => (
-                  <div key={line.id}>
-                    • {items?.get(line.itemId)?.name} — {line.qtyPacked} of {line.qtyRequired}
-                  </div>
-                ))}
-              </>
-            )
-          }
-          confirmLabel="Confirm"
-          onCancel={() => setConfirmAdvance(undefined)}
-          onConfirm={() => {
-            const target = confirmAdvance;
-            setConfirmAdvance(undefined);
-            void advance(target);
-          }}
-        />
-      ) : null}
     </Screen>
   );
 }

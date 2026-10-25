@@ -1,7 +1,8 @@
 import { db } from '../db/db';
 import { alive, create, createMany, liveWhere, nextSort, softDelete, update } from '../db/repo';
-import type { Destination, Packlist, PacklistLine, PacklistStatus, Template, TemplateLine } from '../db/types';
+import type { Destination, Packlist, PacklistLine, PacklistStatus, RaceEvent, Template, TemplateLine } from '../db/types';
 import { makeCode } from './codes';
+import { nameKey } from './importMatch';
 import { recordMovements, round2 } from './stock';
 
 /**
@@ -347,21 +348,24 @@ export async function setStatus(
     for (const { line } of owed) await update(db.packlistLines, line.id, { qtyIssued: line.qtyPacked });
   }
 
-  // Reconciling books back whatever physically came home.
+  // Reconciling books back whatever physically came home, less anything the
+  // event's home count already booked, so nothing goes on the shelf twice.
   if (status === 'reconciled' && packlist.status !== 'reconciled') {
+    const owed = lines
+      .map((line) => ({ line, qty: round2(line.qtyReturned - (line.qtyBooked ?? 0)) }))
+      .filter(({ qty }) => qty > 0);
     await recordMovements(
-      lines
-        .filter((line) => line.qtyReturned > 0)
-        .map((line) => ({
-          itemId: line.itemId,
-          qty: line.qtyReturned,
-          reason: 'return' as const,
-          refType: 'packlist' as const,
-          refId: packlist.id,
-          note: packlist.name,
-          by: options.by ?? '',
-        })),
+      owed.map(({ line, qty }) => ({
+        itemId: line.itemId,
+        qty,
+        reason: 'return' as const,
+        refType: 'packlist' as const,
+        refId: packlist.id,
+        note: packlist.name,
+        by: options.by ?? '',
+      })),
     );
+    for (const { line } of owed) await update(db.packlistLines, line.id, { qtyBooked: line.qtyReturned });
   }
 
   await update(db.packlists, packlist.id, changes);
@@ -370,4 +374,131 @@ export async function setStatus(
 /** What was issued but never came back — consumed, lost or still on site. */
 export function outstanding(lines: PacklistLine[]): PacklistLine[] {
   return lines.filter((line) => !line.deletedAt && line.qtyPacked > line.qtyReturned);
+}
+
+/**
+ * The same station at the last edition of the event, by name.
+ *
+ * "Borough Huts" at GPT100 2025 is the best starting point for Borough Huts
+ * at GPT100 2026, far better than a template written for aid stations in
+ * general. Matched on the station's name across every earlier event, and only
+ * an edition that actually had a worked list counts.
+ */
+export async function previousEdition(
+  destination: Destination,
+): Promise<{ destination: Destination; event: RaceEvent; packlist: Packlist } | undefined> {
+  const events = alive(await db.events.toArray());
+  const here = events.find((event) => event.id === destination.eventId);
+  const earlier = events
+    .filter((event) => event.id !== destination.eventId)
+    .filter((event) => !here || event.startDate < here.startDate)
+    .sort((a, b) => b.startDate.localeCompare(a.startDate));
+  if (!earlier.length) return undefined;
+
+  const key = nameKey(destination.name);
+  const destinations = alive(await db.destinations.toArray()).filter(
+    (candidate) => candidate.id !== destination.id && nameKey(candidate.name) === key,
+  );
+  for (const event of earlier) {
+    for (const candidate of destinations.filter((entry) => entry.eventId === event.id)) {
+      const packlist = await packlistForDestination(candidate.id);
+      if (!packlist) continue;
+      const lines = await liveWhere(db.packlistLines, 'packlistId', packlist.id);
+      if (lines.length) return { destination: candidate, event, packlist };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The template a destination would start from, when no earlier edition exists.
+ *
+ * A per-site list first. The whole-event ones are also filed under the
+ * village, and starting a single destination from a 90-line season total is
+ * never what was meant. Then the one built for how a vehicle actually reaches
+ * this destination: a van-accessible station and a quad drop need different
+ * loads.
+ */
+export function defaultTemplateFor(destination: Destination, templates: Template[]): Template | undefined {
+  const ofType = templates.filter((template) => !template.deletedAt && template.appliesTo === destination.type);
+  const perSite = ofType.filter((template) => template.scope !== 'event');
+  return (
+    perSite.find((template) => template.suitsAccess?.includes(destination.access)) ??
+    perSite.find((template) => !template.suitsAccess) ??
+    perSite[0] ??
+    ofType[0]
+  );
+}
+
+/** Where a new list's lines came from, for the toast. */
+export type ListSource =
+  | { kind: 'edition'; from: string }
+  | { kind: 'template'; from: string }
+  | { kind: 'empty' };
+
+/**
+ * Start a station's list the moment the station exists.
+ *
+ * Copied from the same station's last edition where there was one, otherwise
+ * from the template for its type, otherwise empty. A template named outright
+ * skips the lookup; an explicit empty start skips both. Quantities, must-have
+ * flags, notes and van order carry across; what was packed last year does not.
+ */
+export async function startPacklist(
+  destination: Destination,
+  options: { templateId?: string | null; templates?: Template[]; name?: string } = {},
+): Promise<{ packlist: Packlist; source: ListSource }> {
+  const packlist = await createPacklist(destination, options.name);
+
+  if (options.templateId === null) return { packlist, source: { kind: 'empty' } };
+
+  const templates = options.templates ?? alive(await db.templates.toArray());
+  if (options.templateId) {
+    const template = templates.find((entry) => entry.id === options.templateId);
+    if (!template) return { packlist, source: { kind: 'empty' } };
+    await applyTemplate(packlist.id, template);
+    return { packlist, source: { kind: 'template', from: template.name } };
+  }
+
+  const previous = await previousEdition(destination);
+  if (previous) {
+    const lines = await liveWhere(db.packlistLines, 'packlistId', previous.packlist.id);
+    await createMany(
+      db.packlistLines,
+      lines
+        .sort((a, b) => a.sort - b.sort)
+        .map((line) => ({
+          packlistId: packlist.id,
+          itemId: line.itemId,
+          qtyRequired: line.qtyRequired,
+          qtyPacked: 0,
+          qtyReturned: 0,
+          vanOrder: line.vanOrder ?? null,
+          mandatory: line.mandatory,
+          containerId: null,
+          note: line.note,
+          sort: line.sort,
+        })),
+    );
+    return { packlist, source: { kind: 'edition', from: previous.event.name } };
+  }
+
+  const template = defaultTemplateFor(destination, templates);
+  if (template) {
+    await applyTemplate(packlist.id, template);
+    return { packlist, source: { kind: 'template', from: template.name } };
+  }
+  return { packlist, source: { kind: 'empty' } };
+}
+
+/** The toast after a list is started. */
+export function describeSource(source: ListSource): string {
+  switch (source.kind) {
+    case 'edition':
+      return `List started from ${source.from}`;
+    case 'template':
+      return `List started from the ${source.from} template`;
+    case 'empty':
+      return 'Empty list started';
+  }
 }

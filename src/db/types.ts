@@ -145,6 +145,8 @@ export interface RaceEvent extends SyncMeta {
   truckStage?: boolean;
   /** When the truck was last marked loaded, taking its stock out of the warehouse. */
   truckLoadedAt?: string | null;
+  /** When the returns were last booked back into the warehouse. */
+  truckUnloadedAt?: string | null;
 }
 
 /** What kind of place goods are going to. Drives which templates are suggested. */
@@ -206,6 +208,12 @@ export interface Destination extends SyncMeta {
    * written before food planning existed; both read as "none linked yet".
    */
   raceVisits?: RaceVisit[];
+  /**
+   * The vehicle this station's gear travels in: "Van 3", "Hilux", "Truck".
+   * A tag, nothing more. The pick list reads by it, and a station with none
+   * shows up as gear with no way to travel. Absent or blank means unassigned.
+   */
+  vehicle?: string;
 }
 
 /* ------------------------------------------------------------------- food -- */
@@ -312,8 +320,20 @@ export interface PacklistLine extends SyncMeta {
    * or the server would keep it.
    */
   qtyReceived?: number | null;
-  /** How many came back after the event. */
+  /** How many came back after the event, counted in at the shed. */
   qtyReturned: number;
+  /**
+   * The station's own count of what is going home: what was left over at the
+   * end of the day for a consumable, what went back in the van for gear.
+   *
+   * Written at the station, like `qtyReceived`, and read the same way: absent
+   * or null means nobody has counted this line, not that nothing is left.
+   * Used is `qtyReceived - qtyLeft`, and what the shed should expect back is
+   * this number when it exists.
+   */
+  qtyLeft?: number | null;
+  /** Who last wrote the station's counts, for a station with more than one phone. */
+  countedBy?: string;
   /**
    * Two-stage events: how many of this station's share went into the truck
    * at the warehouse. `qtyPacked` is then the van pack at the event.
@@ -325,6 +345,12 @@ export interface PacklistLine extends SyncMeta {
    * issues the difference, so nothing leaves the count twice.
    */
   qtyIssued?: number;
+  /**
+   * How many of `qtyReturned` have been booked back into warehouse stock.
+   * Counting it home again only books the difference, the same guard as
+   * `qtyIssued` on the way out.
+   */
+  qtyBooked?: number;
   /**
    * Position in the van, counted in unload order (what comes out first).
    * Absent follows the default setup order by category.

@@ -223,6 +223,15 @@ describe('volunteer', () => {
     expect(canEditField(scoped, 'packlistLines', 'qtyReceived')).toBe(true);
   });
 
+  it('counts what is left at the end of the day, and signs the count', () => {
+    expect(canEditField(scoped, 'packlistLines', 'qtyLeft')).toBe(true);
+    expect(canEditField(scoped, 'packlistLines', 'countedBy')).toBe(true);
+    expect(scrubChanges(scoped, 'packlistLines', { qtyLeft: 14, countedBy: 'Jess', qtyOnTruck: 9 })).toEqual({
+      qtyLeft: 14,
+      countedBy: 'Jess',
+    });
+  });
+
   it('cannot move the packlist through its statuses', () => {
     // Where the crate is is the warehouse's and the driver's account of it.
     expect(canEditField(scoped, 'packlists', 'status')).toBe(false);

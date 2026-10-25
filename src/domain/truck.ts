@@ -2,7 +2,7 @@ import { db } from '../db/db';
 import { alive, update } from '../db/repo';
 import { hasIssued } from './packlists';
 import { recordMovements, round2 } from './stock';
-import type { Category, PacklistLine } from '../db/types';
+import type { Category, Destination, Item, PacklistLine } from '../db/types';
 import type { PullDestination } from './warehouse';
 
 /**
@@ -29,14 +29,17 @@ export async function setOnTruck(shares: PullDestination[], onTruck: boolean): P
 }
 
 /**
- * Mark the truck loaded: take what is on it out of the warehouse count.
+ * The one place stock leaves the warehouse: the load is called loaded.
  *
- * Safe to press again after a late addition: each line only issues what is on
- * the truck beyond what has already gone out against it. Lists already loaded
- * at the warehouse took their own stock and are left alone.
+ * On a truck-then-vans event that is what is on the truck; on an event
+ * loaded straight into each station's vehicle it is what is packed. Safe to
+ * press again after a late addition: each line only issues what is loaded
+ * beyond what has already gone out against it. Lists loaded the old way, by
+ * their own status, took their own stock and are left alone.
  */
-export async function loadTruck(
+export async function issueLoaded(
   eventId: string,
+  truckStage: boolean,
   by = '',
 ): Promise<{ lines: number; units: number }> {
   const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray()).filter(
@@ -44,9 +47,10 @@ export async function loadTruck(
   );
   const byId = new Map(packlists.map((packlist) => [packlist.id, packlist]));
   const lines = alive(await db.packlistLines.toArray()).filter((line) => byId.has(line.packlistId));
+  const loaded = (line: PacklistLine) => (truckStage ? line.qtyOnTruck ?? 0 : line.qtyPacked);
 
   const owed = lines
-    .map((line) => ({ line, qty: round2((line.qtyOnTruck ?? 0) - (line.qtyIssued ?? 0)) }))
+    .map((line) => ({ line, qty: round2(loaded(line) - (line.qtyIssued ?? 0)) }))
     .filter(({ qty }) => qty > 0);
 
   await recordMovements(
@@ -56,14 +60,123 @@ export async function loadTruck(
       reason: 'issue' as const,
       refType: 'packlist' as const,
       refId: line.packlistId,
-      note: `Truck · ${byId.get(line.packlistId)?.name ?? ''}`,
+      note: `${truckStage ? 'Truck' : 'Loaded'} · ${byId.get(line.packlistId)?.name ?? ''}`,
       by,
     })),
   );
-  for (const { line } of owed) await update(db.packlistLines, line.id, { qtyIssued: line.qtyOnTruck });
+  for (const { line } of owed) await update(db.packlistLines, line.id, { qtyIssued: loaded(line) });
   await update(db.events, eventId, { truckLoadedAt: new Date().toISOString() });
 
   return { lines: owed.length, units: round2(owed.reduce((sum, { qty }) => sum + qty, 0)) };
+}
+
+/** Mark the truck loaded: take what is on it out of the warehouse count. */
+export async function loadTruck(eventId: string, by = ''): Promise<{ lines: number; units: number }> {
+  return issueLoaded(eventId, true, by);
+}
+
+/** One station's share of an item still on the truck. */
+export interface RemainderShare {
+  destination: Destination;
+  packlistId: string;
+  lineId: string;
+  onTruck: number;
+  inVan: number;
+  /** What the van should take: what went on for it, capped at what it needs. */
+  wants: number;
+}
+
+/** One item, as the truck empties into the vans. */
+export interface RemainderLine {
+  item: Item | undefined;
+  itemId: string;
+  onTruck: number;
+  inVans: number;
+  /** Still on the truck: on it, less what the vans have taken. */
+  remaining: number;
+  /** Stations whose van has less of this than went on the truck for them. */
+  short: RemainderShare[];
+  /** Left on the truck with no station waiting for it. */
+  spare: number;
+}
+
+/** One station's van, as a count of lines. */
+export interface VanSummary {
+  destination: Destination;
+  packlistId: string;
+  linesDone: number;
+  linesTotal: number;
+}
+
+/**
+ * What is still on the truck once the vans start taking from it.
+ *
+ * Ticking a line into a van moves that share from on-truck to in-van, so
+ * the remainder is a subtraction, not a count anyone keeps. Gear a station
+ * is still waiting for reads as short; gear with nowhere to go reads as
+ * spare. An empty remainder with every van packed is the truck being empty,
+ * which is the whole check.
+ */
+export async function remainderFor(eventId: string): Promise<{ lines: RemainderLine[]; vans: VanSummary[] }> {
+  const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray());
+  const destinations = alive(await db.destinations.where('eventId').equals(eventId).toArray());
+  const items = alive(await db.items.toArray());
+  const byDestination = new Map(destinations.map((destination) => [destination.id, destination]));
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const packlistById = new Map(packlists.map((packlist) => [packlist.id, packlist]));
+  const lines = alive(await db.packlistLines.toArray()).filter((line) => packlistById.has(line.packlistId));
+
+  const grouped = new Map<string, RemainderLine>();
+  const vans = new Map<string, VanSummary>();
+  for (const line of lines) {
+    const packlist = packlistById.get(line.packlistId)!;
+    const destination = byDestination.get(packlist.destinationId);
+    if (!destination) continue;
+    const onTruck = line.qtyOnTruck ?? 0;
+    const inVan = line.qtyPacked;
+    // What this van should take: what went on the truck for it, capped at
+    // what the station needs. Two extra on the truck are spare, not owed.
+    const wants = onTruck > 0 ? Math.min(onTruck, line.qtyRequired > 0 ? line.qtyRequired : onTruck) : line.qtyRequired;
+
+    let van = vans.get(packlist.id);
+    if (!van) {
+      van = { destination, packlistId: packlist.id, linesDone: 0, linesTotal: 0 };
+      vans.set(packlist.id, van);
+    }
+    van.linesTotal += 1;
+    if (wants > 0 && inVan >= wants) van.linesDone += 1;
+
+    if (onTruck <= 0 && inVan <= 0) continue;
+    let row = grouped.get(line.itemId);
+    if (!row) {
+      row = { item: itemById.get(line.itemId), itemId: line.itemId, onTruck: 0, inVans: 0, remaining: 0, short: [], spare: 0 };
+      grouped.set(line.itemId, row);
+    }
+    row.onTruck = round2(row.onTruck + onTruck);
+    row.inVans = round2(row.inVans + inVan);
+    if (onTruck > 0 && inVan < wants) {
+      row.short.push({ destination, packlistId: packlist.id, lineId: line.id, onTruck, inVan, wants });
+    }
+  }
+
+  for (const row of grouped.values()) {
+    row.remaining = round2(Math.max(0, row.onTruck - row.inVans));
+    const waiting = row.short.reduce((sum, share) => sum + (share.wants - share.inVan), 0);
+    row.spare = round2(Math.max(0, row.remaining - waiting));
+    row.short.sort((a, b) => a.destination.sort - b.destination.sort || a.destination.name.localeCompare(b.destination.name));
+  }
+
+  return {
+    lines: [...grouped.values()].sort(
+      (a, b) =>
+        Number(b.remaining > 0) - Number(a.remaining > 0) ||
+        (a.item?.bin ?? '').localeCompare(b.item?.bin ?? '') ||
+        (a.item?.name ?? '').localeCompare(b.item?.name ?? ''),
+    ),
+    vans: [...vans.values()].sort(
+      (a, b) => a.destination.sort - b.destination.sort || a.destination.name.localeCompare(b.destination.name),
+    ),
+  };
 }
 
 /**

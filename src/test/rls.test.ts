@@ -207,6 +207,15 @@ describe('what a volunteer can change on a line', () => {
     await db.close();
   });
 
+  it('records the end-of-day count and who made it', async () => {
+    const db = await withLine();
+    await push(db, { id: 'line-1', qtyRequired: 4, qtyPacked: 4, qtyReceived: 4, qtyLeft: 1, countedBy: 'Jess', qtyOnTruck: 9 });
+    const row = await stored(db);
+    expect(row).toMatchObject({ qtyLeft: 1, countedBy: 'Jess', qtyRequired: 4 });
+    expect(row.qtyOnTruck).toBeUndefined();
+    await db.close();
+  });
+
   it('cannot add a line of its own', async () => {
     const db = await withLine();
     const { rows } = await db.query<{ push_records: Record<string, number> }>(

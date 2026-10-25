@@ -267,11 +267,24 @@ export default function StockScreen() {
         </div>
       ) : null}
 
-      {canCount ? (
-        <div className="mt-4">
-          <Link to="/stocktake" className="btn btn-outline btn-block">
-            🔢 Stocktake
-          </Link>
+      {/* The shed's other jobs live here rather than on a tab of their own. */}
+      {canCount || can(session, 'shopping:manage') || can(session, 'template:manage') ? (
+        <div className="btn-row mt-4 no-print">
+          {canCount ? (
+            <Link to="/stocktake" className="btn btn-outline btn-sm">
+              🔢 Stocktake
+            </Link>
+          ) : null}
+          {can(session, 'shopping:manage') ? (
+            <Link to="/shopping" className="btn btn-outline btn-sm">
+              🛒 Shopping list
+            </Link>
+          ) : null}
+          {can(session, 'template:manage') ? (
+            <Link to="/templates" className="btn btn-outline btn-sm">
+              📋 Templates
+            </Link>
+          ) : null}
         </div>
       ) : null}
 
