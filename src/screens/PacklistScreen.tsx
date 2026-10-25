@@ -847,7 +847,7 @@ export default function PacklistScreen() {
                     ? '🎉 Everything is back in the van.'
                     : '🎉 Everything is counted in.'
             : mode === 'count'
-              ? 'No food or drink on this list.'
+              ? 'Nothing on this list gets used up.'
               : 'Nothing here yet.'}
         </div>
       )}

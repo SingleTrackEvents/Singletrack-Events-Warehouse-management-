@@ -477,7 +477,9 @@ function StationHome({
       mode: 'count',
       icon: '🔢',
       title: 'Count',
-      sub: food.length ? `${counted} of ${food.length} food and drink lines counted` : 'No food or drink on this list',
+      sub: food.length
+        ? `${counted} of ${food.length} used-up things counted (food, drink, sunscreen, paper towel)`
+        : 'Nothing on this list gets used up',
       done: food.length > 0 && counted === food.length,
     },
     {

@@ -152,7 +152,7 @@ const STEPS: Record<Role, IntroStep[]> = {
       title: 'Checking the delivery in',
       body: [
         'Tap Arrived. As each item comes off the van, tap its line to tick it off. If fewer arrived than the list says, use the − and + to record how many actually came. The warehouse sees the difference.',
-        'At the end of the day tap Count and put a number on what is left of each food and drink line. Then tap Pack down and tick the gear as it goes back in the van.',
+        'At the end of the day tap Count and put a number on what is left of everything that gets used up: food, drink, sunscreen, paper towel. Then tap Pack down and tick the gear as it goes back in the van.',
       ],
     },
     {
