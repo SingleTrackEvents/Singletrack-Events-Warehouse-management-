@@ -98,7 +98,12 @@ export default function ReturnsScreen() {
   }
 
   const home = list.lines.filter(isHome).length;
-  const unbooked = list.lines.reduce((sum, line) => sum + line.unbooked, 0);
+  // What booking now would do: on, off (a lowered count), and what stays off
+  // because more came home than went out.
+  const pending = list.lines.filter((line) => line.changed);
+  const goingOn = pending.reduce((sum, line) => sum + Math.max(0, line.toBook), 0);
+  const comingOff = pending.reduce((sum, line) => sum + Math.max(0, -line.toBook), 0);
+  const overIssued = list.lines.filter((line) => line.overIssued > 0);
   const missing = list.lines.filter((line) => line.gap < 0).length;
   const percent = list.lines.length ? Math.round((home / list.lines.length) * 100) : 0;
 
@@ -121,11 +126,11 @@ export default function ReturnsScreen() {
           <button
             type="button"
             className="btn btn-primary btn-block mt-3"
-            disabled={!unbooked}
+            disabled={!pending.length}
             onClick={() => setBooking(true)}
           >
-            {event.truckUnloadedAt ? 'Book the rest onto the shelf' : 'Unloaded: book it onto the shelf'}
-            {unbooked ? ` (${formatQty(unbooked, 'each')})` : ''}
+            {event.truckUnloadedAt ? 'Book the changes onto the shelf' : 'Unloaded: book it onto the shelf'}
+            {goingOn || comingOff ? ` (${formatQty(goingOn - comingOff, 'each')})` : ''}
           </button>
         ) : null}
       </div>
@@ -188,8 +193,16 @@ export default function ReturnsScreen() {
           title="Book the returns onto the shelf?"
           body={
             <>
-              {formatQty(unbooked, 'each')} counted home goes back into the warehouse count now, once. Anything
-              counted later can be booked the same way and only the extra goes on.
+              {goingOn ? `${formatQty(goingOn, 'each')} goes back into the warehouse count now, once. ` : ''}
+              {comingOff ? `${formatQty(comingOff, 'each')} comes back off, for counts lowered since they were booked. ` : ''}
+              Anything counted later can be booked the same way and only the difference changes.
+              {overIssued.length ? (
+                <span className="block mt-2" style={{ color: 'var(--warn)' }}>
+                  More came home than went out of the warehouse for{' '}
+                  {overIssued.map((line) => `${line.item?.name ?? 'an item'} (${formatQty(line.overIssued, line.item?.unit ?? 'each')})`).join(', ')}.
+                  The extra is not booked: count those on the shelf with a stocktake.
+                </span>
+              ) : null}
             </>
           }
           confirmLabel="Book it in"
@@ -197,7 +210,13 @@ export default function ReturnsScreen() {
           onConfirm={() => {
             setBooking(false);
             void bookReturns(event.id, session?.displayName ?? '').then(({ lines, units }) =>
-              toast(lines ? `Booked in: ${formatQty(units, 'each')} back on the shelf` : 'Nothing new to book'),
+              toast(
+                !lines
+                  ? 'Nothing new to book'
+                  : units < 0
+                    ? `Booked: ${formatQty(-units, 'each')} off the shelf`
+                    : `Booked in: ${formatQty(units, 'each')} back on the shelf`,
+              ),
             );
           }}
         />
@@ -253,8 +272,10 @@ function HomeRow({
               <Pill tone="warn">{-line.gap} short</Pill>
             ) : line.gap > 0 ? (
               <Pill tone="info">{line.gap} over</Pill>
-            ) : line.unbooked > 0 ? (
-              <span className="tiny muted">{line.unbooked} to book</span>
+            ) : line.overIssued > 0 ? (
+              <Pill tone="warn">{line.overIssued} more than went out</Pill>
+            ) : line.changed && line.toBook ? (
+              <span className="tiny muted">{line.toBook > 0 ? `${line.toBook} to book` : `${-line.toBook} to take off`}</span>
             ) : null}
           </span>
         </button>

@@ -204,8 +204,12 @@ describe('the count adds up across truck, vans, stations and home', () => {
     await bookReturns(event.id);
     expect(await onHand(esky)).toBe(5);
     await update(db.packlistLines, line.id, { qtyReturned: 3 });
+    // The screen's preview says what the booking will do before it does it.
+    const [preview] = (await homeListFor(event.id)).lines;
+    expect(preview).toMatchObject({ changed: true, toBook: -2 });
     await bookReturns(event.id);
     expect(await onHand(esky)).toBe(3);
+    expect((await homeListFor(event.id)).lines[0]).toMatchObject({ changed: false, toBook: 0 });
   });
 
   it('puts gear taken off the truck before it left back on the count', async () => {

@@ -49,7 +49,23 @@ export interface HomeLine {
    * at what went out, so this much needs a stocktake or a receipt instead.
    */
   overIssued: number;
+  /**
+   * What booking now would do to the shelf: positive goes back on, negative
+   * comes off (a count lowered after it was booked). Never past what went out.
+   */
+  toBook: number;
+  /** True when some share's count differs from what was last booked. */
+  changed: boolean;
   going: HomeShare[];
+}
+
+/**
+ * The change booking makes to one item's stock: what is counted home, capped
+ * at what went out, less what that came to last time. One rule for the
+ * screen's preview and the booking itself, so the two always agree.
+ */
+export function bookingDelta(issued: number, bookedBefore: number, bookedAfter: number): number {
+  return round2(Math.min(bookedAfter, issued) - Math.min(bookedBefore, issued));
 }
 
 export interface HomeList {
@@ -118,6 +134,7 @@ export async function homeListFor(eventId: string): Promise<HomeList> {
 
   const grouped = new Map<string, HomeLine>();
   const issuedByItem = new Map<string, number>();
+  const bookedByItem = new Map<string, number>();
   const stations = new Set<string>();
   for (const line of lines) {
     const packlist = packlistById.get(line.packlistId)!;
@@ -136,7 +153,8 @@ export async function homeListFor(eventId: string): Promise<HomeList> {
     let row = grouped.get(line.itemId);
     if (!row) {
       row = {
-        item, itemId: line.itemId, sent: 0, expected: 0, counted: 0, unbooked: 0, gap: 0, overIssued: 0, going: [],
+        item, itemId: line.itemId, sent: 0, expected: 0, counted: 0, unbooked: 0, gap: 0, overIssued: 0,
+        toBook: 0, changed: false, going: [],
       };
       grouped.set(line.itemId, row);
     }
@@ -144,6 +162,8 @@ export async function homeListFor(eventId: string): Promise<HomeList> {
     row.expected = round2(row.expected + expected);
     row.counted = round2(row.counted + line.qtyReturned);
     row.unbooked = round2(row.unbooked + Math.max(0, line.qtyReturned - (line.qtyBooked ?? 0)));
+    if (line.qtyReturned !== (line.qtyBooked ?? 0)) row.changed = true;
+    bookedByItem.set(line.itemId, round2((bookedByItem.get(line.itemId) ?? 0) + (line.qtyBooked ?? 0)));
     row.going.push({
       destination,
       packlistId: packlist.id,
@@ -156,7 +176,9 @@ export async function homeListFor(eventId: string): Promise<HomeList> {
 
   for (const row of grouped.values()) {
     row.gap = round2(row.counted - row.expected);
-    row.overIssued = round2(Math.max(0, row.counted - (issuedByItem.get(row.itemId) ?? 0)));
+    const issued = issuedByItem.get(row.itemId) ?? 0;
+    row.overIssued = round2(Math.max(0, row.counted - issued));
+    row.toBook = bookingDelta(issued, bookedByItem.get(row.itemId) ?? 0, row.counted);
     row.going.sort((a, b) => a.destination.sort - b.destination.sort || a.destination.name.localeCompare(b.destination.name));
   }
 
@@ -232,7 +254,7 @@ export async function bookReturns(
         bookedBefore + changing.reduce((sum, line) => sum + line.qtyReturned - (line.qtyBooked ?? 0), 0),
       );
       // On the shelf is what was counted home, never more than went out.
-      const qty = round2(Math.min(bookedAfter, issued) - Math.min(bookedBefore, issued));
+      const qty = bookingDelta(issued, bookedBefore, bookedAfter);
       touchedLines.push(...changing);
       if (qty === 0) continue;
       const first = changing[0];
@@ -242,7 +264,9 @@ export async function bookReturns(
         reason: 'return',
         refType: 'packlist',
         refId: first.packlistId,
-        note: `${qty < 0 ? 'Home count lowered' : 'Home'} · ${byId.get(first.packlistId)?.name ?? ''}`,
+        note: `${qty < 0 ? 'Home count lowered' : 'Home'} · ${
+          changing.length > 1 ? `${changing.length} stations` : byId.get(first.packlistId)?.name ?? ''
+        }`,
         by,
       });
     }
