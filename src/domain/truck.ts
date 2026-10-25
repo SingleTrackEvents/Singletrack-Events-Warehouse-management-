@@ -209,10 +209,25 @@ export async function remainderFor(eventId: string): Promise<{ lines: RemainderL
         (a.item?.bin ?? '').localeCompare(b.item?.bin ?? '') ||
         (a.item?.name ?? '').localeCompare(b.item?.name ?? ''),
     ),
-    vans: [...vans.values()].sort(
-      (a, b) => a.destination.sort - b.destination.sort || a.destination.name.localeCompare(b.destination.name),
-    ),
+    vans: [...vans.values()].sort(yardOrder),
   };
+}
+
+/**
+ * The order the yard packs vans in: by when each leaves Halls Gap, first
+ * out first. GPT's vans go in a fixed order from 03:30 Thursday, so packing
+ * by station order has the crew loading Saturday's van before Thursday's.
+ * Stations with no departure time follow, in course order.
+ */
+export function yardOrder(a: { destination: Destination }, b: { destination: Destination }): number {
+  const left = a.destination.schedule?.departsAt ?? '';
+  const right = b.destination.schedule?.departsAt ?? '';
+  if (left !== right) {
+    if (!left) return 1;
+    if (!right) return -1;
+    return left.localeCompare(right);
+  }
+  return a.destination.sort - b.destination.sort || a.destination.name.localeCompare(b.destination.name);
 }
 
 /**
