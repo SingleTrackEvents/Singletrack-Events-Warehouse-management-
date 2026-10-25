@@ -15,8 +15,9 @@ import {
   addShoppingLine,
   awaitingBooking,
   bookAllBought,
-  bookIntoStock,
+  bookLine,
   bought,
+  canonicalShop,
   clearBought,
   describeLine,
   groupByShop,
@@ -106,7 +107,12 @@ export default function ShoppingScreen() {
   const all = useMemo(() => lines ?? [], [lines]);
   const open = toBuy(all);
   const done = bought(all);
-  const waiting = awaitingBooking(all);
+  // An archived item is out of use: its purchase is not booked onto the shelf
+  // count, so it is not offered as waiting either.
+  const isArchived = (line: ShoppingLine) => Boolean(line.itemId && itemById.get(line.itemId)?.archived);
+  const waiting = awaitingBooking(all).filter((line) => !isArchived(line));
+  // Lines with a booking on its way, so a double tap on Book in is one tap.
+  const bookingNow = useRef(new Set<string>());
   const shops = useMemo(() => shopsUsed(all), [all]);
 
   // The "for" filter only earns its place once the list spans more than one
@@ -150,7 +156,11 @@ export default function ShoppingScreen() {
         toast(merged ? `${line.name} topped up to ${formatQty(line.qty, line.unit)}` : `${line.name} added`);
       });
     } else if (editing) {
-      void update(db.shoppingLines, editing.id, draft).then(() => toast('Line updated'));
+      // Spelt the way the rest of the list spells the shop, so it joins that group.
+      const others = all.filter((line) => line.id !== editing.id);
+      void update(db.shoppingLines, editing.id, { ...draft, shop: canonicalShop(draft.shop, others) }).then(() =>
+        toast('Line updated'),
+      );
     }
     setEditing(undefined);
   };
@@ -185,7 +195,34 @@ export default function ShoppingScreen() {
     setBooking(true);
     const count = await bookAllBought(all, crew);
     setBooking(false);
-    toast(count ? `${plural(count, 'line')} booked into stock` : 'Nothing to book in', count ? 'ok' : 'warn');
+    const archived = awaitingBooking(all).filter(isArchived).length;
+    const skipped = archived ? `. ${plural(archived, 'archived item')} left out` : '';
+    toast(
+      count ? `${plural(count, 'line')} booked into stock${skipped}` : `Nothing to book in${skipped}`,
+      count && !archived ? 'ok' : 'warn',
+    );
+  };
+
+  const bookOne = (line: ShoppingLine) => {
+    if (bookingNow.current.has(line.id)) return;
+    bookingNow.current.add(line.id);
+    void bookLine(line.id, crew)
+      .then((result) => {
+        if (result.status === 'booked') {
+          toast(
+            result.resolved
+              ? `${line.name} booked into stock and off the low-stock list`
+              : `${line.name} booked into stock`,
+          );
+        } else if (result.status === 'already') {
+          toast(`${line.name} is already booked in`);
+        } else if (result.status === 'archived') {
+          toast(`${line.name} is archived, so it was not booked in. Bring the item back first.`, 'warn');
+        } else {
+          toast('Could not book that in', 'warn');
+        }
+      })
+      .finally(() => bookingNow.current.delete(line.id));
   };
 
   return (
@@ -295,6 +332,8 @@ export default function ShoppingScreen() {
                       <span className="row-sub">
                         {isBooked(line) ? (
                           <Pill tone="ok">Booked into stock</Pill>
+                        ) : isArchived(line) ? (
+                          <Pill tone="warn">Bought · item archived, not booked in</Pill>
                         ) : line.itemId ? (
                           <Pill tone="info">Bought · not booked in yet</Pill>
                         ) : (
@@ -318,15 +357,15 @@ export default function ShoppingScreen() {
                       >
                         {formatQty(line.qty, line.unit)} <span aria-hidden>✎</span>
                       </button>
+                    ) : line.itemId && !isBooked(line) && isArchived(line) ? (
+                      <Pill tone="warn">Archived item</Pill>
                     ) : line.itemId && !isBooked(line) ? (
                       <button
                         type="button"
                         className="btn btn-outline btn-sm"
                         onClick={(event) => {
                           event.stopPropagation();
-                          void bookIntoStock(line.id, crew).then((movement) => {
-                            toast(movement ? `${line.name} booked into stock` : 'Could not book that in', movement ? 'ok' : 'warn');
-                          });
+                          bookOne(line);
                         }}
                       >
                         Book in
