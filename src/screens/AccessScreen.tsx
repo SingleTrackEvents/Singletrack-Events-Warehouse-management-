@@ -10,7 +10,7 @@ import { SUPABASE_CONFIGURED } from '../sync';
 import { clearAuthRedirect, getAuthRedirect } from '../sync/authRedirect';
 import { useDestinations, useEvents } from '../hooks/useDb';
 import { describeRole } from '../sync/permissions';
-import { ROLE_BLURBS, ROLE_LABELS, SyncError } from '../sync/types';
+import { ROLE_BLURBS, ROLE_LABELS, SyncError, defaultInviteExpiryDay, weekendSunday } from '../sync/types';
 import { MIN_PASSWORD_LENGTH, passwordProblem } from '../sync/passwords';
 import type { Invite, Member, Passkey as PasskeyType, Scope } from '../sync/types';
 import { AccessEditor } from '../components/AccessEditor';
@@ -366,7 +366,7 @@ export default function AccessScreen() {
           title="Sign out?"
           body={
             pending
-              ? `${plural(pending, 'change')} has not reached the server yet. Sync first or it stays on this device.`
+              ? `${plural(pending, 'change')} ${pending === 1 ? 'has' : 'have'} not reached the server yet. Sync first or ${pending === 1 ? 'it stays' : 'they stay'} on this device.`
               : 'Your data stays on this device.'
           }
           confirmLabel="Sign out"
@@ -1188,13 +1188,6 @@ function daysFromNow(days: number): string {
   return localDate(date);
 }
 
-/** The Sunday coming, or today if it is Sunday: the end of a race weekend. */
-function comingSunday(): string {
-  const date = new Date();
-  date.setDate(date.getDate() + ((7 - date.getDay()) % 7));
-  return localDate(date);
-}
-
 /**
  * When an invite stops: a day on the calendar, a shortcut, or no end at all.
  * Shared by the new invite sheet and "Change end date".
@@ -1213,7 +1206,7 @@ function ExpiryField({
   onNoExpiry: (noExpiry: boolean) => void;
 }) {
   const quick = [
-    { label: 'This Sunday', day: comingSunday() },
+    { label: new Date().getDay() === 0 ? 'Next Sunday' : 'This Sunday', day: weekendSunday(today) },
     { label: '1 week', day: daysFromNow(7) },
     { label: '1 month', day: daysFromNow(30) },
   ];
@@ -1371,12 +1364,17 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const { backend, session } = useSession();
   const toast = useToast();
   const [draft, setDraft] = useAccessDraft(null);
-  const [expiryDay, setExpiryDay] = useState(() => daysFromNow(4));
+  const [today] = useState(() => localDate(new Date()));
+  const events = useEvents();
+  // Until a day is picked by hand, the invite lasts to the end of the chosen
+  // event, and follows it if the event changes.
+  const [pickedDay, setPickedDay] = useState<string>();
+  const expiryDay =
+    pickedDay ?? defaultInviteExpiryDay(events?.find((event) => event.id === draft.eventId), today);
   const [noExpiry, setNoExpiry] = useState(false);
   const [label, setLabel] = useState('');
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const [today] = useState(() => localDate(new Date()));
   const autoLabel = useAutoLabel(draft);
 
   const ready = draftReady(draft) && expiryOk(expiryDay, noExpiry, today) && !busy;
@@ -1422,7 +1420,7 @@ function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
           day={expiryDay}
           noExpiry={noExpiry}
           today={today}
-          onDay={setExpiryDay}
+          onDay={setPickedDay}
           onNoExpiry={setNoExpiry}
         />
 

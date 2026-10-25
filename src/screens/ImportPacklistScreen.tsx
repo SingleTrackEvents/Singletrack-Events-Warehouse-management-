@@ -5,10 +5,9 @@ import { ItemPicker } from '../components/ItemPicker';
 import { EmptyState, Field, Pill } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { useCategories, useDestinations, useEvents, useItems } from '../hooks/useDb';
-import { interpretGrids } from '../domain/importGrid';
 import type { Grid } from '../domain/importGrid';
 import { fileKind, readSpreadsheet } from '../domain/spreadsheet';
-import { buildPlan, commitImport } from '../domain/packlistImport';
+import { LARGE_QTY, commitImport, planImport } from '../domain/packlistImport';
 import type { ImportPlan, ItemPlan, PlacePlan } from '../domain/packlistImport';
 import { formatQty, plural } from '../domain/format';
 import type { Item } from '../db/types';
@@ -66,11 +65,16 @@ export default function ImportPacklistScreen() {
   const rebuild = (sources: Grid[], chosen: ReadonlySet<string>) => {
     if (!eventId || !destinations || !items || !categories) return;
     const selected = sources.filter((grid) => chosen.has(grid.name));
-    const parsed = interpretGrids(selected, {
-      placeNames: destinations.map((destination) => destination.name),
-      categoryNames: categories.map((category) => category.name),
-    });
-    setPlan(buildPlan(parsed, { eventId, destinations, items, categories }));
+    setPlan(
+      planImport(
+        selected,
+        {
+          placeNames: destinations.map((destination) => destination.name),
+          categoryNames: categories.map((category) => category.name),
+        },
+        { eventId, destinations, items, categories },
+      ),
+    );
   };
 
   const load = async (file: File) => {
@@ -156,7 +160,7 @@ export default function ImportPacklistScreen() {
     return destinationName(place.destinationId);
   };
 
-  const needsLook = (item: ItemPlan) => item.action === 'create' || item.confidence !== 'sure';
+  const needsLook = (item: ItemPlan) => item.action === 'create' || item.confidence !== 'sure' || item.large;
   const toCheck = plan?.items.filter((item) => item.action !== 'skip' && needsLook(item)) ?? [];
   const matched = plan?.items.filter((item) => item.action !== 'skip' && !needsLook(item)) ?? [];
   const skipped = plan?.items.filter((item) => item.action === 'skip') ?? [];
@@ -347,6 +351,31 @@ export default function ImportPacklistScreen() {
             </section>
           ) : null}
 
+          {plan.problems.length ? (
+            <section className="section">
+              <div className="section-head">
+                <h2>Rows not brought in</h2>
+                <span className="small muted">{plan.problems.length}</span>
+              </div>
+              <div className="list">
+                {plan.problems.map((problem) => (
+                  <div key={`${problem.where}:${problem.text}`} className="row row-static">
+                    <span className="row-body">
+                      <span className="row-title">
+                        {problem.name || problem.where} <Pill tone="warn">skipped</Pill>
+                      </span>
+                      <span className="row-sub">
+                        “{problem.text}”{' '}
+                        {problem.reason === 'negative' ? 'is below zero' : 'is not a number'} · {problem.where}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="tiny muted mt-2">Fix them in the file and import it again, or add them to the list by hand.</p>
+            </section>
+          ) : null}
+
           {toCheck.length ? (
             <section className="section">
               <div className="section-head">
@@ -511,7 +540,13 @@ function ItemRow({
           ) : item.confidence === 'likely' ? (
             <Pill tone="warn"> guessed</Pill>
           ) : null}
+          {item.large ? <Pill tone="danger"> check the number</Pill> : null}
         </span>
+        {item.large ? (
+          <span className="row-sub">
+            More than {LARGE_QTY.toLocaleString('en-AU')} at one station. Check it is not a typo.
+          </span>
+        ) : null}
         {item.alsoWritten.length ? (
           <span className="row-sub">Also written as {item.alsoWritten.join(', ')}</span>
         ) : null}
@@ -550,6 +585,11 @@ function ItemRow({
             onClick={() => onChange({ action: 'create', itemId: null, confidence: 'none', score: 0 })}
           >
             Make new
+          </button>
+        ) : null}
+        {item.large ? (
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => onChange({ large: false })}>
+            The number is right
           </button>
         ) : null}
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange({ action: 'skip' })}>

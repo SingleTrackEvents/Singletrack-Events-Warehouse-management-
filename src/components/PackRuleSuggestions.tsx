@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useToast } from './toastContext';
 import { addLine } from '../domain/packlists';
 import { suggestionsFor, type Suggestion } from '../domain/packRules';
@@ -28,6 +28,9 @@ export function PackRuleSuggestions({
   const toast = useToast();
   const storageKey = `packRules:dismissed:${packlistId}`;
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => readDismissed(storageKey));
+  // One add at a time: a double tap would otherwise top the line up twice.
+  const adding = useRef(false);
+  const [busy, setBusy] = useState(false);
 
   const suggestions = useMemo(
     () => suggestionsFor(lines, items, destinationType, eventId).filter((entry) => !dismissed.has(entry.key)),
@@ -36,7 +39,15 @@ export function PackRuleSuggestions({
   if (!suggestions.length) return null;
 
   const add = async (entries: Suggestion[]) => {
-    for (const entry of entries) await addLine(packlistId, entry.item.id, entry.qty);
+    if (adding.current) return;
+    adding.current = true;
+    setBusy(true);
+    try {
+      for (const entry of entries) await addLine(packlistId, entry.item.id, entry.qty);
+    } finally {
+      adding.current = false;
+      setBusy(false);
+    }
     toast(entries.length === 1 ? `Added ${entries[0].item.name}` : `Added ${entries.length} items`);
   };
 
@@ -61,7 +72,7 @@ export function PackRuleSuggestions({
       </summary>
       {suggestions.length > 1 ? (
         <div className="mt-2">
-          <button type="button" className="btn btn-outline btn-sm" onClick={() => void add(suggestions)}>
+          <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => void add(suggestions)}>
             Add all
           </button>
         </div>
@@ -78,7 +89,7 @@ export function PackRuleSuggestions({
             </span>
           </span>
           <span className="btn-row" style={{ flexShrink: 0 }}>
-            <button type="button" className="btn btn-outline btn-sm" onClick={() => void add([entry])}>
+            <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => void add([entry])}>
               Add
             </button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => dismiss(entry)}>

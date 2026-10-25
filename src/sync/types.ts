@@ -212,6 +212,83 @@ export function inviteExpiry(input: CreateInviteInput, now = Date.now()): string
   return new Date(now + days * 86_400_000).toISOString();
 }
 
+/**
+ * The invites still working, and the people, that open one station. Asked
+ * before the station is removed: each of them would be left pointing at a
+ * station that is gone.
+ */
+export function accessPointingAt(
+  destinationId: string,
+  invites: Invite[],
+  members: Member[],
+  now = Date.now(),
+): { invites: number; members: number } {
+  const live = (expiresAt: string | null) => !expiresAt || new Date(expiresAt).getTime() > now;
+  return {
+    invites: invites.filter(
+      (invite) => invite.scope.destinationId === destinationId && !invite.revokedAt && live(invite.expiresAt),
+    ).length,
+    members: members.filter((member) => member.scope.destinationId === destinationId && live(member.expiresAt))
+      .length,
+  };
+}
+
+/** Calendar days ("2026-11-14") as the date input gives them. */
+function addDays(day: string, days: number): string {
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, date + days)).toISOString().slice(0, 10);
+}
+
+/** How long an invite for no event in particular lasts unless told otherwise. */
+export const INVITE_DEFAULT_DAYS = 30;
+
+/**
+ * The day a new invite should stop working, before anyone picks one.
+ *
+ * An invite for an event lasts to the end of its last day, so a QR printed a
+ * fortnight out still works on race morning. With no event chosen, or one
+ * already over, a month.
+ */
+export function defaultInviteExpiryDay(
+  event: { startDate: string; endDate?: string | null } | undefined,
+  today: string,
+): string {
+  const last = event ? event.endDate || event.startDate : '';
+  if (last && last >= today) return last;
+  return addDays(today, INVITE_DEFAULT_DAYS);
+}
+
+/**
+ * The Sunday a race weekend ends on, for the quick date: this coming Sunday,
+ * or next week's when today already is Sunday, since an invite ending tonight
+ * is never what was meant.
+ */
+export function weekendSunday(today: string): string {
+  const [year, month, date] = today.split('-').map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, date)).getUTCDay();
+  return addDays(today, (7 - weekday) % 7 || 7);
+}
+
+/**
+ * An invite code the way it is stored, from however it was typed or read out.
+ *
+ * Over the radio "4Q8K-TP4L" arrives as "4q8k tp4l" or "4Q8KTP4L": the
+ * spaces go, the letters go up, and eight characters get their dash back.
+ * Anything else is passed on uppercased, so an odd old code still reaches the
+ * server to be judged there.
+ */
+export function normaliseInviteCode(raw: string): string {
+  const compact = raw.replace(/\s+/g, '').toUpperCase();
+  const bare = compact.replace(/-/g, '');
+  return /^[A-Z0-9]{8}$/.test(bare) ? `${bare.slice(0, 4)}-${bare.slice(4)}` : compact;
+}
+
+/** Two codes are the same invite when their letters and digits match. */
+export function sameInviteCode(a: string, b: string): boolean {
+  const key = (code: string) => code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return key(a) === key(b);
+}
+
 /* ------------------------------------------------------------ change sets -- */
 
 /** One table's worth of rows moving in either direction. */

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../hooks/sessionContext';
-import { initials } from '../domain/format';
+import { initials, plural } from '../domain/format';
 
 /**
  * Who you are and whether your work is safe, on every screen.
@@ -36,7 +36,7 @@ export function AccountChip() {
           state === 'ok'
             ? 'Everything synced'
             : state === 'pending'
-              ? `${pending} changes waiting to sync`
+              ? `${plural(pending, 'change')} waiting to sync`
               : state === 'busy'
                 ? 'Syncing now'
                 : 'Sync problem'

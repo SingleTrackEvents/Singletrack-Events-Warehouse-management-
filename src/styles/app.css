@@ -1192,3 +1192,10 @@ button, input, select, textarea {
 .stocktake-line-actions { display: flex; gap: var(--space-1); }
 
 .stocktake-note { flex: 1 0 100%; }
+
+/* admin flows */
+/* On a laptop the bottom nav is still there, so the page has to end above it
+   or the last buttons (the warehouse list's CSV and Print) sit underneath. */
+@media (min-width: 820px) {
+  .app-main { padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + var(--space-10)); }
+}

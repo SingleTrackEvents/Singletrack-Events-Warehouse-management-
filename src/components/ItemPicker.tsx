@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Sheet, Stepper } from './ui';
 import { useSearch } from '../hooks/useSearch';
 import { useCategories, useItems } from '../hooks/useDb';
@@ -43,6 +43,10 @@ export function ItemPicker({
   const [onlyCategory, setOnlyCategory] = useState(Boolean(categoryId));
   // The quantity doubles as the selection: absent or zero means not picked.
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  // The sheet hands its picks over once. A second tap on Add before the sheet
+  // has closed would add every pick again.
+  const handedOver = useRef(false);
+  const [done, setDone] = useState(false);
 
   const excluded = new Set(exclude);
   const available = (items ?? []).filter(
@@ -81,8 +85,13 @@ export function ItemPicker({
           <button
             type="button"
             className="btn btn-primary"
-            disabled={!picks.length}
-            onClick={() => onPick(picks)}
+            disabled={!picks.length || done}
+            onClick={() => {
+              if (handedOver.current) return;
+              handedOver.current = true;
+              setDone(true);
+              onPick(picks);
+            }}
           >
             {picks.length ? `Add ${picks.length}` : 'Add'}
           </button>

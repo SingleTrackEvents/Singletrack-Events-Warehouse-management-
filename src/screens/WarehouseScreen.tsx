@@ -13,7 +13,7 @@ import { issueLoaded, setOnTruck } from '../domain/truck';
 import { downloadCsv, slugify } from '../domain/backup';
 import { formatDateTime, formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
-import type { PullDestination, PullLine } from '../domain/warehouse';
+import type { PullDestination, PullLine, PullList } from '../domain/warehouse';
 
 type Filter = 'all' | 'todo' | 'short' | 'noRun';
 
@@ -23,6 +23,45 @@ const FILTER_LABELS: Record<Filter, string> = {
   short: 'Short in the warehouse',
   noRun: 'No vehicle yet',
 };
+
+/**
+ * One spelling for each vehicle before the list is split by vehicle.
+ *
+ * Vehicles are typed per station, so "Pantech #1" on one and "pantech #1 " on
+ * another are the same truck and must be one load, not two. Matched without
+ * case or extra spaces; the group takes the spelling most stations use.
+ */
+function oneSpellingPerVehicle(list: PullList): PullList {
+  const key = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+  const counts = new Map<string, Map<string, number>>();
+  for (const line of list.lines) {
+    for (const going of line.going) {
+      if (!going.vehicle) continue;
+      const spelling = going.vehicle.trim().replace(/\s+/g, ' ');
+      const forKey = counts.get(key(spelling)) ?? new Map<string, number>();
+      forKey.set(spelling, (forKey.get(spelling) ?? 0) + 1);
+      counts.set(key(spelling), forKey);
+    }
+  }
+  const chosen = new Map<string, string>();
+  for (const [name, spellings] of counts) {
+    // A tie goes to the one written with capitals: "Pantech #1" over "pantech #1".
+    const capitals = (text: string) => text.replace(/[^A-Z]/g, '').length;
+    const [best] = [...spellings].sort(
+      (a, b) => b[1] - a[1] || capitals(b[0]) - capitals(a[0]) || a[0].localeCompare(b[0]),
+    );
+    chosen.set(name, best[0]);
+  }
+  return {
+    ...list,
+    lines: list.lines.map((line) => ({
+      ...line,
+      going: line.going.map((going) =>
+        going.vehicle ? { ...going, vehicle: chosen.get(key(going.vehicle)) ?? going.vehicle } : going,
+      ),
+    })),
+  };
+}
 
 /**
  * One list for the whole event, for the person standing in the warehouse.
@@ -87,7 +126,7 @@ export default function WarehouseScreen() {
     ...line.going.map((entry) => entry.destination.name),
   ]);
 
-  const vehicles = useMemo(() => (list ? byVehicle(list) : []), [list]);
+  const vehicles = useMemo(() => (list ? byVehicle(oneSpellingPerVehicle(list)) : []), [list]);
 
   /*
    * Sections by category, keeping bin order inside each one. The picking pass
