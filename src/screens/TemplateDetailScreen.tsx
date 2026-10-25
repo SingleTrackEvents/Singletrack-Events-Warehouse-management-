@@ -6,9 +6,8 @@ import { ItemPicker } from '../components/ItemPicker';
 import { ConfirmSheet, Pill, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { alive, byId, createMany, liveWhere, nextSort, softDelete, softDeleteChildren, update } from '../db/repo';
+import { alive, byId, createMany, liveWhere, nextSort, restore, softDelete, softDeleteChildren, update } from '../db/repo';
 import { DESTINATION_LABELS, plural } from '../domain/format';
-import type { TemplateLine } from '../db/types';
 
 /** Edit one template's contents. Quantities here are the starting point, not a rule. */
 export default function TemplateDetailScreen() {
@@ -27,7 +26,6 @@ export default function TemplateDetailScreen() {
   const items = useLiveQuery(async () => byId(alive(await db.items.toArray())), []);
 
   const [picking, setPicking] = useState(false);
-  const [removing, setRemoving] = useState<TemplateLine>();
   const [deleting, setDeleting] = useState(false);
 
   if (!template) {
@@ -85,7 +83,13 @@ export default function TemplateDetailScreen() {
                       type="button"
                       className="btn btn-ghost btn-sm"
                       aria-label="Remove line"
-                      onClick={() => setRemoving(line)}
+                      onClick={() =>
+                        void softDelete(db.templateLines, line.id).then(() =>
+                          toast(`${items?.get(line.itemId)?.name ?? 'Line'} removed`, 'ok', {
+                            undo: () => restore(db.templateLines, line.id),
+                          }),
+                        )
+                      }
                     >
                       🗑
                     </button>
@@ -143,20 +147,6 @@ export default function TemplateDetailScreen() {
               toast(`${plural(picks.length, 'item')} added`);
               setPicking(false);
             });
-          }}
-        />
-      ) : null}
-
-      {removing ? (
-        <ConfirmSheet
-          title="Remove this line?"
-          body={items?.get(removing.itemId)?.name ?? ''}
-          confirmLabel="Remove"
-          tone="danger"
-          onCancel={() => setRemoving(undefined)}
-          onConfirm={() => {
-            void softDelete(db.templateLines, removing.id);
-            setRemoving(undefined);
           }}
         />
       ) : null}

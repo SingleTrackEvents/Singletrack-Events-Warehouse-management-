@@ -51,15 +51,21 @@ export function PackRuleSuggestions({
   };
 
   return (
-    <div className="card card-pad mb-3 no-print">
-      <div className="spread mb-2">
-        <span className="strong">Usually goes with this list</span>
-        {suggestions.length > 1 ? (
+    // Folded away under the list: the lines to pack are the job, and these are
+    // a second thought about them.
+    <details className="card card-pad mt-3 no-print">
+      <summary className="small strong">
+        {suggestions.length === 1
+          ? '1 thing usually goes with this list'
+          : `${suggestions.length} things usually go with this list`}
+      </summary>
+      {suggestions.length > 1 ? (
+        <div className="mt-2">
           <button type="button" className="btn btn-outline btn-sm" onClick={() => void add(suggestions)}>
             Add all
           </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       {suggestions.map((entry) => (
         <div key={entry.key} className="spread mt-2" style={{ alignItems: 'flex-start', gap: 8 }}>
           <span className="row-body">
@@ -72,7 +78,7 @@ export function PackRuleSuggestions({
             </span>
           </span>
           <span className="btn-row" style={{ flexShrink: 0 }}>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => void add([entry])}>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => void add([entry])}>
               Add
             </button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => dismiss(entry)}>
@@ -81,7 +87,7 @@ export function PackRuleSuggestions({
           </span>
         </div>
       ))}
-    </div>
+    </details>
   );
 }
 

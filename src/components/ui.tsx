@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ToastContext } from './toastContext';
-import type { ToastTone } from './toastContext';
+import type { ToastOptions, ToastTone } from './toastContext';
 
 /** Shared building blocks, all sized for thumbs rather than mouse pointers. */
 
@@ -11,20 +11,30 @@ interface Toast {
   id: number;
   message: string;
   tone: ToastTone;
+  undo?: () => unknown;
 }
+
+/** Long enough to read; with an Undo, long enough to find the button too. */
+const TOAST_MS = 3200;
+const UNDO_TOAST_MS = 6500;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seq = useRef(0);
 
-  const push = useCallback((message: string, tone: ToastTone = 'ok') => {
-    seq.current += 1;
-    const toast = { id: seq.current, message, tone };
-    setToasts((current) => [...current, toast]);
-    setTimeout(() => {
-      setToasts((current) => current.filter((entry) => entry.id !== toast.id));
-    }, 3200);
+  const dismiss = useCallback((id: number) => {
+    setToasts((current) => current.filter((entry) => entry.id !== id));
   }, []);
+
+  const push = useCallback(
+    (message: string, tone: ToastTone = 'ok', options: ToastOptions = {}) => {
+      seq.current += 1;
+      const toast = { id: seq.current, message, tone, undo: options.undo };
+      setToasts((current) => [...current, toast]);
+      setTimeout(() => dismiss(toast.id), options.undo ? UNDO_TOAST_MS : TOAST_MS);
+    },
+    [dismiss],
+  );
 
   return (
     <ToastContext.Provider value={push}>
@@ -32,7 +42,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div className="toast-host" role="status" aria-live="polite">
         {toasts.map((toast) => (
           <div key={toast.id} className={`toast${toast.tone === 'ok' ? '' : ` toast-${toast.tone}`}`}>
-            {toast.message}
+            <span className="toast-text">{toast.message}</span>
+            {toast.undo ? (
+              <button
+                type="button"
+                className="toast-undo"
+                onClick={() => {
+                  // Once only: a second tap must not undo twice.
+                  const undo = toast.undo;
+                  dismiss(toast.id);
+                  void Promise.resolve(undo?.()).catch((cause) => console.error('Undo failed', cause));
+                }}
+              >
+                Undo
+              </button>
+            ) : null}
           </div>
         ))}
       </div>

@@ -693,6 +693,30 @@ button, input, select, textarea {
   animation: rise 0.18s ease;
 }
 
+.toast:has(.toast-undo) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-right: var(--space-2);
+  pointer-events: auto;
+}
+
+.toast-text { flex: 1 1 auto; min-width: 0; }
+
+.toast-undo {
+  flex: 0 0 auto;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0 var(--space-4);
+  border: 2px solid rgb(255 255 255 / 70%);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .toast-error { background: var(--red-600); }
 .toast-warn { background: var(--amber-600); }
 
@@ -859,6 +883,18 @@ button, input, select, textarea {
   text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
 }
 
+/* ----------------------------------------------------------- print sheet -- */
+
+.print-sheet { background: var(--surface); color: var(--text); padding: var(--space-3); border-radius: var(--radius); }
+.print-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); margin-bottom: var(--space-3); }
+.print-title { font-size: var(--text-xl); margin: 0; }
+.print-facts, .print-lines { width: 100%; border-collapse: collapse; margin-bottom: var(--space-3); }
+.print-facts th { text-align: left; width: 6.5rem; vertical-align: top; padding: 4px 8px 4px 0; }
+.print-facts td { padding: 4px 0; }
+.print-lines th, .print-lines td { border: 1px solid var(--border-strong); padding: 6px; text-align: left; vertical-align: top; }
+.print-lines .print-box { font-size: 1.2rem; width: 1.6rem; text-align: center; }
+.print-lines .print-write { width: 4.5rem; }
+
 /* ---------------------------------------------------------------- print -- */
 
 @media print {
@@ -866,6 +902,9 @@ button, input, select, textarea {
   .app-main { max-width: none; padding: 0; }
   body { background: #fff; color: #000; }
   .card, .list { box-shadow: none; border-color: #999; }
+  .print-sheet { padding: 0; color: #000; background: #fff; }
+  .print-lines th, .print-lines td { border-color: #000; }
+  .print-lines tr { break-inside: avoid; }
 }
 
 /* ------------------------------------------------------------- utilities -- */
@@ -1111,3 +1150,20 @@ button, input, select, textarea {
 @media (prefers-color-scheme: dark) {
   .move-cell.on { background: var(--teal-900); }
 }
+
+/* -------------------------------------------------------------- run sheet -- */
+
+/* A label column and the fact beside it, at body size: this is the part of
+   the paper sheet volunteers read first. */
+.run-sheet-row {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.run-sheet-row:last-child { border-bottom: none; }
+.run-sheet-label { font-weight: 700; }
+.block { display: block; }

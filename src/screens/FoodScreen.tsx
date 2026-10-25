@@ -5,7 +5,7 @@ import { ConfirmSheet, EmptyState, Field, Pill, Sheet, Stepper } from '../compon
 import { ItemPicker } from '../components/ItemPicker';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { byId, create, nextSort, softDelete, update } from '../db/repo';
+import { byId, create, nextSort, restore, softDelete, update } from '../db/repo';
 import { FOOD_CATEGORY } from '../db/foodCatalogue';
 import { seedId } from '../db/seed';
 import {
@@ -714,7 +714,6 @@ function LineSheet({
   const [raceId, setRaceId] = useState<string>(line.raceId ?? '');
   const [perRunner, setPerRunner] = useState(line.perRunner ? String(line.perRunner) : '');
   const [flatQty, setFlatQty] = useState(line.flatQty);
-  const [removing, setRemoving] = useState(false);
   const [copyFor, setCopyFor] = useState('');
 
   const parsed = Number(perRunner);
@@ -740,7 +739,16 @@ function LineSheet({
       onClose={onClose}
       footer={
         <>
-          <button type="button" className="btn btn-outline" onClick={() => setRemoving(true)}>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() =>
+              void softDelete(db.consumptionLines, line.id).then(() => {
+                toast('Removed from the plan', 'ok', { undo: () => restore(db.consumptionLines, line.id) });
+                onClose();
+              })
+            }
+          >
             Remove
           </button>
           <button type="button" className="btn btn-primary" onClick={() => void save()}>
@@ -835,21 +843,6 @@ function LineSheet({
         ) : null}
       </div>
 
-      {removing ? (
-        <ConfirmSheet
-          title={`Take ${itemName} off this station?`}
-          body="Only the plan changes — nothing already on the packlist is removed."
-          confirmLabel="Remove"
-          tone="danger"
-          onCancel={() => setRemoving(false)}
-          onConfirm={() => {
-            void softDelete(db.consumptionLines, line.id).then(() => {
-              toast('Removed from the plan');
-              onClose();
-            });
-          }}
-        />
-      ) : null}
     </Sheet>
   );
 }

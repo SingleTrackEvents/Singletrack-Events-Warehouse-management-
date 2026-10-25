@@ -7,7 +7,7 @@ import { SwipeToDelete } from '../components/SwipeToDelete';
 import { ConfirmSheet, EmptyState, Pill } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { byId, softDelete, update } from '../db/repo';
+import { byId, restore, softDelete, update } from '../db/repo';
 import { useCrewName, useEvents, useItems, useShoppingLines } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
@@ -63,7 +63,6 @@ export default function ShoppingScreen() {
   const [filter, setFilter] = useState<Filter>('todo');
   const [forFilter, setForFilter] = useState<string>('');
   const [editing, setEditing] = useState<'new' | ShoppingLine>();
-  const [removing, setRemoving] = useState<ShoppingLine>();
   const [clearing, setClearing] = useState(false);
   const [booking, setBooking] = useState(false);
 
@@ -339,7 +338,13 @@ export default function ShoppingScreen() {
                 </div>
               );
               return (
-                <SwipeToDelete key={line.id} label="Remove" onDelete={() => setRemoving(line)}>
+                <SwipeToDelete key={line.id} label="Remove" onDelete={() =>
+                    void softDelete(db.shoppingLines, line.id).then(() =>
+                      toast(`${line.name} off the list`, 'ok', {
+                        undo: () => restore(db.shoppingLines, line.id),
+                      }),
+                    )
+                  }>
                   {row}
                 </SwipeToDelete>
               );
@@ -385,25 +390,6 @@ export default function ShoppingScreen() {
           shops={shops}
           onClose={() => setEditing(undefined)}
           onSave={save}
-        />
-      ) : null}
-
-      {removing ? (
-        <ConfirmSheet
-          title="Remove this line?"
-          body={
-            isBooked(removing)
-              ? `${removing.name} comes off the list. The stock it was booked into stays where it is.`
-              : removing.name
-          }
-          confirmLabel="Remove"
-          tone="danger"
-          onCancel={() => setRemoving(undefined)}
-          onConfirm={() => {
-            void softDelete(db.shoppingLines, removing.id);
-            setRemoving(undefined);
-            toast('Line removed');
-          }}
         />
       ) : null}
 

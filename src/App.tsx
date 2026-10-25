@@ -38,6 +38,7 @@ const WarehouseScreen = lazy(() => import('./screens/WarehouseScreen'));
 const VansScreen = lazy(() => import('./screens/VansScreen'));
 const ReturnsScreen = lazy(() => import('./screens/ReturnsScreen'));
 const PacklistScreen = lazy(() => import('./screens/PacklistScreen'));
+const PrintSheetScreen = lazy(() => import('./screens/PrintSheetScreen'));
 const StockScreen = lazy(() => import('./screens/StockScreen'));
 const ItemScreen = lazy(() => import('./screens/ItemScreen'));
 const StocktakeScreen = lazy(() => import('./screens/StocktakeScreen'));
@@ -119,6 +120,16 @@ function Guard({ needs, children }: { needs: Action; children: ReactElement }) {
 }
 
 /**
+ * One packlist screen per list. Going from one station's list straight to
+ * another's would otherwise keep the first one's state, such as the job
+ * chosen (Pack down), and open the next list in it.
+ */
+function KeyedPacklist() {
+  const { packlistId } = useParams();
+  return <PacklistScreen key={packlistId} />;
+}
+
+/**
  * Everything a station-only volunteer may be on, and nothing else.
  *
  * Per-route permissions cannot express this on their own: a volunteer holds
@@ -126,7 +137,7 @@ function Guard({ needs, children }: { needs: Action; children: ReactElement }) {
  * it because they genuinely browse events. One allowlist in one place says what
  * the tabs already imply — their station, their account, and a scan.
  */
-const STATION_ROUTES = [/^\/$/, /^\/packlists\/[^/]+$/, /^\/access$/, /^\/scan/, /^\/join\//];
+const STATION_ROUTES = [/^\/$/, /^\/packlists\/[^/]+(\/print)?$/, /^\/access$/, /^\/scan/, /^\/join\//];
 
 function StationOnlyGate({ children }: { children: ReactElement }) {
   const { session, ready } = useSession();
@@ -191,7 +202,8 @@ export default function App() {
               <Route path="/events/:eventId/home" element={<Guard needs="packlist:pack"><ReturnsScreen /></Guard>} />
               <Route path="/events/:eventId/food" element={<Guard needs="food:plan"><FoodScreen /></Guard>} />
               <Route path="/import" element={<Guard needs="packlist:manage"><ImportPacklistScreen /></Guard>} />
-              <Route path="/packlists/:packlistId" element={<PacklistScreen />} />
+              <Route path="/packlists/:packlistId" element={<KeyedPacklist />} />
+              <Route path="/packlists/:packlistId/print" element={<PrintSheetScreen />} />
               <Route path="/stock" element={<Guard needs="item:read"><StockScreen /></Guard>} />
               <Route path="/stock/:itemId" element={<Guard needs="item:read"><ItemScreen /></Guard>} />
               <Route path="/stocktake" element={<Guard needs="stocktake:read"><StocktakeScreen /></Guard>} />

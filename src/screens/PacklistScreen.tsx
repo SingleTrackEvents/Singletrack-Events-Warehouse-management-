@@ -5,12 +5,13 @@ import { Screen } from '../App';
 import { AssistantCheck } from '../components/AssistantCheck';
 import { ItemPicker } from '../components/ItemPicker';
 import { PackRuleSuggestions } from '../components/PackRuleSuggestions';
+import { RunSheetCard } from '../components/RunSheetCard';
 import { SwipeToDelete } from '../components/SwipeToDelete';
 import { MovePill } from '../components/Moves';
 import { ConfirmSheet, Field, ProgressBar, Sheet, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { alive, byId, update } from '../db/repo';
+import { alive, byId, restore, update } from '../db/repo';
 import { useCategories, useCrewName, useEvent, usePacklist, usePacklistLines } from '../hooks/useDb';
 import { moveInVan, resetVanOrder, unloadOrder } from '../domain/truck';
 import { useSession } from '../hooks/sessionContext';
@@ -119,7 +120,6 @@ export default function PacklistScreen() {
   const [applying, setApplying] = useState(false);
   const [checking, setChecking] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [removingLine, setRemovingLine] = useState<PacklistLine>();
   const [editingRequired, setEditingRequired] = useState<PacklistLine>();
   const [clearing, setClearing] = useState<'confirmations' | 'notes'>();
   const [deleting, setDeleting] = useState(false);
@@ -250,9 +250,17 @@ export default function PacklistScreen() {
     }
   };
 
-  /** True when this job is finished with the line. */
+  /**
+   * True when this job is finished with the line. Checking in is finished
+   * once the station has said how many arrived, short or not: their job is
+   * to say what turned up, and a short line must not keep it open forever.
+   */
   const doneOn = (line: PacklistLine): boolean =>
-    mode === 'count' || mode === 'packdown' ? hasLeft(line) : countOn(line) >= wantOn(line);
+    mode === 'count' || mode === 'packdown'
+      ? hasLeft(line)
+      : mode === 'arrived'
+        ? isConfirmed(line)
+        : countOn(line) >= wantOn(line);
 
   /** Only the lines this job is about: the food and drink to count, the gear to pack down. */
   const forMode = (line: PacklistLine): boolean => {
@@ -365,14 +373,39 @@ export default function PacklistScreen() {
    * the number box is the control: a tap that quietly wrote "none left"
    * would be a tap that wrote the wrong number most of the time.
    */
+  /** A swipe is deliberate, so the line goes at once, with Undo on the toast. */
+  const removeWithUndo = (line: PacklistLine) => {
+    void removeLine(line.id).then(() =>
+      toast(`${items?.get(line.itemId)?.name ?? 'Line'} removed`, 'ok', {
+        undo: () => restore(db.packlistLines, line.id),
+      }),
+    );
+  };
+
   const toggleLine = (line: PacklistLine) => {
     if (mode === 'count') return;
     const full = doneOn(line) && countOn(line) >= wantOn(line);
     if (mode === 'packdown') {
       if (hasLeft(line)) void update(db.packlistLines, line.id, { qtyLeft: null, countedBy: me });
       else packTo(line, wantOn(line));
+    } else if (mode === 'arrived' && isConfirmed(line)) {
+      // Unticking a checked-in line takes the answer back to "not checked",
+      // never to "none arrived": a mis-tap must not report a missing crate.
+      const before = line.qtyReceived ?? null;
+      void update(db.packlistLines, line.id, { qtyReceived: null });
+      toast(`${items?.get(line.itemId)?.name ?? 'Line'} not checked yet`, 'ok', {
+        undo: () => update(db.packlistLines, line.id, { qtyReceived: before }),
+      });
+    } else if (full) {
+      // A gloved mis-tap on a packed row would wipe its count, so the way
+      // back is one tap away rather than a recount.
+      const before = countOn(line);
+      packTo(line, 0);
+      toast(`${items?.get(line.itemId)?.name ?? 'Line'} cleared`, 'ok', {
+        undo: () => packTo(line, before),
+      });
     } else {
-      packTo(line, full ? 0 : wantOn(line));
+      packTo(line, wantOn(line));
     }
     if (!full && navigator.vibrate) navigator.vibrate(15);
   };
@@ -388,8 +421,10 @@ export default function PacklistScreen() {
             const item = items?.get(line.itemId);
             const unit = item?.unit ?? 'each';
             const count = countOn(line);
-            const packed = doneOn(line);
-            const short = !packed && (mode === 'count' || mode === 'packdown' ? false : count > 0);
+            // Checked in but fewer than were sent reads as short, not as done.
+            const shortArrival = mode === 'arrived' && isConfirmed(line) && count < wantOn(line);
+            const packed = doneOn(line) && !shortArrival;
+            const short = shortArrival || (!doneOn(line) && (mode === 'count' || mode === 'packdown' ? false : count > 0));
             const kit = isKit(item);
             const counting = mode === 'count' || mode === 'packdown';
             const stamp =
@@ -404,6 +439,9 @@ export default function PacklistScreen() {
                 tabIndex={0}
                 onClick={() => !returning && toggleLine(line)}
                 onKeyDown={(event) => {
+                  // Only the row's own keys: Enter in the number box (the
+                  // phone's Go key, or a Bluetooth scanner) must not toggle it.
+                  if (event.target !== event.currentTarget) return;
                   if (!returning && (event.key === 'Enter' || event.key === ' ')) {
                     event.preventDefault();
                     toggleLine(line);
@@ -571,7 +609,7 @@ export default function PacklistScreen() {
             // Swiping a line off the list is the crew's job; a driver checking a
             // delivery in gets the plain row.
             return canManage && mode === 'pack' ? (
-              <SwipeToDelete key={line.id} label="Remove" onDelete={() => setRemovingLine(line)}>
+              <SwipeToDelete key={line.id} label="Remove" onDelete={() => removeWithUndo(line)}>
                 {row}
               </SwipeToDelete>
             ) : (
@@ -611,9 +649,6 @@ export default function PacklistScreen() {
             Tap a line as it goes back in the van. The number is what came home from the station.
           </p>
         ) : null}
-        {destination?.accessNotes ? (
-          <p className="tiny muted mt-2">🚙 {destination.accessNotes}</p>
-        ) : null}
         {packlist.notes ? <p className="tiny muted mt-2">📝 {packlist.notes}</p> : null}
         {siblings?.length ? (
           <p className="tiny mt-2" style={{ color: 'var(--warn)' }}>
@@ -628,6 +663,21 @@ export default function PacklistScreen() {
           </p>
         ) : null}
       </div>
+
+      {/* The run sheet: open for the station's own crew, folded for the
+          warehouse, who are here for the lines. */}
+      {destination ? (
+        stationOnly ? (
+          <RunSheetCard destination={destination} />
+        ) : (
+          <details className="mb-3 no-print">
+            <summary className="small strong">Run sheet: hours, crew lead, vehicle, access</summary>
+            <div className="mt-2">
+              <RunSheetCard destination={destination} />
+            </div>
+          </details>
+        )
+      ) : null}
 
       {modes.length > 1 ? (
         <div className="chip-row mb-3" role="group" aria-label="Job">
@@ -676,17 +726,6 @@ export default function PacklistScreen() {
             </button>
           ) : null}
         </div>
-      ) : null}
-
-      {/* The pack rules, while the list can still change before stock leaves. */}
-      {canManage && mode === 'pack' && !hasIssued(packlist.status) && items ? (
-        <PackRuleSuggestions
-          packlistId={packlist.id}
-          lines={lines ?? []}
-          items={items}
-          destinationType={destination?.type}
-          eventId={packlist.eventId}
-        />
       ) : null}
 
       <div className="chip-row mb-3">
@@ -767,10 +806,24 @@ export default function PacklistScreen() {
         </div>
       )}
 
+      {/* Under the lines: the pack rules, while the list can still change before stock leaves. */}
+      {canManage && mode === 'pack' && !hasIssued(packlist.status) && items ? (
+        <PackRuleSuggestions
+          packlistId={packlist.id}
+          lines={lines ?? []}
+          items={items}
+          destinationType={destination?.type}
+          eventId={packlist.eventId}
+        />
+      ) : null}
+
       <div className="btn-row mt-4 no-print">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotesOpen(true)}>
           📝 Notes
         </button>
+        <Link className="btn btn-ghost btn-sm" to={`/packlists/${packlist.id}/print`}>
+          🖨 Print run sheet
+        </Link>
       </div>
 
       {canManage ? (
@@ -897,21 +950,6 @@ export default function PacklistScreen() {
               toast(`Now needs ${formatQty(qtyRequired, items?.get(editingRequired.itemId)?.unit ?? 'each')}`);
               setEditingRequired(undefined);
             });
-          }}
-        />
-      ) : null}
-
-      {removingLine ? (
-        <ConfirmSheet
-          title="Remove this line?"
-          body={items?.get(removingLine.itemId)?.name ?? ''}
-          confirmLabel="Remove"
-          tone="danger"
-          onCancel={() => setRemovingLine(undefined)}
-          onConfirm={() => {
-            void removeLine(removingLine.id);
-            setRemovingLine(undefined);
-            toast('Line removed');
           }}
         />
       ) : null}
