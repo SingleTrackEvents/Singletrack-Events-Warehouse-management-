@@ -5,7 +5,7 @@ import { Scanner } from '../components/Scanner';
 import { Field } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { useSession } from '../hooks/sessionContext';
-import { ROLE_BLURBS, ROLE_LABELS } from '../sync/types';
+import { ROLE_BLURBS, ROLE_LABELS, normaliseInviteCode } from '../sync/types';
 import { parseInviteScan } from '../domain/codes';
 
 /**
@@ -75,7 +75,11 @@ export default function JoinScreen() {
     setBusy(true);
     setError(undefined);
     try {
-      const joined = await backend.joinWithInvite(code.trim(), name);
+      // Sent the way it is stored, however it was typed: "4q8k tp4l" is the
+      // same card as "4Q8K-TP4L".
+      const sent = normaliseInviteCode(code);
+      setCode(sent);
+      const joined = await backend.joinWithInvite(sent, name);
       setSession(joined);
       toast(`Welcome, ${joined.displayName}`);
       navigate('/', { replace: true });
@@ -196,6 +200,7 @@ export default function JoinScreen() {
               value={code}
               placeholder="ABCD-EFGH"
               onChange={(event) => setCode(event.target.value.toUpperCase())}
+              onBlur={() => setCode((current) => normaliseInviteCode(current))}
             />
           )}
         </Field>

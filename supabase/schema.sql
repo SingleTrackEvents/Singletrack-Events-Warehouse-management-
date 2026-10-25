@@ -467,7 +467,10 @@ begin
   end if;
 
   select * into found_invite from public.invites
-  where upper(token) = upper(trim(p_token));
+  -- Letters and digits only, so a code typed as read out ("4q8k tp4l",
+  -- "4Q8KTP4L") finds the card it came from.
+  where regexp_replace(upper(token), '[^A-Z0-9]', '', 'g')
+      = regexp_replace(upper(p_token), '[^A-Z0-9]', '', 'g');
 
   if not found then
     raise exception 'That invite code was not recognised';
