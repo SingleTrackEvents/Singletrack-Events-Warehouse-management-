@@ -1167,3 +1167,28 @@ button, input, select, textarea {
 .run-sheet-row:last-child { border-bottom: none; }
 .run-sheet-label { font-weight: 700; }
 .block { display: block; }
+
+/* stocktake */
+
+/* Shelf, count and the line's small actions share the line under the name,
+   wrapping on a narrow phone rather than squeezing the count box. */
+.stocktake-controls { flex-wrap: wrap; }
+
+.stocktake-shelf {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: auto;
+}
+
+.stocktake-shelf .input {
+  width: 5.5rem;
+  text-transform: uppercase;
+}
+
+/* Wide enough for 1150 and 12.5 without the last digit clipping. */
+.pack-row .count-box input { width: 5.5rem; }
+
+.stocktake-line-actions { display: flex; gap: var(--space-1); }
+
+.stocktake-note { flex: 1 0 100%; }
