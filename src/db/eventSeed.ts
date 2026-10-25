@@ -1,4 +1,5 @@
-import type { AccessType, DestinationType, EventStatus } from './types';
+import { GPT_PLAN_2026 } from './gptSchedule';
+import type { AccessType, DestinationType, EventStatus, StationSchedule } from './types';
 
 /**
  * The season's events, with their aid stations.
@@ -29,6 +30,20 @@ export interface SeedDestination {
    * between them on phones that already have the rest.
    */
   sort?: number;
+  /**
+   * The name shown, when it differs from `name`. The id is made from `name`,
+   * so a station renamed for a new edition keeps its packlist and its links.
+   */
+  title?: string;
+  /** The vehicle that carries the station's gear. */
+  vehicle?: string;
+  /** When the station runs, and how it is set up and packed down. */
+  schedule?: StationSchedule;
+}
+
+/** Lay an event's station plan over its seeded stations, matched by seeded name. */
+function withPlan<T extends SeedDestination>(destinations: T[], plan: Record<string, Partial<SeedDestination>>): T[] {
+  return destinations.map((destination) => ({ ...destination, ...(plan[destination.name] ?? {}) }));
 }
 
 export interface SeedEvent {
@@ -178,7 +193,7 @@ export const EVENT_SEED: SeedEvent[] = [
     notes:
       'Mt Zero → Dunkeld, 162 km, 50 h limit; miler starts Fri 6 Nov 8:00 am. Hub at Halls Gap. ' +
       'Every station Trail Sisters compliant, with ice, salt and sunscreen. Km and cutoffs from gpt100.com.au.',
-    destinations: [
+    destinations: withPlan([
       { name: 'Mt Zero Picnic Area', type: 'start', courseKm: 0, notes: 'Miler and stage race start.' },
       { name: 'GAR Trailhead', type: 'aid_station', courseKm: 15.5, notes: 'Crew OK. Cutoff Fri 12:00 pm.' },
       {
@@ -275,7 +290,23 @@ export const EVENT_SEED: SeedEvent[] = [
         notes: 'Event hub, registration and merch.',
         sort: 45,
       },
-    ],
+      // Sites the 2026 vehicle plan has that earlier lists did not.
+      {
+        name: 'Seven Dials Track',
+        type: 'checkpoint',
+        accessNotes: "Marshal's own vehicle.",
+        notes: 'Safety marshal only, no aid station.',
+        sort: 65,
+      },
+      {
+        name: 'Stockyard Track',
+        type: 'checkpoint',
+        access: '4wd',
+        accessNotes: 'Drive straight to the site. Parks to confirm road access.',
+        notes: 'Safety checkpoint. Wilderness first aid certified volunteers. Takes the Stockyard kit.',
+        sort: 75,
+      },
+    ], GPT_PLAN_2026),
   },
   {
     code: 'buller26',

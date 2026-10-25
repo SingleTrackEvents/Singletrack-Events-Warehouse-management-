@@ -11,7 +11,7 @@ import { RCR_CONSUMPTION, RCR_PACKLISTS, RCR_RETIRED } from './rollerCoasterSeed
 import { STATION_TEMPLATES } from './stationTemplates';
 import { makeCode } from '../domain/codes';
 import { packlistForDestination } from '../domain/packlists';
-import type { Item, RaceVisit, SyncMeta, Unit } from './types';
+import type { Destination, Item, RaceVisit, SyncMeta, Unit } from './types';
 
 /**
  * The starting data: SingleTrack's real warehouse catalogue.
@@ -342,15 +342,22 @@ export async function seedStarterData(
         // `raceVisits` absent is "never set", while a list, even an empty
         // one, is the crew's and stays.
         const existing = await db.destinations.get(destinationId);
-        if (existing && !existing.deletedAt && existing.raceVisits === undefined && raceVisits.length) {
-          await update(db.destinations, destinationId, { raceVisits });
-        }
+        if (!existing || existing.deletedAt) continue;
+        const changes: Partial<Destination> = {};
+        if (existing.raceVisits === undefined && raceVisits.length) changes.raceVisits = raceVisits;
+        // This edition's plan reaches stations seeded before it, once each:
+        // a name still as seeded takes the new one, and a vehicle or schedule
+        // nobody has set is filled in. Anything the crew has set is theirs.
+        if (destination.title && existing.name === destination.name) changes.name = destination.title;
+        if (destination.vehicle && !existing.vehicle?.trim()) changes.vehicle = destination.vehicle;
+        if (destination.schedule && existing.schedule === undefined) changes.schedule = destination.schedule;
+        if (Object.keys(changes).length) await update(db.destinations, destinationId, changes);
         continue;
       }
       await create(db.destinations, {
         id: destinationId,
         eventId,
-        name: destination.name,
+        name: destination.title ?? destination.name,
         type: destination.type,
         courseKm: destination.courseKm ?? null,
         access: destination.access ?? '2wd',
@@ -366,6 +373,8 @@ export async function seedStarterData(
         notes: destination.notes ?? '',
         sort: destination.sort ?? (index + 1) * 10,
         ...(raceVisits.length ? { raceVisits } : {}),
+        ...(destination.vehicle ? { vehicle: destination.vehicle } : {}),
+        ...(destination.schedule ? { schedule: destination.schedule } : {}),
       });
     }
   }
