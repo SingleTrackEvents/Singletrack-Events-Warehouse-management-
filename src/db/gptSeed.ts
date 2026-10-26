@@ -29,6 +29,23 @@ import type { HounslowPacklist } from './hounslowSeed';
  * kettles per gas stove; one set of merch racking and two arch pumps; and
  * 10 power boards at the Halls Gap village, not 20.
  *
+ * Brought up to 2026 from Chad's warehouse handover (22 and 25 Oct) and
+ * GPT100_VehiclePlan_2026_v1_1:
+ * - Power as the plan has it. EcoFlows at Mt Difficult Rd, Rosea and Yarram
+ *   Gap, hired diesel light towers (with two labelled diesel jerries each)
+ *   at Mt William, Jimmy Creek and Griffin, the larger hired generator at
+ *   Borough Huts, and petrol generators only at Cassidys and Bainggug.
+ * - Starlinks by unit, and a unit that moves on to another station is that
+ *   station's line coming from the first, so it leaves the warehouse once.
+ *   Cassidys and Bainggug still want a spare nobody has.
+ * - Twelve gas heaters: two in the big night shelters (Borough, Mt William,
+ *   Griffin) and at Jimmy Creek.
+ * - Shoe wash at every aid station and start line, two where the miler's
+ *   wash is mandatory (Halls Gap, Mt William, Griffin), Sterling Place for
+ *   the GPT33 at Dunkeld, and the RD's six-tub stage race kit.
+ * - Eight Zempire stretchers at Dunkeld, the orange wire flags going to
+ *   Julie, and no black bins (see the pack rules).
+ *
  * Seeded as drafts, like Hounslow and the Roller Coaster Run.
  */
 
@@ -61,7 +78,7 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Bunting (lengths)', qty: 8 },
       { item: 'Traffic Bollards and Bases', qty: 10 },
       { item: 'Shoe Wash Kit', qty: 1 },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink Mini', qty: 1, note: 'Starlink Mini 1. Moves on to Jimmy Creek Campground on Friday.' },
       { item: 'PA System / VONYX + Mic + Stand', qty: 1 },
       { item: 'Finish Gantry (Running Wild)', qty: 1 },
       { item: 'Toolbox', qty: 1, note: 'Finish gantry tool box' },
@@ -90,6 +107,7 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Plastic Tubs for Serving Ice', qty: 1 },
       { item: 'Spray Bottle / Backpack (Ice Water)', qty: 1 },
       { item: 'Water Containers (20L equiv)', qty: 20 },
+      { item: 'Starlink Mini', qty: 1, note: 'Starlink Mini 2. Moves on to Stockyard Track on Friday.' },
     ],
   },
   {
@@ -117,7 +135,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Pallets for IBCs', qty: 3 },
       { item: 'Portable Toilets', qty: 4, note: 'Hired. Sheet notes relocation' },
       { item: 'Ice Baths (DOPE)', qty: 1 },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink Mini', qty: 1, note: 'Starlink Mini 3. Moves on to Yarram Gap Rd on Friday.' },
+      { item: 'Shoe Wash Kit', qty: 1 },
     ],
   },
   {
@@ -158,8 +177,7 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Gas Bottle', qty: 1 },
       { item: 'Lighter', qty: 1 },
       { item: 'Chairs - Plastic Bistro', qty: 15, note: 'Hired' },
-      { item: 'Generator', qty: 1 },
-      { item: 'Jerry Can (Fuel)', qty: 1 },
+      { item: 'EcoFlow Battery (1 kWh)', qty: 1, note: 'EcoFlow #1' },
       { item: 'Weights - Steel 20kg', qty: 12 },
       { item: 'Marquee - ST 3x3 (or equivalent)', qty: 3 },
       { item: 'Marquee Walls - 3x3 (or equivalent)', qty: 9 },
@@ -171,7 +189,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'IBC Water Container (1000L)', qty: 1 },
       { item: 'IBC Pipe', qty: 1 },
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink', qty: 1, note: 'Starlink 2. Moves on to Griffin Fireline on Friday night.' },
+      { item: 'Shoe Wash Kit', qty: 1 },
     ],
   },
   {
@@ -201,9 +220,9 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Spray Bottle / Backpack (Ice Water)', qty: 1 },
       { item: 'Water Containers (20L equiv)', qty: 4 },
       { item: 'Toilet Paper', qty: 48 },
-      { item: 'Shoe Wash Kit', qty: 1 },
+      { item: 'Shoe Wash Kit', qty: 2, note: "Stage 2 start, and the miler's mandatory wash" },
       { item: 'Ice Baths (DOPE)', qty: 1 },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink', qty: 1, note: 'Starlink 1. Moves on to Dunkeld on Friday evening.' },
       { item: 'Finish Gantry (Running Wild)', qty: 1 },
       { item: 'Toolbox', qty: 1, note: 'Finish gantry tool box' },
       { item: 'Crowd Barriers', qty: 8 },
@@ -231,9 +250,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Gas Bottle', qty: 2, note: '1 stove, 1 heater' },
       { item: 'Lighter', qty: 1 },
       { item: 'Chairs - Plastic Bistro', qty: 10, note: 'Hired' },
-      { item: 'Generator', qty: 1 },
+      { item: 'EcoFlow Battery (1 kWh)', qty: 1, note: 'EcoFlow #2' },
       { item: 'Gas Heater', qty: 1 },
-      { item: 'Jerry Can (Fuel)', qty: 1 },
       { item: 'Stand Light', qty: 2 },
       { item: 'Strip Light', qty: 2 },
       { item: 'Weights - Steel 20kg', qty: 8 },
@@ -245,7 +263,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Spray Bottle / Backpack (Ice Water)', qty: 2 },
       { item: 'Toilet Paper', qty: 12 },
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink', qty: 1, note: 'Starlink 3' },
+      { item: 'Shoe Wash Kit', qty: 1 },
       { item: 'Festoon Lighting (10m lengths)', qty: 1 },
     ],
   },
@@ -273,8 +292,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Gas Bottle', qty: 2, note: '1 stove, 1 heater' },
       { item: 'Lighter', qty: 1 },
       { item: 'Chairs - Plastic Bistro', qty: 10, note: 'Hired' },
-      { item: 'Generator', qty: 1 },
-      { item: 'Gas Heater', qty: 1 },
+      { item: 'Large Generator (Hired)', qty: 1, note: 'The larger hired generator' },
+      { item: 'Gas Heater', qty: 2, note: 'Warming shelter' },
       { item: 'Jerry Can (Fuel)', qty: 1 },
       { item: 'Stand Light', qty: 2 },
       { item: 'Strip Light', qty: 2 },
@@ -291,7 +310,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
       { item: 'Camp Stretcher / Folding Bed', qty: 3 },
       { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink', qty: 1, note: 'Starlink 4' },
+      { item: 'Shoe Wash Kit', qty: 1 },
       { item: 'Festoon Lighting (10m lengths)', qty: 1 },
     ],
   },
@@ -321,9 +341,9 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Lighter', qty: 1 },
       { item: 'Chairs - Plastic Bistro', qty: 10, note: 'Hired' },
       { item: 'Electric Hot Water Urn', qty: 1 },
-      { item: 'Generator', qty: 1 },
-      { item: 'Gas Heater', qty: 1 },
-      { item: 'Jerry Can (Fuel)', qty: 1 },
+      { item: 'Light Tower (Diesel, Hired)', qty: 1 },
+      { item: 'Jerry Can 20 L (Diesel, labelled)', qty: 2, note: 'Labelled, they sit with the tower' },
+      { item: 'Gas Heater', qty: 2, note: 'Structural marquee, high roof' },
       { item: 'Stand Light', qty: 2 },
       { item: 'Strip Light', qty: 2 },
       { item: 'Weights - Steel 20kg', qty: 16 },
@@ -337,8 +357,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Portable Toilets', qty: 6, note: 'Hired. Sheet notes relocation' },
       { item: 'Camp Stretcher / Folding Bed', qty: 3 },
       { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
-      { item: 'Shoe Wash Kit', qty: 1 },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Shoe Wash Kit', qty: 2, note: "Stage 3 start, and the miler's mandatory wash" },
+      { item: 'Starlink', qty: 1, note: 'Starlink 5' },
       { item: 'Festoon Lighting (10m lengths)', qty: 1 },
     ],
   },
@@ -365,9 +385,9 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Gas Bottle', qty: 2, note: '1 stove, 1 heater' },
       { item: 'Lighter', qty: 1 },
       { item: 'Chairs - Plastic Bistro', qty: 10, note: 'Hired' },
-      { item: 'Generator', qty: 1 },
-      { item: 'Gas Heater', qty: 1 },
-      { item: 'Jerry Can (Fuel)', qty: 1 },
+      { item: 'Light Tower (Diesel, Hired)', qty: 1 },
+      { item: 'Jerry Can 20 L (Diesel, labelled)', qty: 2, note: 'Labelled, they sit with the tower' },
+      { item: 'Gas Heater', qty: 2 },
       { item: 'Stand Light', qty: 2 },
       { item: 'Strip Light', qty: 2 },
       { item: 'Weights - Steel 20kg', qty: 16 },
@@ -381,7 +401,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
       { item: 'Camp Stretcher / Folding Bed', qty: 3 },
       { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink Mini', qty: 1, note: 'Starlink Mini 1', from: 'Mt Zero Picnic Area' },
+      { item: 'Shoe Wash Kit', qty: 1 },
     ],
   },
   {
@@ -406,9 +427,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Gas Bottle', qty: 2, note: '1 stove, 1 heater' },
       { item: 'Lighter', qty: 1 },
       { item: 'Chairs - Plastic Bistro', qty: 10, note: 'Hired' },
-      { item: 'Generator', qty: 1 },
+      { item: 'EcoFlow Battery (1 kWh)', qty: 3, note: 'Three overnight, units to be confirmed' },
       { item: 'Gas Heater', qty: 1 },
-      { item: 'Jerry Can (Fuel)', qty: 1 },
       { item: 'Stand Light', qty: 1 },
       { item: 'Strip Light', qty: 2 },
       { item: 'Weights - Steel 20kg', qty: 8 },
@@ -420,7 +440,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Spray Bottle / Backpack (Ice Water)', qty: 1 },
       { item: 'Toilet Paper', qty: 12 },
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink Mini', qty: 1, note: 'Starlink Mini 3', from: 'GAR Trailhead' },
+      { item: 'Shoe Wash Kit', qty: 1 },
     ],
   },
   {
@@ -449,9 +470,9 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Lighter', qty: 1 },
       { item: 'Chairs - Plastic Bistro', qty: 10, note: 'Hired' },
       { item: 'Electric Hot Water Urn', qty: 1 },
-      { item: 'Generator', qty: 1 },
-      { item: 'Gas Heater', qty: 1 },
-      { item: 'Jerry Can (Fuel)', qty: 1 },
+      { item: 'Light Tower (Diesel, Hired)', qty: 1 },
+      { item: 'Jerry Can 20 L (Diesel, labelled)', qty: 2, note: 'Labelled, they sit with the tower' },
+      { item: 'Gas Heater', qty: 2, note: 'Rest and sleep base' },
       { item: 'Stand Light', qty: 1 },
       { item: 'Strip Light', qty: 2 },
       { item: 'Weights - Steel 20kg', qty: 8 },
@@ -465,9 +486,9 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Portable Toilets', qty: 6, note: 'Hired. Sheet notes relocation' },
       { item: 'Camp Stretcher / Folding Bed', qty: 3 },
       { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
-      { item: 'Shoe Wash Kit', qty: 1 },
+      { item: 'Shoe Wash Kit', qty: 2, note: "Stage 4 start, and the miler's mandatory wash" },
       { item: 'Ice Baths (DOPE)', qty: 1 },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink', qty: 1, note: 'Starlink 2', from: 'Mt Difficult Rd' },
       { item: 'Festoon Lighting (10m lengths)', qty: 1 },
     ],
   },
@@ -513,7 +534,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Camp Stretcher / Folding Bed', qty: 3 },
       { item: 'Blankets / Space Blankets', qty: 15, note: '5 per bed' },
       { item: 'Ice Baths (DOPE)', qty: 1 },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink', qty: 1, note: 'Spare unit to be confirmed: all five are placed' },
+      { item: 'Shoe Wash Kit', qty: 1 },
     ],
   },
   {
@@ -552,7 +574,8 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Spray Bottle / Backpack (Ice Water)', qty: 2 },
       { item: 'Toilet Paper', qty: 12 },
       { item: 'Portable Toilets', qty: 1, note: 'Hired. Sheet notes relocation' },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink', qty: 1, note: 'Spare unit to be confirmed: all five are placed' },
+      { item: 'Shoe Wash Kit', qty: 1 },
     ],
   },
   {
@@ -589,9 +612,10 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Bunting (lengths)', qty: 8 },
       { item: 'Traffic Bollards and Bases', qty: 10 },
       { item: 'Ice Baths (DOPE)', qty: 1 },
-      { item: 'Camp Stretcher / Folding Bed', qty: 5, note: 'Sterling Place on the sheet' },
+      { item: 'Camp Stretcher / Folding Bed', qty: 8, note: 'Zempire only, so the stock is not mixed. Sterling Place on the sheet.' },
       { item: 'Blankets / Space Blankets', qty: 25, note: '5 per bed' },
-      { item: 'Starlink', qty: 1, note: 'Hired or owned' },
+      { item: 'Starlink', qty: 1, note: 'Starlink 1', from: 'Halls Gap' },
+      { item: 'Shoe Wash Kit', qty: 2, note: 'One at the finish, one at Sterling Place for the GPT33 before the bus' },
       { item: 'Finish Gantry (Running Wild)', qty: 1 },
       { item: 'Toolbox', qty: 1, note: 'Finish gantry tool box' },
       { item: 'Inflatable Arch', qty: 1 },
@@ -660,7 +684,37 @@ export const GPT_PACKLISTS: HounslowPacklist[] = [
       { item: 'Laminator', qty: 1 },
       { item: 'Laminator Sheets', qty: 2 },
       { item: 'Paper (packs)', qty: 2 },
-      { item: 'Large Generator (Hired)', qty: 1, note: 'Sheet says "1?", confirm' },
+      { item: 'Shoe Wash Kit', qty: 6, note: 'Stage race kit: six tubs that travel with the RD to each stage start' },
+      { item: 'Orange Wire Flags', qty: 1, note: 'All of them, for Julie for the Mt Buller SkyRun' },
     ],
   },
+  {
+    station: 'Stockyard Track',
+    notes: "From the 2026 vehicle plan. Ray Taylor's 4WD takes the Stockyard kit.",
+    lines: [
+      { item: 'Starlink Mini', qty: 1, note: 'Starlink Mini 2', from: 'Coppermine' },
+    ],
+  },
+];
+
+/**
+ * Lines the 2026 plan takes off last year's lists. Removed only where nobody
+ * has touched them, like every other seeded change.
+ */
+export const GPT_RETIRED: Array<{ station: string; item: string }> = [
+  // Swapped for an EcoFlow, a light tower or the hired generator.
+  ...['Mt Difficult Rd', 'Rosea Carpark', 'Mt William Carpark', 'Jimmy Creek Rd', 'Yarram Gap Rd', 'Griffin Fireline'].flatMap(
+    (station) => [
+      { station, item: 'Generator' },
+      { station, item: 'Jerry Can (Fuel)' },
+    ],
+  ),
+  { station: 'Borough Huts', item: 'Generator' },
+  // A Starlink Mini instead of a full Starlink.
+  ...['Mt Zero Picnic Area', 'GAR Trailhead', 'Jimmy Creek Rd', 'Yarram Gap Rd'].map((station) => ({
+    station,
+    item: 'Starlink',
+  })),
+  // The hired large generator goes to Borough Huts; the village has mains power.
+  { station: 'Halls Gap Event Village', item: 'Large Generator (Hired)' },
 ];

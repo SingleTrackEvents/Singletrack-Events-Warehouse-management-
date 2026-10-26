@@ -24,6 +24,10 @@ export interface Companion {
   atLeast?: number;
   /** Destination types where this companion is not asked for. */
   notAt?: DestinationType[];
+  /** Event ids where this companion is not asked for, for one year's change of plan. */
+  notEvents?: string[];
+  /** Other items that do its job: with any of them on the list, it is not asked for. */
+  orAny?: string[];
 }
 
 export interface PackRule {
@@ -163,7 +167,7 @@ export const PACK_RULES: PackRule[] = [
     // The seeded GPT100 2026 event. No phone reception on most of that course.
     events: ['stw-event-gpt26'],
     why: 'every GPT100 station runs a Starlink',
-    add: [{ sku: 'COM-01', atLeast: 1 }], // Starlink
+    add: [{ sku: 'COM-01', atLeast: 1, orAny: ['COM-90'] }], // Starlink, or a Starlink Mini
   },
   {
     id: 'aid-station-basics',
@@ -171,7 +175,8 @@ export const PACK_RULES: PackRule[] = [
     why: 'every staffed aid station',
     add: [
       { sku: 'KIT-01', atLeast: 1 }, // Primary Aid Station Kit
-      { sku: 'WST-01', atLeast: 2 }, // Bins - Large Round Black
+      // No black bins at GPT100 2026: bin bags hang from the tents instead.
+      { sku: 'WST-01', atLeast: 2, notEvents: ['stw-event-gpt26'] }, // Bins - Large Round Black
       { sku: 'FRN-06', atLeast: 2 }, // Chairs - Camping / Folding
       { sku: 'FRN-04', atLeast: 2 }, // Tarps
       { sku: 'COM-03', atLeast: 1 }, // Bluetooth Speaker
@@ -245,6 +250,8 @@ export function suggestionsFor(
       if (trigger <= 0) continue;
       for (const companion of rule.add) {
         if (!applies(companion.notAt) || !bySku.has(companion.sku)) continue;
+        if (eventId && companion.notEvents?.includes(eventId)) continue;
+        if (companion.orAny?.some((sku) => (have.get(sku) ?? 0) > 0)) continue;
         if (companion.per) {
           perSum.set(companion.sku, (perSum.get(companion.sku) ?? 0) + trigger * companion.per);
         }

@@ -16,11 +16,16 @@ export interface KitSpec {
   sku: string;
   /** [catalogue item name, quantity] per line. */
   contents: Array<[item: string, qty: number]>;
+  /** Items taken out of the kit since earlier builds seeded it. */
+  removed?: string[];
 }
 
 export const KIT_CONTENTS: KitSpec[] = [
   {
     sku: 'KIT-01', // Primary Aid Station Kit (3 x Black Tubs)
+    // Sugar goes with the tea and coffee now, not in the box: it was not
+    // getting used and kept spilling (Chad, 22 Oct 2026).
+    removed: ['Sugar'],
     contents: [
       ['Chopping / Cutting Board', 2],
       ['Tupperware Containers', 4],
@@ -48,7 +53,6 @@ export const KIT_CONTENTS: KitSpec[] = [
       ['Tongs', 4],
       ['Matches', 1],
       ['Salt', 1],
-      ['Sugar', 1],
       ['Aluminium Foil', 1],
       ['Cable Ties', 1],
       ['First Aid Kit', 1],

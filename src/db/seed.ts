@@ -6,7 +6,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
-import { GPT_PACKLISTS } from './gptSeed';
+import { GPT_PACKLISTS, GPT_RETIRED } from './gptSeed';
 import { GPT_PLAN_2026 } from './gptSchedule';
 import { RCR_CONSUMPTION, RCR_PACKLISTS, RCR_RETIRED } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
@@ -400,7 +400,15 @@ export async function seedStarterData(
   // seed already wrote the kit complete above, so this leaves it alone.
   for (const spec of KIT_CONTENTS) {
     const kit = bySku.get(spec.sku);
-    if (!kit || kit.contents !== undefined) continue;
+    if (!kit) continue;
+    // Taken out of the box since it was seeded: gone from a kit that still has
+    // it, which nobody would have added back by hand.
+    if (kit.contents && spec.removed?.length) {
+      const gone = new Set(spec.removed.map((name) => byName.get(name)?.id).filter(Boolean));
+      const kept = kit.contents.filter((content) => !gone.has(content.itemId));
+      if (kept.length !== kit.contents.length) await update(db.items, kit.id, { contents: kept });
+    }
+    if (kit.contents !== undefined) continue;
     const contents = spec.contents
       .map(([name, qty]) => ({ itemId: byName.get(name)?.id, qty }))
       .filter((content): content is { itemId: string; qty: number } => Boolean(content.itemId));
@@ -424,7 +432,7 @@ export async function seedStarterData(
     {
       code: 'gpt26',
       lists: GPT_PACKLISTS,
-      retired: [],
+      retired: GPT_RETIRED,
       notes: 'Starting quantities from the GPT 2025 pack list (draft).',
     },
   ];
@@ -546,11 +554,18 @@ export async function seedStarterData(
             containerId: null,
             note: line.note ?? '',
             sort,
+            ...(line.from ? { fromDestinationId: seedId('dest', `${code}-${line.from}`) } : {}),
           });
         } else if (item) {
           const existing = await untouched(packlistId, lineId);
-          if (existing && (existing.qtyRequired !== line.qty || existing.note !== (line.note ?? ''))) {
-            await update(db.packlistLines, lineId, { qtyRequired: line.qty, note: line.note ?? '' });
+          const from = line.from ? seedId('dest', `${code}-${line.from}`) : null;
+          if (
+            existing &&
+            (existing.qtyRequired !== line.qty ||
+              existing.note !== (line.note ?? '') ||
+              (existing.fromDestinationId ?? null) !== from)
+          ) {
+            await update(db.packlistLines, lineId, { qtyRequired: line.qty, note: line.note ?? '', fromDestinationId: from });
           }
         }
         sort += 10;
