@@ -34,7 +34,7 @@ export const ROLE_BLURBS: Record<Role, string> = {
   admin: 'Full control, including the item catalogue and who else has access.',
   crew: 'Pack, build transport loads and plan food. Given every event, they also run the warehouse: stock, stocktakes and templates.',
   driver: 'See assigned loads and confirm deliveries on the road.',
-  volunteer: 'See one aid station’s packlist and record what actually arrived.',
+  volunteer: 'See only their own station’s packing list and tick off what actually arrived.',
 };
 
 /**
