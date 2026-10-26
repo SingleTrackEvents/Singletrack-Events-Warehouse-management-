@@ -75,7 +75,7 @@ export default function VanSheetScreen() {
   return (
     <Screen title="Van sheets" subtitle={event.name} back="-1">
       {groups.length ? (
-        <div className="btn-row mb-3 no-print">
+        <div className="row-flex wrap mb-3 no-print">
           <button type="button" className="btn btn-primary" onClick={() => window.print()}>
             🖨 Print
           </button>
@@ -149,6 +149,7 @@ function StationTable({
   stationName: (id: string) => string;
 }) {
   return (
+    <div className="print-scroll">
     <table className="print-lines">
       <thead>
         <tr>
@@ -187,5 +188,6 @@ function StationTable({
         })}
       </tbody>
     </table>
+    </div>
   );
 }

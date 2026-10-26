@@ -1212,7 +1212,18 @@ button, input, select, textarea {
 .print-station { margin-top: var(--space-4); }
 .print-station-name { font-size: var(--text-lg); margin: 0 0 var(--space-2); }
 
+/* On a phone the sheet's table is wider than the screen. It scrolls inside
+   its own box rather than dragging the whole page sideways, and the cells
+   tighten up so most of it fits. Paper is wide enough as it is. */
+.print-scroll { overflow-x: auto; }
+@media (max-width: 600px) {
+  .print-lines { font-size: var(--text-sm); }
+  .print-lines th, .print-lines td { padding: 4px; }
+  .print-lines .nowrap { white-space: normal; }
+}
+
 @media print {
+  .print-scroll { overflow: visible; }
   /* One vehicle per page, so each van's sheet can go on its own clipboard. */
   .print-page { break-after: page; margin: 0; border-radius: 0; }
   .print-page:last-of-type { break-after: auto; }
@@ -1222,4 +1233,37 @@ button, input, select, textarea {
   .print-summary { background: none !important; border: 2px solid #000; color: #000; }
   .print-lines tr.print-short td { background: none; border-width: 2px; }
   .print-missing { color: #000; }
+}
+
+/* One invite card printed on its own. On screen it is never seen; while it
+   is up, printing shows it and nothing else. */
+.invite-print { display: none; }
+
+@media print {
+  body.printing-invite > :not(.invite-print) { display: none !important; }
+  body.printing-invite .invite-print {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    max-width: 14cm;
+    margin: 2cm auto 0;
+    padding: var(--space-6);
+    border: 2px dashed #000;
+    text-align: center;
+    color: #000;
+  }
+}
+
+/* A laptop or desktop: planners want to see more of a list at once. The
+   column widens and rows tighten up; a mouse does not need a thumb-sized
+   target. Phones and tablets keep the layout above untouched. */
+@media (min-width: 1024px) {
+  .app-main { max-width: 1100px; }
+  .row { min-height: 40px; padding: var(--space-2) var(--space-4); }
+  .row-icon { width: 32px; height: 32px; }
+  .pack-row { padding: var(--space-2) var(--space-4); gap: var(--space-2) var(--space-3); }
+  /* There is room beside the name now, so the count sits on the same line. */
+  .pack-row .row-end { flex: 0 0 auto; }
+  .pack-check { width: 28px; height: 28px; }
 }

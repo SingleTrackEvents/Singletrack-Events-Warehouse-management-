@@ -104,6 +104,7 @@ export default function PrintSheetScreen() {
 
         <p className={`print-summary ${summary.missing.length ? 'short' : 'done'}`}>{summaryText(summary)}</p>
 
+        <div className="print-scroll">
         <table className="print-lines">
           <thead>
             <tr>
@@ -148,6 +149,7 @@ export default function PrintSheetScreen() {
             })}
           </tbody>
         </table>
+        </div>
         <p className="tiny mt-3">
           In unload order: what the station needs first is at the top. * must-have. A ticked box
           was packed in full. MISSING means it never went in, so do not look for it in the van.
