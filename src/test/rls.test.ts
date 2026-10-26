@@ -532,6 +532,17 @@ describe('privilege boundaries', () => {
     );
     await db.close();
   });
+
+  it('takes a code typed the way it was read out', async () => {
+    const db = await seeded();
+    const third = '33333333-3333-4333-8333-333333333333';
+    await db.addUser(third, 'late@example.com');
+    await db.actAs(third);
+
+    const joined = await db.query<{ role: string }>(`select role from public.redeem_invite(' aaaa bbbb ', 'Late')`);
+    expect(joined.rows[0].role).toBe('volunteer');
+    await db.close();
+  });
 });
 
 /**

@@ -15,7 +15,9 @@ import { useCategories, useCrewName, useItem, useItems } from '../hooks/useDb';
 import { addKitContent, isKit, kitLines, removeKitContent, setKitContentQty } from '../domain/kits';
 import {
   MOVEMENT_LABELS,
+  countedItemIds,
   isLowStock,
+  isUncounted,
   itemHistory,
   recordMovements,
   setQuantity,
@@ -28,8 +30,11 @@ import { UNITS, unitHasPackSize } from '../db/types';
 import { PackSizeField } from '../components/PackSizeField';
 import { CategoryPicker } from '../components/CategoryPicker';
 
-/** Reasons offered when adjusting by hand, in the order they actually come up. */
-const ADJUST_REASONS: MovementReason[] = ['receipt', 'adjustment', 'damaged', 'consumed'];
+/** Reasons offered when changing stock by hand, each way, in the order they come up. */
+const ADJUST_REASONS: Record<1 | -1, MovementReason[]> = {
+  1: ['receipt', 'adjustment'],
+  [-1]: ['consumed', 'damaged', 'adjustment'],
+};
 
 /** One item: what is on the shelf, how to change it, and why it changed. */
 export default function ItemScreen() {
@@ -42,8 +47,12 @@ export default function ItemScreen() {
   const history = useLiveQuery(async () => (itemId ? itemHistory(itemId, 40) : []), [itemId]);
   // Depending on the movements table keeps the ledger live as adjustments land.
   const movementCount = useLiveQuery(async () => db.movements.count(), []);
+  // A shelf counted as empty on a stocktake writes no movement, so the ledger
+  // alone would still call it "not counted". countedItemIds knows better.
+  const counted = useLiveQuery(() => countedItemIds(), [movementCount]);
 
-  const [adjusting, setAdjusting] = useState(false);
+  // Which way the stock sheet opens: in (a delivery) or out (used, broken).
+  const [adjusting, setAdjusting] = useState<1 | -1 | null>(null);
   const [counting, setCounting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -96,15 +105,24 @@ export default function ItemScreen() {
             <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, lineHeight: 1 }}>
               {formatQty(item.qtyOnHand, item.unit)}
             </div>
-            <div className="small muted mt-2">
-              {item.packSize > 1 ? `${Math.round(item.qtyOnHand * item.packSize)} pieces · ` : ''}
-              bin {item.bin || '—'}
+            {/* The shelf is what you came here for when you are standing in
+                the warehouse looking for the thing, so it reads as loud as
+                the number. */}
+            <div className="mt-2" style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, lineHeight: 1 }}>
+              {item.bin ? `Shelf ${item.bin}` : <span className="small muted">No shelf set</span>}
             </div>
+            {item.packSize > 1 ? (
+              <div className="small muted mt-2">{Math.round(item.qtyOnHand * item.packSize)} pieces</div>
+            ) : null}
           </div>
           <div className="stack-sm" style={{ alignItems: 'flex-end' }}>
-            {history && !history.length && item.qtyOnHand === 0 ? (
+            {counted && isUncounted(item, counted) ? (
               <Pill>Not counted yet</Pill>
-            ) : isLowStock(item) ? (
+            ) : item.qtyOnHand < 0 ? (
+              // More went out than the warehouse had counted: the count is
+              // wrong, and the fix is to count it, not to buy more.
+              <Pill tone="danger">Count is out: count it</Pill>
+            ) : isLowStock(item, counted) ? (
               <Pill tone="danger">Below reorder</Pill>
             ) : (
               <Pill tone="ok">In stock</Pill>
@@ -121,14 +139,24 @@ export default function ItemScreen() {
       </div>
 
       {canAdjust ? (
-        <div className="btn-row mb-3">
-          <button type="button" className="btn btn-primary" onClick={() => setAdjusting(true)}>
-            ± Adjust
-          </button>
-          <button type="button" className="btn btn-outline" onClick={() => setCounting(true)}>
-            🔢 Set count
-          </button>
-        </div>
+        <>
+          {/* Receiving is what this screen is usually opened for. Fixing the
+              count books a stocktake correction, so it is named for that
+              rather than offered as a quick way to change a number. */}
+          <div className="btn-row mb-2">
+            <button type="button" className="btn btn-primary" onClick={() => setAdjusting(1)}>
+              📦 Receive stock
+            </button>
+            <button type="button" className="btn btn-outline" onClick={() => setAdjusting(-1)}>
+              Take stock out
+            </button>
+          </div>
+          <div className="btn-row mb-3">
+            <button type="button" className="btn btn-outline" onClick={() => setCounting(true)}>
+              🔢 Fix the count
+            </button>
+          </div>
+        </>
       ) : null}
 
       {canShop ? (
@@ -256,12 +284,13 @@ export default function ItemScreen() {
       {adjusting ? (
         <AdjustSheet
           unit={item.unit}
-          onClose={() => setAdjusting(false)}
+          initialDirection={adjusting}
+          onClose={() => setAdjusting(null)}
           onSave={(delta, reason, note) => {
             void recordMovements([
               { itemId: item.id, qty: delta, reason, note, by: crew, refType: 'manual' },
             ]).then(() => toast(`${delta > 0 ? 'Added' : 'Removed'} ${Math.abs(delta)}`));
-            setAdjusting(false);
+            setAdjusting(null);
           }}
         />
       ) : null}
@@ -368,21 +397,24 @@ export default function ItemScreen() {
 
 function AdjustSheet({
   unit,
+  initialDirection,
   onClose,
   onSave,
 }: {
   unit: Unit;
+  initialDirection: 1 | -1;
   onClose: () => void;
   onSave: (delta: number, reason: MovementReason, note: string) => void;
 }) {
-  const [direction, setDirection] = useState<1 | -1>(1);
+  const [direction, setDirection] = useState<1 | -1>(initialDirection);
   const [amount, setAmount] = useState(1);
-  const [reason, setReason] = useState<MovementReason>('receipt');
+  // Most stock taken out by hand was used at an event, not broken.
+  const [reason, setReason] = useState<MovementReason>(initialDirection > 0 ? 'receipt' : 'consumed');
   const [note, setNote] = useState('');
 
   return (
     <Sheet
-      title="Adjust stock"
+      title={direction > 0 ? 'Receive stock' : 'Take stock out'}
       onClose={onClose}
       footer={
         <>
@@ -416,7 +448,7 @@ function AdjustSheet({
           className={`btn ${direction < 0 ? 'btn-brand' : 'btn-outline'}`}
           onClick={() => {
             setDirection(-1);
-            setReason('damaged');
+            setReason('consumed');
           }}
         >
           − Remove
@@ -438,7 +470,7 @@ function AdjustSheet({
             value={reason}
             onChange={(event) => setReason(event.target.value as MovementReason)}
           >
-            {ADJUST_REASONS.map((option) => (
+            {ADJUST_REASONS[direction].map((option) => (
               <option key={option} value={option}>
                 {MOVEMENT_LABELS[option]}
               </option>

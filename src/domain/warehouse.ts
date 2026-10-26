@@ -33,6 +33,11 @@ export interface PullDestination {
   canPack: boolean;
   /** The vehicle carrying this destination, if it has one yet. */
   vehicle: string | undefined;
+  /**
+   * The station this share comes from instead of the warehouse, by name.
+   * Shown so the crew can see where it is coming from, never picked here.
+   */
+  fromDestination?: string;
 }
 
 export interface PullLine {
@@ -46,6 +51,10 @@ export interface PullLine {
   qtyOnHand: number;
   /** How far short the warehouse is of the total. Zero when it covers it. */
   shortfall: number;
+  /** Already out of the warehouse count for these lines (on the truck, loaded). */
+  qtyIssued: number;
+  /** Needed, but coming from another station rather than the warehouse. */
+  qtyFromStations: number;
   /** True when nothing has ever been counted, so "short" would be a guess. */
   uncounted: boolean;
   going: PullDestination[];
@@ -152,23 +161,34 @@ export async function pullListFor(eventId: string): Promise<PullList> {
         qtyOnTruck: 0,
         qtyOnHand: item?.qtyOnHand ?? 0,
         shortfall: 0,
+        qtyIssued: 0,
+        qtyFromStations: 0,
         uncounted: Boolean(item) && item!.qtyOnHand === 0 && !counted.has(line.itemId),
         going: [],
       };
       grouped.set(line.itemId, row);
     }
 
-    row.qtyRequired = round2(row.qtyRequired + line.qtyRequired);
-    row.qtyPacked = round2(row.qtyPacked + line.qtyPacked);
-    row.qtyOnTruck = round2(row.qtyOnTruck + (line.qtyOnTruck ?? 0));
+    const fromDestination = line.fromDestinationId ? byId.get(line.fromDestinationId)?.name ?? 'another station' : undefined;
+    if (fromDestination) {
+      // Gear moving on from another station is that station's gear twice
+      // over: counting it here asks the warehouse for gear it does not need.
+      row.qtyFromStations = round2(row.qtyFromStations + line.qtyRequired);
+    } else {
+      row.qtyRequired = round2(row.qtyRequired + line.qtyRequired);
+      row.qtyPacked = round2(row.qtyPacked + line.qtyPacked);
+      row.qtyOnTruck = round2(row.qtyOnTruck + (line.qtyOnTruck ?? 0));
+      row.qtyIssued = round2(row.qtyIssued + (line.qtyIssued ?? 0));
+    }
     row.going.push({
+      fromDestination,
       destination,
       qtyRequired: line.qtyRequired,
       qtyPacked: line.qtyPacked,
       qtyOnTruck: line.qtyOnTruck ?? 0,
       packlistId: packlist.id,
       lineId: line.id,
-      canPack: !hasIssued(packlist.status),
+      canPack: !hasIssued(packlist.status) && !fromDestination,
       vehicle: vehicleFor(destination),
     });
   }
@@ -176,8 +196,10 @@ export async function pullListFor(eventId: string): Promise<PullList> {
   for (const row of grouped.values()) {
     // Uncounted stock is not a shortfall: nobody has looked at the shelf, and
     // reporting a shortage against a number that was never counted sends
-    // someone shopping for gear that is probably already in the shed.
-    row.shortfall = row.uncounted ? 0 : round2(Math.max(0, row.qtyRequired - row.qtyOnHand));
+    // someone shopping for gear that is probably already in the warehouse.
+    // What is already on the truck has left the count, so it is not short:
+    // the shelf only has to cover what has not gone yet.
+    row.shortfall = row.uncounted ? 0 : round2(Math.max(0, row.qtyRequired - row.qtyIssued - row.qtyOnHand));
     // Course order, so the breakdown reads the way the race runs.
     row.going.sort(
       (a, b) =>
@@ -299,14 +321,29 @@ export function isPulled(line: PullLine, truck = false): boolean {
  * list, progress bar and load step sees it. Lists already loaded are left
  * alone, since stock has left the shed against what they say.
  */
-export async function setPulled(shares: PullDestination[], packed: boolean): Promise<number> {
-  let changed = 0;
+export async function setPulled(shares: PullDestination[], packed: boolean): Promise<LineSnapshot[]> {
+  const before: LineSnapshot[] = [];
   for (const share of shares) {
     if (!share.canPack) continue;
     const qty = packed ? share.qtyRequired : 0;
     if (share.qtyPacked === qty) continue;
+    before.push({ lineId: share.lineId, qty: share.qtyPacked });
     await update(db.packlistLines, share.lineId, { qtyPacked: qty });
-    changed += 1;
   }
-  return changed;
+  return before;
+}
+
+/** One line's number before a change that touched many, so it can be put back. */
+export interface LineSnapshot {
+  lineId: string;
+  qty: number;
+}
+
+/**
+ * Put back what a tick across every station changed. One tap on the
+ * warehouse list writes to a dozen lists, so a mis-tap needs one tap back,
+ * not a dozen stations recounted.
+ */
+export async function restoreLines(field: 'qtyPacked' | 'qtyOnTruck', before: LineSnapshot[]): Promise<void> {
+  for (const { lineId, qty } of before) await update(db.packlistLines, lineId, { [field]: qty });
 }

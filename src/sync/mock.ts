@@ -20,7 +20,7 @@ import type {
   SignInChallenge,
   SyncBackend,
 } from './types';
-import { SyncError, UNSCOPED, inviteExpiry } from './types';
+import { SyncError, UNSCOPED, inviteExpiry, sameInviteCode } from './types';
 
 /**
  * A stand-in server.
@@ -272,17 +272,18 @@ export class MockBackend implements SyncBackend {
   }
 
   async joinWithInvite(token: string, displayName: string): Promise<Session> {
-    const normalised = token.trim().toUpperCase();
-    const invite = (await server.invites.toArray()).find(
-      (entry) => entry.token.toUpperCase() === normalised,
-    );
+    const invites = await server.invites.toArray();
+    const invite = invites.find((entry) => sameInviteCode(entry.token, token));
     if (!invite) {
       // Named unmistakably: the real server produces almost the same sentence,
       // and a volunteer stuck on the stand-in could not tell which one had
-      // turned them away.
+      // turned them away. Only an empty demo is told it has no invites.
       throw new SyncError(
-        'This device is on the on-device demo server, which has no invites on it. ' +
-          'Connect it to the SingleTrack server from More → Accounts & sync.',
+        invites.length
+          ? 'That invite code was not recognised on the on-device demo server. Check it against the card, ' +
+              'or connect to the SingleTrack server from More → Accounts & sync if it was made there.'
+          : 'This device is on the on-device demo server, which has no invites on it. ' +
+              'Connect it to the SingleTrack server from More → Accounts & sync.',
         'auth',
       );
     }

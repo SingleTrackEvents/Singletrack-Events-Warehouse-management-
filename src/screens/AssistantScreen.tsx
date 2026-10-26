@@ -3,10 +3,10 @@ import { Navigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { SwipeToDelete } from '../components/SwipeToDelete';
-import { ConfirmSheet, EmptyState, Field, Pill, Sheet } from '../components/ui';
+import { EmptyState, Field, Pill, Sheet } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { alive, softDelete, update } from '../db/repo';
+import { alive, restore, softDelete, update } from '../db/repo';
 import { useEvents } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
@@ -36,7 +36,6 @@ export default function AssistantScreen() {
   );
   // 'new' for a blank sheet, or the rule being changed.
   const [editing, setEditing] = useState<'new' | AssistantNote>();
-  const [removing, setRemoving] = useState<AssistantNote>();
   const [test, setTest] = useState<{ phase: 'idle' | 'running' | 'ok' | 'failed'; message: string }>({
     phase: 'idle',
     message: '',
@@ -114,7 +113,11 @@ export default function AssistantScreen() {
         )}
         <div className="list">
           {(notes ?? []).map((note) => (
-            <SwipeToDelete key={note.id} label="Delete" onDelete={() => setRemoving(note)}>
+            <SwipeToDelete key={note.id} label="Delete" onDelete={() =>
+                void softDelete(db.assistantNotes, note.id).then(() =>
+                  toast('Rule deleted', 'ok', { undo: () => restore(db.assistantNotes, note.id) }),
+                )
+              }>
               {/* Tapping a rule opens it for editing: the wording, or where it applies. */}
               <button type="button" className="row assistant-note" onClick={() => setEditing(note)}>
                 <span className="row-icon">{note.source === 'learned' ? '💡' : '📝'}</span>
@@ -196,20 +199,6 @@ export default function AssistantScreen() {
         />
       ) : null}
 
-      {removing ? (
-        <ConfirmSheet
-          title="Delete this rule?"
-          body={removing.text}
-          confirmLabel="Delete"
-          tone="danger"
-          onCancel={() => setRemoving(undefined)}
-          onConfirm={() => {
-            void softDelete(db.assistantNotes, removing.id);
-            setRemoving(undefined);
-            toast('Rule deleted');
-          }}
-        />
-      ) : null}
     </Screen>
   );
 }

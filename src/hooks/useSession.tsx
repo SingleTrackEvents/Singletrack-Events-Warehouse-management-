@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { liveQuery } from 'dexie';
 import {
   BACKEND_ENABLED_KEY,
   connectDemoBackend,
@@ -61,10 +62,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const restored = restoreBackend();
       setBackendState(restored);
       if (restored) adopt(await restored.currentSession());
-      setPending(await pendingCount());
       setReady(true);
     })();
   }, [adopt]);
+
+  /*
+   * The waiting count follows the database, not the last sync attempt.
+   *
+   * Offline, a sync never starts, so a count refreshed only after one kept
+   * saying "Everything synced" while edits piled up on the phone. Watching
+   * the unsynced rows moves it on every local write. It counts only what
+   * this account would send: a volunteer's phone also holds the whole
+   * catalogue it pulled, and that is never theirs to push.
+   */
+  useEffect(() => {
+    const who = backend ? session : null;
+    const subscription = liveQuery(() => pendingCount(who)).subscribe({
+      next: setPending,
+      error: (cause: unknown) => console.error('Could not count unsynced changes', cause),
+    });
+    return () => subscription.unsubscribe();
+  }, [backend, session]);
 
   const refreshPending = useCallback(async () => {
     setPending(await pendingCount(getBackend() ? session : null));

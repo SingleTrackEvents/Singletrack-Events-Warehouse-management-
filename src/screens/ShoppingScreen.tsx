@@ -7,7 +7,7 @@ import { SwipeToDelete } from '../components/SwipeToDelete';
 import { ConfirmSheet, EmptyState, Pill } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { byId, softDelete, update } from '../db/repo';
+import { byId, restore, softDelete, update } from '../db/repo';
 import { useCrewName, useEvents, useItems, useShoppingLines } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
@@ -15,8 +15,9 @@ import {
   addShoppingLine,
   awaitingBooking,
   bookAllBought,
-  bookIntoStock,
+  bookLine,
   bought,
+  canonicalShop,
   clearBought,
   describeLine,
   groupByShop,
@@ -29,7 +30,7 @@ import {
   toBuy,
 } from '../domain/shopping';
 import { downloadCsv } from '../domain/backup';
-import { formatQty, plural } from '../domain/format';
+import { formatQty, localIsoDate, plural } from '../domain/format';
 import type { ShoppingLine } from '../db/types';
 
 type Filter = 'todo' | 'bought' | 'all';
@@ -63,7 +64,6 @@ export default function ShoppingScreen() {
   const [filter, setFilter] = useState<Filter>('todo');
   const [forFilter, setForFilter] = useState<string>('');
   const [editing, setEditing] = useState<'new' | ShoppingLine>();
-  const [removing, setRemoving] = useState<ShoppingLine>();
   const [clearing, setClearing] = useState(false);
   const [booking, setBooking] = useState(false);
 
@@ -107,7 +107,12 @@ export default function ShoppingScreen() {
   const all = useMemo(() => lines ?? [], [lines]);
   const open = toBuy(all);
   const done = bought(all);
-  const waiting = awaitingBooking(all);
+  // An archived item is out of use: its purchase is not booked onto the shelf
+  // count, so it is not offered as waiting either.
+  const isArchived = (line: ShoppingLine) => Boolean(line.itemId && itemById.get(line.itemId)?.archived);
+  const waiting = awaitingBooking(all).filter((line) => !isArchived(line));
+  // Lines with a booking on its way, so a double tap on Book in is one tap.
+  const bookingNow = useRef(new Set<string>());
   const shops = useMemo(() => shopsUsed(all), [all]);
 
   // The "for" filter only earns its place once the list spans more than one
@@ -151,7 +156,11 @@ export default function ShoppingScreen() {
         toast(merged ? `${line.name} topped up to ${formatQty(line.qty, line.unit)}` : `${line.name} added`);
       });
     } else if (editing) {
-      void update(db.shoppingLines, editing.id, draft).then(() => toast('Line updated'));
+      // Spelt the way the rest of the list spells the shop, so it joins that group.
+      const others = all.filter((line) => line.id !== editing.id);
+      void update(db.shoppingLines, editing.id, { ...draft, shop: canonicalShop(draft.shop, others) }).then(() =>
+        toast('Line updated'),
+      );
     }
     setEditing(undefined);
   };
@@ -177,7 +186,7 @@ export default function ShoppingScreen() {
   const exportCsv = () => {
     downloadCsv(
       shoppingCsv(visible, eventName, (itemId) => (itemId ? itemById.get(itemId)?.sku ?? '' : '')),
-      `shopping-list-${new Date().toISOString().slice(0, 10)}.csv`,
+      `shopping-list-${localIsoDate()}.csv`,
     );
     toast('Shopping list saved to downloads');
   };
@@ -186,7 +195,34 @@ export default function ShoppingScreen() {
     setBooking(true);
     const count = await bookAllBought(all, crew);
     setBooking(false);
-    toast(count ? `${plural(count, 'line')} booked into stock` : 'Nothing to book in', count ? 'ok' : 'warn');
+    const archived = awaitingBooking(all).filter(isArchived).length;
+    const skipped = archived ? `. ${plural(archived, 'archived item')} left out` : '';
+    toast(
+      count ? `${plural(count, 'line')} booked into stock${skipped}` : `Nothing to book in${skipped}`,
+      count && !archived ? 'ok' : 'warn',
+    );
+  };
+
+  const bookOne = (line: ShoppingLine) => {
+    if (bookingNow.current.has(line.id)) return;
+    bookingNow.current.add(line.id);
+    void bookLine(line.id, crew)
+      .then((result) => {
+        if (result.status === 'booked') {
+          toast(
+            result.resolved
+              ? `${line.name} booked into stock and off the low-stock list`
+              : `${line.name} booked into stock`,
+          );
+        } else if (result.status === 'already') {
+          toast(`${line.name} is already booked in`);
+        } else if (result.status === 'archived') {
+          toast(`${line.name} is archived, so it was not booked in. Bring the item back first.`, 'warn');
+        } else {
+          toast('Could not book that in', 'warn');
+        }
+      })
+      .finally(() => bookingNow.current.delete(line.id));
   };
 
   return (
@@ -296,6 +332,8 @@ export default function ShoppingScreen() {
                       <span className="row-sub">
                         {isBooked(line) ? (
                           <Pill tone="ok">Booked into stock</Pill>
+                        ) : isArchived(line) ? (
+                          <Pill tone="warn">Bought · item archived, not booked in</Pill>
                         ) : line.itemId ? (
                           <Pill tone="info">Bought · not booked in yet</Pill>
                         ) : (
@@ -319,15 +357,15 @@ export default function ShoppingScreen() {
                       >
                         {formatQty(line.qty, line.unit)} <span aria-hidden>✎</span>
                       </button>
+                    ) : line.itemId && !isBooked(line) && isArchived(line) ? (
+                      <Pill tone="warn">Archived item</Pill>
                     ) : line.itemId && !isBooked(line) ? (
                       <button
                         type="button"
                         className="btn btn-outline btn-sm"
                         onClick={(event) => {
                           event.stopPropagation();
-                          void bookIntoStock(line.id, crew).then((movement) => {
-                            toast(movement ? `${line.name} booked into stock` : 'Could not book that in', movement ? 'ok' : 'warn');
-                          });
+                          bookOne(line);
                         }}
                       >
                         Book in
@@ -339,7 +377,13 @@ export default function ShoppingScreen() {
                 </div>
               );
               return (
-                <SwipeToDelete key={line.id} label="Remove" onDelete={() => setRemoving(line)}>
+                <SwipeToDelete key={line.id} label="Remove" onDelete={() =>
+                    void softDelete(db.shoppingLines, line.id).then(() =>
+                      toast(`${line.name} off the list`, 'ok', {
+                        undo: () => restore(db.shoppingLines, line.id),
+                      }),
+                    )
+                  }>
                   {row}
                 </SwipeToDelete>
               );
@@ -385,25 +429,6 @@ export default function ShoppingScreen() {
           shops={shops}
           onClose={() => setEditing(undefined)}
           onSave={save}
-        />
-      ) : null}
-
-      {removing ? (
-        <ConfirmSheet
-          title="Remove this line?"
-          body={
-            isBooked(removing)
-              ? `${removing.name} comes off the list. The stock it was booked into stays where it is.`
-              : removing.name
-          }
-          confirmLabel="Remove"
-          tone="danger"
-          onCancel={() => setRemoving(undefined)}
-          onConfirm={() => {
-            void softDelete(db.shoppingLines, removing.id);
-            setRemoving(undefined);
-            toast('Line removed');
-          }}
         />
       ) : null}
 

@@ -88,16 +88,25 @@ describe('the pack rules', () => {
     expect(asked(list([['OTH-02', 25]]), 'start')).toEqual({ 'OTH-03': 25, 'CRS-90': 25 });
   });
 
-  it('gives 3 table cloths for every 2 marquees, rounded up', () => {
-    expect(asked(list([['STR-02', 3], ['ANC-01', 12], ['ANC-03', 12], ['STR-01', 6]]), 'aid_station')['FRN-03']).toBe(5);
-    expect(asked(list([['STR-02', 2], ['ANC-01', 8], ['ANC-03', 8]]), 'event_village')).toEqual({ 'FRN-03': 3 });
+  it('asks for a Starlink at GPT100 stations only', () => {
+    const gpt = (type: DestinationType) =>
+      Object.fromEntries(
+        suggestionsFor([], items, type, 'stw-event-gpt26').map((entry) => [entry.item.sku, entry.qty]),
+      );
+    expect(gpt('finish')).toEqual({ 'COM-01': 1 });
+    expect(gpt('aid_station')['COM-01']).toBe(1);
+    expect(gpt('event_village')).toEqual({ 'FRN-03': 12 }); // the village's table cloth floor
+    expect(asked([], 'finish')).toEqual({});
+    // No black bins at GPT100 this year, and a Starlink Mini is the station's Starlink.
+    expect(gpt('aid_station')['WST-01']).toBeUndefined();
+    expect(asked([], 'aid_station')['WST-01']).toBe(2);
+    const withMini = suggestionsFor(list([['COM-90', 1]]), items, 'aid_station', 'stw-event-gpt26');
+    expect(withMini.some((entry) => entry.item.sku === 'COM-01')).toBe(false);
   });
 
-  it('puts at least 3 cloths under a hired structure, and 12 at the GPT100 village', () => {
+  it('gives 3 table cloths for every 2 marquees, and at least 3 under a hired structure', () => {
+    expect(asked(list([['STR-02', 2], ['ANC-01', 8], ['ANC-03', 8]]), 'event_village')).toEqual({ 'FRN-03': 3 });
     expect(asked(list([['STR-90', 1]]), 'checkpoint')).toEqual({ 'FRN-03': 3 });
-    const village = suggestionsFor([], items, 'event_village', 'stw-event-gpt26');
-    expect(village.map((entry) => [entry.item.sku, entry.qty])).toEqual([['FRN-03', 12]]);
-    expect(asked([], 'event_village')).toEqual({});
   });
 
   it('finds nothing missing on the RCR26 cards, bar a cover for the recovery power board', () => {

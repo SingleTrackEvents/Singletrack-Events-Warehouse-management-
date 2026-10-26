@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
-import { ConfirmSheet, EmptyState, Field, Pill, Sheet } from '../components/ui';
+import { EmptyState, Field, Pill, Sheet } from '../components/ui';
 import { SwipeToDelete } from '../components/SwipeToDelete';
 import { useToast } from '../components/toastContext';
 import { useSearch } from '../hooks/useSearch';
@@ -18,7 +18,7 @@ import { downloadCsv } from '../domain/backup';
 import { suggestSku } from '../domain/skus';
 import { PackSizeField } from '../components/PackSizeField';
 import { CategoryPicker } from '../components/CategoryPicker';
-import type { Item, Unit } from '../db/types';
+import type { Unit } from '../db/types';
 import { UNITS, unitHasPackSize } from '../db/types';
 
 /**
@@ -36,7 +36,6 @@ export default function StockScreen() {
   const categories = useCategories();
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState(false);
-  const [archiving, setArchiving] = useState<Item>();
   const { session } = useSession();
   const crew = useCrewName();
   const canEdit = can(session, 'item:write');
@@ -174,6 +173,8 @@ export default function StockScreen() {
                 </div>
                 {isUncounted(item, counted) ? (
                   <Pill>Not counted</Pill>
+                ) : item.qtyOnHand < 0 ? (
+                  <Pill tone="danger">Count it</Pill>
                 ) : isLowStock(item, counted) ? (
                   <Pill tone="danger">Low</Pill>
                 ) : (
@@ -183,7 +184,13 @@ export default function StockScreen() {
             </Link>
             );
             return canArchive ? (
-              <SwipeToDelete key={item.id} label="Archive" onDelete={() => setArchiving(item)}>
+              <SwipeToDelete key={item.id} label="Archive" onDelete={() =>
+                  void update(db.items, item.id, { archived: true }).then(() =>
+                    toast(`${item.name} archived`, 'ok', {
+                      undo: () => update(db.items, item.id, { archived: false }),
+                    }),
+                  )
+                }>
                 {row}
               </SwipeToDelete>
             ) : (
@@ -267,7 +274,7 @@ export default function StockScreen() {
         </div>
       ) : null}
 
-      {/* The shed's other jobs live here rather than on a tab of their own. */}
+      {/* The warehouse's other jobs live here rather than on a tab of their own. */}
       {canCount || can(session, 'shopping:manage') || can(session, 'template:manage') ? (
         <div className="btn-row mt-4 no-print">
           {canCount ? (
@@ -290,20 +297,6 @@ export default function StockScreen() {
 
       {adding ? <NewItemSheet onClose={() => setAdding(false)} /> : null}
 
-      {archiving ? (
-        <ConfirmSheet
-          title={`Archive ${archiving.name}?`}
-          body="It disappears from search and pickers but stays on past packlists and the ledger. It can be brought back from its page."
-          confirmLabel="Archive"
-          tone="danger"
-          onCancel={() => setArchiving(undefined)}
-          onConfirm={() => {
-            const target = archiving;
-            setArchiving(undefined);
-            void update(db.items, target.id, { archived: true }).then(() => toast('Item archived'));
-          }}
-        />
-      ) : null}
     </Screen>
   );
 }

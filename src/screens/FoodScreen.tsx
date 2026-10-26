@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Screen } from '../App';
 import { ConfirmSheet, EmptyState, Field, Pill, Sheet, Stepper } from '../components/ui';
 import { ItemPicker } from '../components/ItemPicker';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { byId, create, nextSort, softDelete, update } from '../db/repo';
+import { byId, create, nextSort, restore, softDelete, update } from '../db/repo';
 import { FOOD_CATEGORY } from '../db/foodCatalogue';
 import { seedId } from '../db/seed';
 import {
@@ -26,6 +26,7 @@ import {
   dayShort,
   eventDays,
   lineQtyByDay,
+  parseAmount,
   sortDays,
   stationRunners,
   stationRunnersByDay,
@@ -64,6 +65,9 @@ export default function FoodScreen() {
   const [editingLine, setEditingLine] = useState<ConsumptionLine>();
   const [applying, setApplying] = useState(false);
   const [working, setWorking] = useState(false);
+  // Set before the first await, so a second tap in the same frame (before
+  // `working` has re-rendered the button) is turned away too.
+  const sending = useRef(false);
   const [listing, setListing] = useState(false);
 
   const itemById = useMemo(() => byId(items ?? []), [items]);
@@ -129,9 +133,16 @@ export default function FoodScreen() {
   };
 
   const apply = async () => {
+    if (sending.current) return;
+    sending.current = true;
     setWorking(true);
-    const result = await applyPlanToPacklists(event.id, destinations ?? []);
-    setWorking(false);
+    let result;
+    try {
+      result = await applyPlanToPacklists(event.id, destinations ?? []);
+    } finally {
+      sending.current = false;
+      setWorking(false);
+    }
     setApplying(false);
     if (!result.stations) {
       toast('Nothing to send yet — the plan computes to zero', 'warn');
@@ -532,16 +543,26 @@ function RaceSheet({
   const [projection, setProjection] = useState(100);
   // A one-day event needs no asking; a weekend leaves it open until told.
   const [day, setDay] = useState(dayOptions.length === 1 ? dayOptions[0] : '');
+  // One race per tap on Add, however fast the second tap comes.
+  const saving = useRef(false);
+  const [busy, setBusy] = useState(false);
 
   const save = async () => {
-    if (!name.trim()) return;
-    await create(db.races, {
-      eventId: event.id,
-      name: name.trim(),
-      projection,
-      sort: nextSort(existing),
-      day: day || null,
-    });
+    if (!name.trim() || saving.current) return;
+    saving.current = true;
+    setBusy(true);
+    try {
+      await create(db.races, {
+        eventId: event.id,
+        name: name.trim(),
+        projection,
+        sort: nextSort(existing),
+        day: day || null,
+      });
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
     toast('Race added');
     onClose();
   };
@@ -558,7 +579,7 @@ function RaceSheet({
           <button
             type="button"
             className="btn btn-primary"
-            disabled={!name.trim()}
+            disabled={!name.trim() || busy}
             onClick={() => void save()}
           >
             Add
@@ -713,12 +734,21 @@ function LineSheet({
   const toast = useToast();
   const [raceId, setRaceId] = useState<string>(line.raceId ?? '');
   const [perRunner, setPerRunner] = useState(line.perRunner ? String(line.perRunner) : '');
-  const [flatQty, setFlatQty] = useState(line.flatQty);
-  const [removing, setRemoving] = useState(false);
+  const [flat, setFlat] = useState(line.flatQty);
+  const [flatTouched, setFlatTouched] = useState(false);
   const [copyFor, setCopyFor] = useState('');
 
-  const parsed = Number(perRunner);
-  const ratio = perRunner.trim() && Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  const parsed = parseAmount(perRunner);
+  const ratioError = 'error' in parsed ? parsed.error : undefined;
+  const ratio = 'value' in parsed ? (parsed.value ?? 0) : 0;
+  // The picker's 1 becomes the flat amount on a new line. Once a per-runner
+  // amount goes on, that 1 would ride on top unseen, so it drops to 0 unless
+  // someone sets the flat amount on purpose.
+  const flatQty = !flatTouched && line.perRunner === 0 && ratio > 0 ? 0 : flat;
+  const setFlatQty = (next: number) => {
+    setFlatTouched(true);
+    setFlat(next);
+  };
   const draft: ConsumptionLine = { ...line, perRunner: ratio, flatQty, raceId: raceId || null };
   const visits = destination ? stationVisits(destination, races) : [];
   const byDay = destination ? lineQtyByDay(draft, destination, races) : [];
@@ -729,6 +759,7 @@ function LineSheet({
     .filter((race) => race.id !== (raceId || null) && !siblings.some((entry) => entry.raceId === race.id));
 
   const save = async () => {
+    if (ratioError) return;
     await update(db.consumptionLines, line.id, { perRunner: ratio, flatQty, raceId: raceId || null });
     toast('Rule saved');
     onClose();
@@ -740,10 +771,24 @@ function LineSheet({
       onClose={onClose}
       footer={
         <>
-          <button type="button" className="btn btn-outline" onClick={() => setRemoving(true)}>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() =>
+              void softDelete(db.consumptionLines, line.id).then(() => {
+                toast('Removed from the plan', 'ok', { undo: () => restore(db.consumptionLines, line.id) });
+                onClose();
+              })
+            }
+          >
             Remove
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => void save()}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={Boolean(ratioError)}
+            onClick={() => void save()}
+          >
             Save
           </button>
         </>
@@ -778,10 +823,16 @@ function LineSheet({
               inputMode="decimal"
               value={perRunner}
               placeholder="0.2"
+              aria-invalid={ratioError ? true : undefined}
               onChange={(changed) => setPerRunner(changed.target.value)}
             />
           )}
         </Field>
+        {ratioError ? (
+          <p className="small" style={{ color: 'var(--danger)' }}>
+            {ratioError}. Use a number like 0.2 or 1,5.
+          </p>
+        ) : null}
         <Field label="Flat amount" hint="Supplied regardless of numbers — the salt shaker, the tea box.">
           {(id) => (
             <span id={id}>
@@ -820,7 +871,7 @@ function LineSheet({
               <button
                 type="button"
                 className="btn btn-outline"
-                disabled={!copyFor}
+                disabled={!copyFor || Boolean(ratioError)}
                 onClick={() => {
                   void copyRuleForRace(draft, copyFor).then(() => {
                     toast(`Rule added for the ${races.find((race) => race.id === copyFor)?.name ?? 'race'}`);
@@ -835,21 +886,6 @@ function LineSheet({
         ) : null}
       </div>
 
-      {removing ? (
-        <ConfirmSheet
-          title={`Take ${itemName} off this station?`}
-          body="Only the plan changes — nothing already on the packlist is removed."
-          confirmLabel="Remove"
-          tone="danger"
-          onCancel={() => setRemoving(false)}
-          onConfirm={() => {
-            void softDelete(db.consumptionLines, line.id).then(() => {
-              toast('Removed from the plan');
-              onClose();
-            });
-          }}
-        />
-      ) : null}
     </Sheet>
   );
 }

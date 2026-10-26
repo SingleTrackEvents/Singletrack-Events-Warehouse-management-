@@ -3,7 +3,8 @@ import { db } from '../db/db';
 import { create, liveWhere } from '../db/repo';
 import { interpretGrids } from './importGrid';
 import type { Grid } from './importGrid';
-import { buildPlan, commitImport } from './packlistImport';
+import { buildPlan, commitImport, planImport, sharpenMatch } from './packlistImport';
+import { matchItem } from './importMatch';
 import type { ImportPlan } from './packlistImport';
 import { createPacklist, addLine } from './packlists';
 import type { Destination, Item, RaceEvent } from '../db/types';
@@ -297,5 +298,70 @@ describe('commitImport', () => {
     const result = await commitImport(plain, { existing: 'set', source: '' });
     expect(result.linesSkipped).toBe(1);
     expect(result.packlistsTouched).toBe(0);
+  });
+});
+
+describe('planImport', () => {
+  async function plan(rows: string[][]) {
+    const world = await setUp();
+    await makeItem('Starlink', 'COM-01');
+    const destinations = await liveWhere(db.destinations, 'eventId', world.event.id);
+    const items = await db.items.toArray();
+    const categories = await db.categories.toArray();
+    const result = planImport(
+      [{ name: 'Sheet1', rows }],
+      {
+        placeNames: destinations.map((destination) => destination.name),
+        categoryNames: categories.map((category) => category.name),
+      },
+      { eventId: world.event.id, destinations, items, categories },
+    );
+    return { ...world, plan: result };
+  }
+
+  it('turns away a negative quantity instead of reading it as positive', async () => {
+    const { plan: result } = await plan([['Item', 'Qty'], ['Trestle Tables', '-5'], ['Kettle - Electric', '2']]);
+    expect(result.items.map((item) => [item.name, item.totalQty])).toEqual([['Kettle - Electric', 2]]);
+    expect(result.problems).toEqual([
+      { where: 'Sheet1 row 2', name: 'Trestle Tables', text: '-5', reason: 'negative' },
+    ]);
+  });
+
+  it('lists a row whose quantity is words, rather than dropping it quietly', async () => {
+    const { plan: result } = await plan([
+      ['Item', 'Qty'],
+      ['Trestle Tables', 'abc'],
+      ['Kettle - Electric', '2'],
+      ['Marquee 3x3', '1'],
+    ]);
+    expect(result.problems).toEqual([
+      { where: 'Sheet1 row 2', name: 'Trestle Tables', text: 'abc', reason: 'not a number' },
+    ]);
+  });
+
+  it('flags a quantity big enough to be a slipped key', async () => {
+    const { plan: result } = await plan([['Item', 'Qty'], ['Trestle Tables', '1000000'], ['Kettle - Electric', '2']]);
+    const byName = new Map(result.items.map((item) => [item.name, item]));
+    expect(byName.get('Trestle Tables')?.large).toBe(true);
+    expect(byName.get('Kettle - Electric')?.large).toBe(false);
+  });
+
+  it('does not guess a Starlink for a Starlink Mini', async () => {
+    const { plan: result } = await plan([['Item', 'Qty'], ['Starlink Mini', '1']]);
+    expect(result.items[0].action).toBe('create');
+    expect(result.items[0].itemId).toBeNull();
+  });
+
+  it('prefers the catalogue name that has every word the file used', async () => {
+    await setUp();
+    const starlink = await makeItem('Starlink', 'COM-01');
+    const mini = await makeItem('Starlink Mini Kit', 'COM-02');
+    const items = await db.items.toArray();
+    const guess = matchItem('Starlink Mini', items);
+    expect(sharpenMatch('Starlink Mini', guess, items)?.item.id).toBe(mini.id);
+    // Saying less than the catalogue name is still a fair guess.
+    const loose = { item: mini, score: 0.7, confidence: 'likely' as const };
+    expect(sharpenMatch('Starlink', loose, items)?.item.id).toBe(mini.id);
+    expect(sharpenMatch('Starlink', { item: starlink, score: 1, confidence: 'sure' }, items)?.item.id).toBe(starlink.id);
   });
 });

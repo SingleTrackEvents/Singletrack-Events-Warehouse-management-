@@ -206,11 +206,30 @@ describe('the seeded season', () => {
     );
     const rosea = destinations.find((destination) => destination.name === 'Rosea Carpark');
     expect(rosea?.courseKm).toBe(59);
-    // 13 from the race page, and 4 more from the GPT pack lists.
-    expect(destinations).toHaveLength(17);
-    const stockyard = destinations.find((destination) => destination.name === 'Stockyard Track');
-    expect(stockyard?.vehicle).toBe('Ray Taylor 4WD');
-    expect(rosea?.vehicle).toBe('Van #2');
+    // 13 from the race page, 3 more from the GPT 2025 pack list and 2 from
+    // the 2026 vehicle plan.
+    expect(destinations).toHaveLength(18);
+    // This year's plan names, times, vehicles and power.
+    const gar = destinations.find((destination) => destination.id === seedId('dest', 'gpt26-GAR Trailhead'))!;
+    expect(gar.vehicle).toBe('Pantech #1');
+    expect(gar.schedule?.windows[1]).toEqual({ label: 'Miler', firstRunner: '2026-11-06T09:26', cutoff: '2026-11-06T12:00' });
+    expect(destinations.some((destination) => destination.name === 'Jimmy Creek Campground')).toBe(true);
+  });
+
+  it('brings the 2026 plan to stations seeded before it, without touching the crew’s edits', async () => {
+    await seedStarterData();
+    const jimmy = seedId('dest', 'gpt26-Jimmy Creek Rd');
+    const borough = seedId('dest', 'gpt26-Borough Huts');
+    // As an older build left them: last year's name, no plan, one renamed by hand.
+    await db.destinations.update(jimmy, { name: 'Jimmy Creek Rd', schedule: undefined, vehicle: undefined });
+    await db.destinations.update(borough, { name: 'Borough Huts camp', schedule: undefined, vehicle: 'Van 9' });
+    await seedStarterData({ onlyMissing: true });
+    const after = (id: string) => db.destinations.get(id);
+    expect((await after(jimmy))!.name).toBe('Jimmy Creek Campground');
+    expect((await after(jimmy))!.schedule?.power).toBe('Light tower');
+    expect((await after(borough))!.name).toBe('Borough Huts camp');
+    expect((await after(borough))!.vehicle).toBe('Van 9');
+    expect((await after(borough))!.schedule?.connectivity).toBe('Starlink 4');
   });
 
   it('links Hounslow’s stations to its races, double passes included', async () => {
@@ -867,13 +886,13 @@ describe('the GPT100 starting packlists', () => {
     const packlists = alive(await db.packlists.toArray()).filter((entry) => entry.eventId === gpt);
     expect(packlists).toHaveLength(GPT_PACKLISTS.length);
     for (const spec of GPT_PACKLISTS) {
-      const packlist = packlists.find((entry) => entry.name === spec.station);
+      const packlist = packlists.find((entry) => entry.id === seedId('plist', `gpt26-${spec.station}`));
       expect(packlist, spec.station).toBeDefined();
       expect(destinations.some((entry) => entry.id === packlist!.destinationId), spec.station).toBe(true);
     }
     // The sites the pack list adds slot in between the race page's own.
     const order = destinations.sort((a, b) => a.sort - b.sort).map((entry) => entry.name);
-    expect(order.slice(0, 3)).toEqual(['Mt Zero Picnic Area', 'Coppermine', 'GAR Trailhead']);
+    expect(order.slice(0, 3)).toEqual(['Mt Zero (start line)', 'Copper Mine Track (water table)', 'GAR Trailhead']);
   });
 
   it('packs the black box as one Aid Station Box, with only the extras beside it', async () => {
@@ -977,43 +996,6 @@ describe('the Roller Coaster Run lists moving from the v1.5 cards to v2.1', () =
     expect((await db.packlistLines.get(doongallaIbc))?.qtyRequired).toBe(1);
     expect((await db.packlistLines.get(singletonIbc))?.deletedAt).not.toBeNull();
     expect((await db.packlistLines.get(singletonEsky))?.qtyRequired).toBe(5);
-  });
-});
-
-describe('the GPT100 lists moving to the 2026 Master Pack List', () => {
-  it('counts every Starlink once, where it starts', () => {
-    const units = (name: string) =>
-      GPT_PACKLISTS.flatMap((list) => list.lines.filter((line) => line.item === name)).reduce(
-        (sum, line) => sum + line.qty,
-        0,
-      );
-    expect(units('Starlink')).toBe(5);
-    expect(units('Starlink Mini')).toBe(3);
-    expect(units('Picket Fence')).toBe(1);
-    expect(units('Large Generator (Hired)')).toBe(2); // Borough, then Cassidys; and the village
-  });
-
-  it('retires the 2025 lines, tags the vehicle and fills the water point box', async () => {
-    await seedStarterData();
-    const firewood = seedId('pline', 'gpt26-Borough Huts-Firewood');
-    const borough = seedId('dest', 'gpt26-Borough Huts');
-    const wood = alive(await db.items.toArray()).find((item) => item.name === 'Firewood')!;
-    // As a phone holds them after the 2025 seed: raw writes keep revision 1.
-    await db.packlistLines.put({
-      ...(await db.packlistLines.get(seedId('pline', 'gpt26-Borough Huts-Tarps')))!,
-      id: firewood,
-      itemId: wood.id,
-      qtyRequired: 2,
-    });
-    const { vehicle: _, ...untagged } = (await db.destinations.get(borough))!;
-    await db.destinations.put(untagged);
-
-    await ensureSeeded();
-
-    expect((await db.packlistLines.get(firewood))?.deletedAt).not.toBeNull();
-    expect((await db.destinations.get(borough))?.vehicle).toBe('Van #3');
-    const box = alive(await db.items.toArray()).find((item) => item.name === 'Water Point Box')!;
-    expect(box.contents?.length).toBe(10);
   });
 });
 
@@ -1200,5 +1182,92 @@ describe('the Roller Coaster Run truck stage', () => {
     await update(db.events, rcr, { truckStage: false });
     await ensureSeeded();
     expect((await db.events.get(rcr))?.truckStage).toBe(false);
+  });
+});
+
+describe('GPT100 2026 pack list, as handed over', () => {
+  const gptLines = async () => {
+    const event = seedId('event', 'gpt26');
+    const packlists = alive(await db.packlists.toArray()).filter((entry) => entry.eventId === event);
+    const ids = new Set(packlists.map((entry) => entry.id));
+    const items = new Map(alive(await db.items.toArray()).map((item) => [item.id, item]));
+    return alive(await db.packlistLines.toArray())
+      .filter((line) => ids.has(line.packlistId))
+      .map((line) => ({ ...line, name: items.get(line.itemId)!.name }));
+  };
+  const total = (lines: Array<{ name: string; qtyRequired: number }>, name: string) =>
+    lines.filter((line) => line.name === name).reduce((sum, line) => sum + line.qtyRequired, 0);
+
+  it('carries this year’s power, heaters, shoe wash, beds and units', async () => {
+    await seedStarterData();
+    const lines = await gptLines();
+    expect(total(lines, 'Gas Heater')).toBe(12);
+    expect(total(lines, 'Generator')).toBe(2);
+    expect(total(lines, 'Large Generator (Hired)')).toBe(2); // Borough, on to Cassidys
+    expect(total(lines, 'EcoFlow Battery (1 kWh)')).toBe(3); // #1 moves on to Yarram Gap
+    expect(total(lines, 'Light Tower (Diesel, Hired)')).toBe(3);
+    expect(total(lines, 'Jerry Can 20 L (Diesel, labelled)')).toBe(6);
+    expect(total(lines, 'Shoe Wash Kit')).toBe(23);
+    expect(total(lines, 'Bins - Large Round Black')).toBe(0);
+    expect(total(lines, 'Orange Wire Flags')).toBe(1);
+    const dunkeld = seedId('plist', 'gpt26-Dunkeld Finish');
+    expect(lines.find((line) => line.packlistId === dunkeld && line.name === 'Camp Stretcher / Folding Bed')!.qtyRequired).toBe(8);
+    // Units move on rather than leaving the warehouse twice.
+    const griffin = seedId('plist', 'gpt26-Griffin Fireline');
+    expect(lines.find((line) => line.packlistId === griffin && line.name === 'Starlink')!.fromDestinationId).toBe(
+      seedId('dest', 'gpt26-Mt Difficult Rd'),
+    );
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'Starlink Mini')).toBe(3);
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'Starlink')).toBe(5);
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'Large Generator (Hired)')).toBe(1);
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'EcoFlow Battery (1 kWh)')).toBe(2);
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'Picket Fence')).toBe(1);
+    expect(total(lines, 'Blankets / Space Blankets')).toBe(3 * total(lines, 'Camp Stretcher / Folding Bed'));
+  });
+
+  it('retires the 2025 firewood and fills the water point box', async () => {
+    await seedStarterData();
+    const firewood = seedId('pline', 'gpt26-Borough Huts-Firewood');
+    const wood = alive(await db.items.toArray()).find((item) => item.name === 'Firewood')!;
+    // As a phone holds it after the 2025 seed: a raw write keeps revision 1.
+    await db.packlistLines.put({
+      ...(await db.packlistLines.get(seedId('pline', 'gpt26-Borough Huts-Tarps')))!,
+      id: firewood,
+      itemId: wood.id,
+      qtyRequired: 2,
+    });
+    await seedStarterData({ onlyMissing: true });
+    expect((await db.packlistLines.get(firewood))?.deletedAt).toBeTruthy();
+    const box = alive(await db.items.toArray()).find((item) => item.name === 'Water Point Box')!;
+    expect(box.contents?.length).toBe(10);
+  });
+
+  it('takes sugar out of the aid station box', async () => {
+    await seedStarterData();
+    const items = alive(await db.items.toArray());
+    const kit = items.find((item) => item.sku === 'KIT-01')!;
+    const sugar = items.find((item) => item.name === 'Sugar')!;
+    expect(kit.contents!.some((content) => content.itemId === sugar.id)).toBe(false);
+    // A kit seeded with sugar in it loses it on the next top-up.
+    await db.items.update(kit.id, { contents: [...kit.contents!, { itemId: sugar.id, qty: 1 }] });
+    await seedStarterData({ onlyMissing: true });
+    const after = (await db.items.get(kit.id))!;
+    expect(after.contents!.some((content) => content.itemId === sugar.id)).toBe(false);
+  });
+
+  it('swaps last year’s generator for an EcoFlow on a list nobody has touched', async () => {
+    await seedStarterData();
+    const mtDifficult = seedId('plist', 'gpt26-Mt Difficult Rd');
+    const generator = seedId('pline', 'gpt26-Mt Difficult Rd-Generator');
+    // As an older build left it: the generator still on the list, untouched.
+    const generatorItem = alive(await db.items.toArray()).find((item) => item.name === 'Generator')!;
+    await create(db.packlistLines, {
+      id: generator, packlistId: mtDifficult, itemId: generatorItem.id, qtyRequired: 1, qtyPacked: 0,
+      qtyReturned: 0, mandatory: false, containerId: null, note: '', sort: 10,
+    });
+    await seedStarterData({ onlyMissing: true });
+    expect((await db.packlistLines.get(generator))?.deletedAt).toBeTruthy();
+    const ecoflow = seedId('pline', 'gpt26-Mt Difficult Rd-EcoFlow Battery (1 kWh)');
+    expect((await db.packlistLines.get(ecoflow))?.packlistId).toBe(mtDifficult);
   });
 });

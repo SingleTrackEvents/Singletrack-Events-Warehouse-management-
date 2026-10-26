@@ -123,6 +123,8 @@ export function moveOf(
  * the shortfall shows up once, at the shed, rather than again at the station.
  */
 export function countAt(line: PacklistLine, move: Move, truckStage: boolean): { got: number; want: number } {
+  // Gear moving on from another station is not the warehouse's to load.
+  if (line.fromDestinationId && (move === 'truck' || move === 'vans')) return { got: 1, want: 1 };
   switch (move) {
     case 'plan':
       return { got: line.qtyRequired > 0 ? 1 : 0, want: 1 };
@@ -146,10 +148,27 @@ export function countAt(line: PacklistLine, move: Move, truckStage: boolean): { 
  * nobody saw.
  */
 export function expectedHome(line: PacklistLine, consumable = false): number {
+  return round2(stationHome(line, consumable) + leftOnTruck(line));
+}
+
+/** What should come home from the station itself. */
+function stationHome(line: PacklistLine, consumable: boolean): number {
   if (hasLeft(line)) return line.qtyLeft as number;
   if (consumable) return 0;
   if (isConfirmed(line)) return received(line);
+  // Gear moving on from another station was never packed here; it was due.
+  if (line.fromDestinationId) return line.qtyRequired;
   return line.qtyPacked;
+}
+
+/**
+ * Gear that left the warehouse on the truck for a station but never went
+ * into its van. It is still on the truck, or in the yard, and comes home
+ * with the truck: sixty-three tables out and twenty-three in vans is forty
+ * that must still be counted in, or the warehouse loses them.
+ */
+export function leftOnTruck(line: PacklistLine): number {
+  return round2(Math.max(0, (line.qtyIssued ?? 0) - line.qtyPacked));
 }
 
 export interface MoveProgress {

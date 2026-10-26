@@ -1,4 +1,5 @@
-import type { AccessType, DestinationType, EventStatus } from './types';
+import { GPT_PLAN_2026 } from './gptSchedule';
+import type { AccessType, DestinationType, EventStatus, StationSchedule } from './types';
 
 /**
  * The season's events, with their aid stations.
@@ -29,8 +30,20 @@ export interface SeedDestination {
    * between them on phones that already have the rest.
    */
   sort?: number;
-  /** The vehicle tag this station's gear travels in, e.g. "Van #1". */
+  /**
+   * The name shown, when it differs from `name`. The id is made from `name`,
+   * so a station renamed for a new edition keeps its packlist and its links.
+   */
+  title?: string;
+  /** The vehicle that carries the station's gear. */
   vehicle?: string;
+  /** When the station runs, and how it is set up and packed down. */
+  schedule?: StationSchedule;
+}
+
+/** Lay an event's station plan over its seeded stations, matched by seeded name. */
+function withPlan<T extends SeedDestination>(destinations: T[], plan: Record<string, Partial<SeedDestination>>): T[] {
+  return destinations.map((destination) => ({ ...destination, ...(plan[destination.name] ?? {}) }));
 }
 
 export interface SeedEvent {
@@ -180,28 +193,15 @@ export const EVENT_SEED: SeedEvent[] = [
     notes:
       'Mt Zero → Dunkeld, 162 km, 50 h limit; miler starts Fri 6 Nov 8:00 am. Hub at Halls Gap. ' +
       'Every station Trail Sisters compliant, with ice, salt and sunscreen. Km and cutoffs from gpt100.com.au.',
-    destinations: [
-      {
-        name: 'Mt Zero Picnic Area',
-        type: 'start',
-        courseKm: 0,
-        notes: 'Miler and stage race start.',
-        vehicle: 'STE Van',
-      },
-      {
-        name: 'GAR Trailhead',
-        type: 'aid_station',
-        courseKm: 15.5,
-        notes: 'Crew OK. Cutoff Fri 12:00 pm.',
-        vehicle: 'Pantech #1',
-      },
+    destinations: withPlan([
+      { name: 'Mt Zero Picnic Area', type: 'start', courseKm: 0, notes: 'Miler and stage race start.' },
+      { name: 'GAR Trailhead', type: 'aid_station', courseKm: 15.5, notes: 'Crew OK. Cutoff Fri 12:00 pm.' },
       {
         name: 'Mt Difficult Rd',
         type: 'aid_station',
         courseKm: 35.5,
         accessNotes: 'No crew access.',
         notes: 'Hot soup and noodles. Cutoff Fri 5:00 pm.',
-        vehicle: 'Van #1',
       },
       {
         name: 'Halls Gap',
@@ -214,14 +214,12 @@ export const EVENT_SEED: SeedEvent[] = [
         type: 'aid_station',
         courseKm: 59,
         notes: 'Crew OK, 12 min from Halls Gap. Hot meals. Cutoff Fri 11:00 pm.',
-        vehicle: 'Van #2',
       },
       {
         name: 'Borough Huts',
         type: 'aid_station',
         courseKm: 72,
         notes: 'Crew OK. Nap beds. Cutoff Sat 2:15 am.',
-        vehicle: 'Van #3',
       },
       {
         name: 'Mt William Carpark',
@@ -229,7 +227,6 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 87,
         accessNotes: 'No crew access.',
         notes: 'Drop bags, nap beds. Stage 2 finish. Cutoff Sat 8:15 am.',
-        vehicle: 'Pantech #2',
       },
       {
         name: 'Jimmy Creek Rd',
@@ -237,7 +234,6 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 106,
         accessNotes: 'Limited crew parking.',
         notes: 'Drop bags, nap beds. Cutoff Sat 2:30 pm.',
-        vehicle: 'Pantech #3',
       },
       {
         name: 'Yarram Gap Rd',
@@ -245,7 +241,6 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 117,
         accessNotes: 'No crew access.',
         notes: 'Hot meals. Cutoff Sat 6:30 pm.',
-        vehicle: 'Shane Mitchell Ute',
       },
       {
         name: 'Griffin Fireline',
@@ -253,7 +248,6 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 129,
         accessNotes: 'Shuttle access only.',
         notes: 'Drop bags, nap beds. Stage 3 finish. Cutoff Sat 10:15 pm.',
-        vehicle: 'Pantech #4',
       },
       {
         name: 'Cassidys Gap',
@@ -261,7 +255,6 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 140.5,
         accessNotes: 'Shuttle access only.',
         notes: 'Stage 4 / GPT33 start. Cutoff Sun 2:00 am.',
-        vehicle: 'Pantech #1',
       },
       {
         name: 'Bainggug Carpark',
@@ -269,30 +262,19 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 151.5,
         accessNotes: 'Shuttle access only.',
         notes: 'Cutoff Sun 6:30 am.',
-        vehicle: 'Van #1',
       },
       {
         name: 'Dunkeld Finish',
         type: 'finish',
         courseKm: 162,
         notes: 'Full access, 46 min from Halls Gap. Course closes Sun 10:00 am.',
-        vehicle: 'STE Van',
       },
-      // Sites the GPT pack lists carry that the race page does not.
-      {
-        name: 'Stockyard Track',
-        type: 'checkpoint',
-        access: '4wd',
-        notes: 'Safety Officer point: water and comms, no food. Between Mt William and Jimmy Creek.',
-        sort: 75,
-        vehicle: 'Ray Taylor 4WD',
-      },
+      // Sites the GPT 2025 pack list carries that the race page does not.
       {
         name: 'Coppermine',
         type: 'water_drop',
         notes: 'Drinks and ice, no food. Between Mt Zero and GAR Trailhead on the pack list.',
         sort: 15,
-        vehicle: 'Pantech (TBC)',
       },
       {
         name: 'Mt Difficult Ridgeline',
@@ -301,16 +283,30 @@ export const EVENT_SEED: SeedEvent[] = [
         accessNotes: 'Hiked in.',
         notes: 'Drinks only. Between GAR Trailhead and Mt Difficult Rd on the pack list.',
         sort: 25,
-        vehicle: 'Simon (walk-in, own vehicle)',
       },
       {
         name: 'Halls Gap Event Village',
         type: 'event_village',
         notes: 'Event hub, registration and merch.',
         sort: 45,
-        vehicle: 'STE Van',
       },
-    ],
+      // Sites the 2026 vehicle plan has that earlier lists did not.
+      {
+        name: 'Seven Dials Track',
+        type: 'checkpoint',
+        accessNotes: "Marshal's own vehicle.",
+        notes: 'Safety marshal only, no aid station.',
+        sort: 65,
+      },
+      {
+        name: 'Stockyard Track',
+        type: 'checkpoint',
+        access: '4wd',
+        accessNotes: 'Drive straight to the site. Parks to confirm road access.',
+        notes: 'Safety checkpoint. Wilderness first aid certified volunteers. Takes the Stockyard kit.',
+        sort: 75,
+      },
+    ], GPT_PLAN_2026),
   },
   {
     code: 'buller26',

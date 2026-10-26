@@ -6,6 +6,15 @@ const DATE = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', 
 const DATE_SHORT = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short' });
 const TIME = new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit' });
 
+/**
+ * Today's date on this phone as YYYY-MM-DD. `toISOString()` gives the date in
+ * UTC, which in Australia is yesterday until 10 or 11 in the morning.
+ */
+export function localIsoDate(date: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   const date = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);

@@ -42,9 +42,11 @@
   --border-strong: #a8bcc1;
   --text: #0f1a1d;
   --text-muted: #506367;
-  --text-faint: #778a8f;
+  --text-faint: #5e7074;
 
-  --accent: var(--orange-500);
+  /* orange-600, not 500: white on #ea580c is 3.6:1, under the 4.5:1 a
+     button label needs in full sun. #c2410c is 5.2:1. */
+  --accent: var(--orange-600);
   --accent-ink: #ffffff;
   --brand: var(--teal-700);
   --brand-ink: #ffffff;
