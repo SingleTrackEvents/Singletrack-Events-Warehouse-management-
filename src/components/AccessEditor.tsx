@@ -97,7 +97,7 @@ export function AccessEditor({
               label="Aid station"
               hint={
                 needsDestination
-                  ? 'They see this station’s packlist and no other.'
+                  ? 'They see only this station’s list.'
                   : 'Leave on every station unless they only work one.'
               }
             >
@@ -124,10 +124,19 @@ export function AccessEditor({
               <span className="small strong">What they can do</span>
               {access ? <Pill tone="accent">Custom</Pill> : null}
             </div>
-            <p className="tiny muted mt-1">
-              They always see the packlists for{' '}
-              {destination ? destination.name : event ? event.name : 'every event'}.
-            </p>
+            {/*
+              A volunteer is kept to one station, and the station hint above
+              already says so. This line used to say "the packlists for" the
+              event right under "this station's packlist and no other", which
+              read as if they saw every station.
+            */}
+            {needsDestination ? null : (
+              <p className="tiny muted mt-1">
+                {destination
+                  ? `They always see ${destination.name}’s list.`
+                  : `They always see the station lists for ${event ? event.name : 'every event'}.`}
+              </p>
+            )}
             {ACCESS_OPTIONS.map((option) => {
               const off = Boolean(option.warehouse && scope.eventId);
               return (

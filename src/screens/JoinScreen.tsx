@@ -106,7 +106,7 @@ export default function JoinScreen() {
         <div className="card card-pad">
           <h3>Nearly there</h3>
           <p className="small muted mt-2 mb-3">
-            This phone needs to connect to the SingleTrack server before it can use an invite.
+            This device needs to connect to the SingleTrack server before it can use an invite.
           </p>
           <button
             type="button"
@@ -141,8 +141,8 @@ export default function JoinScreen() {
       <div className="card card-pad mb-4">
         <h3>Almost there</h3>
         <p className="small muted mt-2">
-          Tell us who you are and you will get your aid station's packlist. Nothing to sign up for,
-          and it keeps working once you lose reception.
+          Tell us who you are and you will get your station's list. Nothing to sign up for, and it
+          keeps working once you lose reception.
         </p>
         <p className="tiny muted mt-2">{ROLE_BLURBS.volunteer}</p>
       </div>
@@ -236,7 +236,7 @@ export default function JoinScreen() {
       <p className="tiny muted center mt-4">
         {backend.isReal
           ? 'Connected to the SingleTrack server.'
-          : 'On the on-device demo server — invites made on this phone only.'}
+          : 'On the demo server: only invites made on this device work here.'}
       </p>
     </Screen>
   );
