@@ -12,9 +12,12 @@ import { useSession } from '../hooks/sessionContext';
 import { useToast } from '../components/toastContext';
 import { can, isStationOnly } from '../sync/permissions';
 import { countedItemIds, lowStockItems } from '../domain/stock';
-import { addLowStock, groupByShop, toBuy } from '../domain/shopping';
-import { describeSource, packlistForDestination, primaryPacklist, progressFor, receiptFor, startPacklist } from '../domain/packlists';
-import { boardCounts, currentMove, hasLeft, moveLabel, moveOf, moveProgress } from '../domain/moves';
+import { addLowStock, awaitingBooking, groupByShop, toBuy } from '../domain/shopping';
+import { uncountedSummary } from '../domain/stocktake';
+import { describeSource, packlistForDestination, primaryPacklist, progressFor, startPacklist } from '../domain/packlists';
+import { boardCounts, currentMove, hasLeft, moveLabel, moveOf, moveProgress, sent } from '../domain/moves';
+import { DELIVERY_LABELS, checkInFor, deliveryOf, describeCheckIn } from '../domain/runSheet';
+import { RunSheetCard } from '../components/RunSheetCard';
 import type { BoardRow, Move } from '../domain/moves';
 import { DESTINATION_ICONS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
 import type { Destination, Item, Packlist, PacklistLine } from '../db/types';
@@ -107,6 +110,9 @@ export default function HomeScreen() {
   const canShop = can(session, 'shopping:manage');
   const shopping = useShoppingLines();
   const shoppingOpen = shopping ? toBuy(shopping) : [];
+  // Bought but not yet in stock: the card stays until that is done too, or
+  // booking the shop into the warehouse hides under More.
+  const shoppingToBook = shopping ? awaitingBooking(shopping) : [];
   const shoppingShops = groupByShop(shoppingOpen)
     .map(([shop]) => shop)
     .filter(Boolean);
@@ -126,6 +132,9 @@ export default function HomeScreen() {
   // A volunteer has one packlist and nothing else to do. Sending them through a
   // dashboard of races they cannot open is a lap of the app for no reason. The
   // branch sits below every hook so the order never changes between renders.
+  // The stocktake is how shelves and real counts get recorded, so while
+  // anything is uncounted it has a card here rather than a button under More.
+  const uncounted = useLiveQuery(() => (canRestock ? uncountedSummary() : null), [canRestock]);
   if (stationOnly) return <StationHome station={station} />;
 
   // Without the counted set every shelf nobody has looked at yet reads as
@@ -250,7 +259,7 @@ export default function HomeScreen() {
         </section>
       ) : null}
 
-      {canShop && shoppingOpen.length ? (
+      {canShop && (shoppingOpen.length || shoppingToBook.length) ? (
         <section className="section">
           <div className="section-head">
             <h2>Shopping list</h2>
@@ -259,15 +268,34 @@ export default function HomeScreen() {
             <Link to="/shopping" className="row">
               <span className="row-icon">🛒</span>
               <span className="row-body">
-                <span className="row-title">{plural(shoppingOpen.length, 'line')} to buy</span>
+                <span className="row-title">
+                  {shoppingOpen.length
+                    ? `${plural(shoppingOpen.length, 'line')} to buy`
+                    : `${plural(shoppingToBook.length, 'thing')} bought, not in stock yet`}
+                </span>
                 <span className="row-sub">
-                  {shoppingShops.length ? `At ${shoppingShops.join(', ')}` : 'Tap to open the list'}
+                  {!shoppingOpen.length
+                    ? 'Tap to book them into the warehouse'
+                    : shoppingShops.length
+                      ? `At ${shoppingShops.join(', ')}`
+                      : 'Tap to open the list'}
                 </span>
               </span>
               <span className="row-chevron">›</span>
             </Link>
           </div>
         </section>
+      ) : null}
+
+      {uncounted ? (
+        <Link to={uncounted.href} className="row card mb-3">
+          <span className="row-icon">🔢</span>
+          <span className="row-body">
+            <span className="row-title">{uncounted.title}</span>
+            <span className="row-sub">{uncounted.detail}</span>
+          </span>
+          <span className="row-chevron">›</span>
+        </Link>
       ) : null}
 
       {low.length ? (
@@ -278,7 +306,7 @@ export default function HomeScreen() {
               {plural(low.length, 'item')}
             </Link>
           </div>
-          {canRestock ? (
+          {canRestock && low.some((item) => item.consumable) ? (
             <div className="btn-row mb-2 no-print">
               <button
                 type="button"
@@ -295,7 +323,8 @@ export default function HomeScreen() {
                   });
                 }}
               >
-                🛒 Put all {low.length} on the shopping list
+                {/* Consumables only: nobody buys marquees at Bunnings. */}
+                🛒 Put {plural(low.filter((item) => item.consumable).length, 'consumable')} on the shopping list
               </button>
             </div>
           ) : null}
@@ -393,7 +422,7 @@ function StationHome({
     | { destination?: Destination; packlist?: Packlist; lines: PacklistLine[]; items: Map<string, Item> }
     | undefined;
 }) {
-  const { session } = useSession();
+  const { session, backend, phase } = useSession();
 
   if (!station) {
     return (
@@ -424,8 +453,13 @@ function StationHome({
 
   const packlist = station.packlist;
   // What this station has confirmed, not what the warehouse packed: the number
-  // on their home screen should be the one they can change.
-  const progress = receiptFor(station.lines);
+  // on their home screen should be the one they can change. A short line the
+  // volunteer has answered for is checked, so the job can end.
+  const checkIn = checkInFor(station.lines, sent);
+  const delivery = deliveryOf(station.lines, {
+    connected: Boolean(backend && session),
+    sending: phase === 'pushing',
+  });
   // The three jobs at a station, in the order they happen over the day.
   const food = station.lines.filter((line) => station.items.get(line.itemId)?.consumable);
   const gear = station.lines.filter((line) => !station.items.get(line.itemId)?.consumable);
@@ -436,14 +470,16 @@ function StationHome({
       mode: 'arrived',
       icon: '✅',
       title: 'Arrived',
-      sub: `${progress.linesDone} of ${progress.linesTotal} lines checked in off the van`,
-      done: progress.linesTotal > 0 && progress.percent === 100,
+      sub: checkIn.checked ? describeCheckIn(checkIn) : `${checkIn.total} lines to check in off the van`,
+      done: checkIn.done,
     },
     {
       mode: 'count',
       icon: '🔢',
       title: 'Count',
-      sub: food.length ? `${counted} of ${food.length} food and drink lines counted` : 'No food or drink on this list',
+      sub: food.length
+        ? `${counted} of ${food.length} used-up things counted (food, drink, sunscreen, paper towel)`
+        : 'Nothing on this list gets used up',
       done: food.length > 0 && counted === food.length,
     },
     {
@@ -458,10 +494,8 @@ function StationHome({
 
   return (
     <Screen title={name} subtitle={session ? `Signed in as ${session.displayName}` : undefined}>
-      {station.destination?.accessNotes ? (
-        <p className="tiny muted mb-3">🚙 {station.destination.accessNotes}</p>
-      ) : null}
-      <div className="list mb-4">
+      {station.destination ? <RunSheetCard destination={station.destination} /> : null}
+      <div className="list mb-2">
         {jobs.map((job) => (
           <Link key={job.mode} to={`/packlists/${packlist.id}?mode=${job.mode}`} className="row">
             <span className="row-icon">{job.icon}</span>
@@ -475,6 +509,25 @@ function StationHome({
           </Link>
         ))}
       </div>
+
+      {/* Whether the phone can go back in the pocket: the volunteer cannot
+          see the sync engine, so it is said in words. */}
+      {checkIn.checked ? (
+        <p className={`small mb-4 strong${delivery === 'sent' ? '' : ' muted'}`}>
+          {delivery === 'sent' ? '✅' : delivery === 'sending' ? '⏳' : '📱'} {DELIVERY_LABELS[delivery]}
+        </p>
+      ) : (
+        <div className="mb-4" />
+      )}
+
+      {jobs.every((job) => job.done) ? (
+        <div className="card card-pad center mb-3">
+          <strong>🎉 This station is done.</strong>
+          <p className="small muted mt-2">
+            Everything is checked in, counted and back in the van. {DELIVERY_LABELS[delivery]}.
+          </p>
+        </div>
+      ) : null}
 
       <Link className="btn btn-primary btn-lg btn-block" to={`/packlists/${packlist.id}?mode=${next.mode}`}>
         {next.icon} {next.title}

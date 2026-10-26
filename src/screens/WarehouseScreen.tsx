@@ -8,21 +8,60 @@ import { useSearch } from '../hooks/useSearch';
 import { useCategories, useEvent } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
-import { adoptVehiclesFromLoads, byVehicle, isPulled, pullListCsv, pullListFor, setPulled } from '../domain/warehouse';
+import { adoptVehiclesFromLoads, byVehicle, isPulled, pullListCsv, pullListFor, restoreLines, setPulled } from '../domain/warehouse';
 import { issueLoaded, setOnTruck } from '../domain/truck';
 import { downloadCsv, slugify } from '../domain/backup';
 import { formatDateTime, formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
-import type { PullDestination, PullLine } from '../domain/warehouse';
+import type { PullDestination, PullLine, PullList } from '../domain/warehouse';
 
 type Filter = 'all' | 'todo' | 'short' | 'noRun';
 
 const FILTER_LABELS: Record<Filter, string> = {
   all: 'Everything',
   todo: 'To pack',
-  short: 'Short in the shed',
+  short: 'Short in the warehouse',
   noRun: 'No vehicle yet',
 };
+
+/**
+ * One spelling for each vehicle before the list is split by vehicle.
+ *
+ * Vehicles are typed per station, so "Pantech #1" on one and "pantech #1 " on
+ * another are the same truck and must be one load, not two. Matched without
+ * case or extra spaces; the group takes the spelling most stations use.
+ */
+function oneSpellingPerVehicle(list: PullList): PullList {
+  const key = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+  const counts = new Map<string, Map<string, number>>();
+  for (const line of list.lines) {
+    for (const going of line.going) {
+      if (!going.vehicle) continue;
+      const spelling = going.vehicle.trim().replace(/\s+/g, ' ');
+      const forKey = counts.get(key(spelling)) ?? new Map<string, number>();
+      forKey.set(spelling, (forKey.get(spelling) ?? 0) + 1);
+      counts.set(key(spelling), forKey);
+    }
+  }
+  const chosen = new Map<string, string>();
+  for (const [name, spellings] of counts) {
+    // A tie goes to the one written with capitals: "Pantech #1" over "pantech #1".
+    const capitals = (text: string) => text.replace(/[^A-Z]/g, '').length;
+    const [best] = [...spellings].sort(
+      (a, b) => b[1] - a[1] || capitals(b[0]) - capitals(a[0]) || a[0].localeCompare(b[0]),
+    );
+    chosen.set(name, best[0]);
+  }
+  return {
+    ...list,
+    lines: list.lines.map((line) => ({
+      ...line,
+      going: line.going.map((going) =>
+        going.vehicle ? { ...going, vehicle: chosen.get(key(going.vehicle)) ?? going.vehicle } : going,
+      ),
+    })),
+  };
+}
 
 /**
  * One list for the whole event, for the person standing in the warehouse.
@@ -47,6 +86,10 @@ export default function WarehouseScreen() {
   // A two-stage event ticks gear onto the truck here; the stations' own lists
   // are then the van packs at the event.
   const truck = Boolean(event?.truckStage);
+  // Items where loading now takes out more than the shelf was counted at.
+  const overdrawn = (list?.lines ?? [])
+    .map((line) => ({ ...line, going: (truck ? line.qtyOnTruck : line.qtyPacked) - line.qtyIssued }))
+    .filter((line) => !line.uncounted && line.going > 0 && line.going > line.qtyOnHand);
   const [loadingTruck, setLoadingTruck] = useState(false);
   // A transport plan made before vehicles were tags is written onto the
   // stations once, by whoever may edit them, so it keeps reading the same.
@@ -83,7 +126,7 @@ export default function WarehouseScreen() {
     ...line.going.map((entry) => entry.destination.name),
   ]);
 
-  const vehicles = useMemo(() => (list ? byVehicle(list) : []), [list]);
+  const vehicles = useMemo(() => (list ? byVehicle(oneSpellingPerVehicle(list)) : []), [list]);
 
   /*
    * Sections by category, keeping bin order inside each one. The picking pass
@@ -158,8 +201,20 @@ export default function WarehouseScreen() {
           {truck
             ? '🚛 Tick gear onto the truck here. Each station\'s own list is its van pack at the event.'
             : '🚐 Tick gear as it is packed for each station\'s vehicle.'}
-          {event.truckLoadedAt ? ` Last marked loaded ${formatDateTime(event.truckLoadedAt)}.` : ''}
+          {event.truckLoadedAt && !event.truckRuns?.length ? ` Last marked loaded ${formatDateTime(event.truckLoadedAt)}.` : ''}
         </p>
+        {/* Each load is its own run: GPT goes out bulky gear first, the rest days later. */}
+        {event.truckRuns?.length ? (
+          <ol className="tiny mt-2" style={{ paddingLeft: '1.2rem' }}>
+            {event.truckRuns.map((run, index) => (
+              <li key={run.at}>
+                {truck ? `Truck run ${index + 1}` : `Load ${index + 1}`}, {formatDateTime(run.at)}
+                {run.by ? ` by ${run.by}` : ''}: {formatQty(run.units, 'each')} out
+                {run.returned ? `, ${formatQty(run.returned, 'each')} taken back off` : ''}
+              </li>
+            ))}
+          </ol>
+        ) : null}
         {canTick ? (
           <button
             type="button"
@@ -254,7 +309,7 @@ export default function WarehouseScreen() {
             </div>
           ) : (
             <div className="card card-pad center muted">
-              {filter === 'short' ? '✅ The shed covers everything on this list.' : 'Nothing to show.'}
+              {filter === 'short' ? '✅ The warehouse covers everything on this list.' : 'Nothing to show.'}
             </div>
           )}
         </>
@@ -309,17 +364,33 @@ export default function WarehouseScreen() {
           body={
             <>
               Everything ticked {truck ? 'onto the truck' : 'as packed'} comes out of the warehouse count
-              now, once, and nothing later takes it out again. If more goes on afterwards, mark it loaded
-              again and only the extra comes out.
+              now, once, and nothing later takes it out again. If more goes on afterwards, or something
+              comes off to make room, mark it loaded again and only the difference changes.
+              {overdrawn.length ? (
+                <span className="block mt-2" style={{ color: 'var(--danger)' }}>
+                  ⚠ More is going than the warehouse has counted:{' '}
+                  {overdrawn
+                    .slice(0, 5)
+                    .map((entry) => `${entry.item?.name ?? 'item'} (${formatQty(entry.going, entry.item?.unit ?? 'each')} going, ${formatQty(entry.qtyOnHand, entry.item?.unit ?? 'each')} counted)`)
+                    .join(', ')}
+                  {overdrawn.length > 5 ? ` and ${overdrawn.length - 5} more` : ''}. Their counts will go below zero
+                  until someone counts them.
+                </span>
+              ) : null}
             </>
           }
           confirmLabel={truck ? 'Truck loaded' : 'Vehicles loaded'}
           onCancel={() => setLoadingTruck(false)}
           onConfirm={() => {
             setLoadingTruck(false);
-            void issueLoaded(event.id, truck, session?.displayName ?? '').then(({ lines, units }) =>
-              toast(lines ? `Loaded: ${formatQty(units, 'each')} out of the warehouse` : 'Nothing new to take out'),
-            );
+            void issueLoaded(event.id, truck, session?.displayName ?? '').then(({ lines, units, returned }) => {
+              const run = (event.truckRuns?.length ?? 0) + 1;
+              const parts = [
+                lines ? `${formatQty(units, 'each')} out of the warehouse` : '',
+                returned ? `${formatQty(returned, 'each')} back on the shelf` : '',
+              ].filter(Boolean);
+              toast(parts.length ? `${truck ? `Truck run ${run}` : 'Loaded'}: ${parts.join(', ')}` : 'Nothing has changed since it was loaded');
+            });
           }}
         />
       ) : null}
@@ -348,8 +419,17 @@ function PullRow({
   const verb = truck ? 'on the truck' : 'packed';
   // A loaded list's count is fixed, so a line that is all loaded cannot be ticked.
   const tickable = canTick && line.going.some((going) => going.canPack);
+  const toast = useToast();
   const tick = (shares: PullDestination[], packed: boolean) => {
-    void (truck ? setOnTruck(shares, packed) : setPulled(shares, packed));
+    void (truck ? setOnTruck(shares, packed) : setPulled(shares, packed)).then((before) => {
+      // One tap here writes to every station's list, so a mis-tap gets one
+      // tap back rather than a dozen stations recounted.
+      if (before.length > 1 || !packed) {
+        toast(`${line.item?.name ?? 'Item'} ${packed ? verb : `taken off ${plural(before.length, 'list')}`}`, 'ok', {
+          undo: () => restoreLines(truck ? 'qtyOnTruck' : 'qtyPacked', before),
+        });
+      }
+    });
     if (packed && navigator.vibrate) navigator.vibrate(15);
   };
   return (

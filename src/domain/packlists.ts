@@ -4,6 +4,7 @@ import type { Destination, Packlist, PacklistLine, PacklistStatus, RaceEvent, Te
 import { makeCode } from './codes';
 import { nameKey } from './importMatch';
 import { recordMovements, round2 } from './stock';
+import { bookReturns } from './returns';
 
 /**
  * Packlist lifecycle.
@@ -26,23 +27,23 @@ const ORDER: PacklistStatus[] = [
 ];
 
 export const PACKLIST_STATUS_LABELS: Record<PacklistStatus, string> = {
-  draft: 'Draft',
-  picking: 'Picking',
+  draft: 'Not started',
+  picking: 'Packing',
   packed: 'Packed',
   loaded: 'Loaded',
   delivered: 'Delivered',
-  returned: 'Returned',
-  reconciled: 'Reconciled',
+  returned: 'Back from the race course',
+  reconciled: 'Put away',
 };
 
 /** Wording for the button that moves a packlist to the next stage. */
 export const NEXT_STATUS_ACTION: Partial<Record<PacklistStatus, string>> = {
-  draft: 'Start picking',
+  draft: 'Start packing',
   picking: 'Mark packed',
   packed: 'Mark loaded',
   loaded: 'Mark delivered',
-  delivered: 'Mark returned',
-  returned: 'Reconcile returns',
+  delivered: 'It’s back from the race course',
+  returned: 'Put returns away',
 };
 
 export function statusIndex(status: PacklistStatus): number {
@@ -221,30 +222,37 @@ export async function applyTemplate(
   return templateLines.length;
 }
 
-/** Add a single item to a packlist, merging with an existing line for it. */
+/**
+ * Add a single item to a packlist, merging with an existing line for it.
+ *
+ * Read and write share one transaction, so two taps on Add in quick
+ * succession top up one line instead of both finding no line and making two.
+ */
 export async function addLine(
   packlistId: string,
   itemId: string,
   qty = 1,
 ): Promise<PacklistLine> {
-  const existing = await liveWhere(db.packlistLines, 'packlistId', packlistId);
-  const match = existing.find((line) => line.itemId === itemId);
-  if (match) {
-    const updated = await update(db.packlistLines, match.id, {
-      qtyRequired: round2(match.qtyRequired + qty),
+  return db.transaction('rw', db.packlistLines, async () => {
+    const existing = await liveWhere(db.packlistLines, 'packlistId', packlistId);
+    const match = existing.find((line) => line.itemId === itemId);
+    if (match) {
+      const updated = await update(db.packlistLines, match.id, {
+        qtyRequired: round2(match.qtyRequired + qty),
+      });
+      return updated ?? match;
+    }
+    return create(db.packlistLines, {
+      packlistId,
+      itemId,
+      qtyRequired: qty,
+      qtyPacked: 0,
+      qtyReturned: 0,
+      mandatory: false,
+      containerId: null,
+      note: '',
+      sort: nextSort(existing),
     });
-    return updated ?? match;
-  }
-  return create(db.packlistLines, {
-    packlistId,
-    itemId,
-    qtyRequired: qty,
-    qtyPacked: 0,
-    qtyReturned: 0,
-    mandatory: false,
-    containerId: null,
-    note: '',
-    sort: nextSort(existing),
   });
 }
 
@@ -255,10 +263,23 @@ export async function addLine(
  * has left the warehouse: once a list is loaded, stock has moved against it
  * and it is part of the record. Returns false when the list cannot go.
  */
+/**
+ * True when stock has left the warehouse against a line and not all of it
+ * has been booked home. Such a line is the only record of where that gear
+ * is, so it cannot be removed until it is counted home.
+ */
+export function stillOut(line: PacklistLine): boolean {
+  return (line.qtyIssued ?? 0) > (line.qtyBooked ?? 0);
+}
+
 export async function removePacklist(packlistId: string): Promise<boolean> {
   const packlist = await db.packlists.get(packlistId);
   if (!packlist || packlist.deletedAt || hasIssued(packlist.status)) return false;
-  for (const line of await liveWhere(db.packlistLines, 'packlistId', packlistId)) {
+  // Loading the truck takes stock out by line, not by moving the list's
+  // status, so the lines are the test.
+  const lines = await liveWhere(db.packlistLines, 'packlistId', packlistId);
+  if (lines.some(stillOut)) return false;
+  for (const line of lines) {
     await softDelete(db.packlistLines, line.id);
   }
   for (const container of await liveWhere(db.containers, 'packlistId', packlistId)) {
@@ -349,23 +370,10 @@ export async function setStatus(
   }
 
   // Reconciling books back whatever physically came home, less anything the
-  // event's home count already booked, so nothing goes on the shelf twice.
+  // event's home count already booked, so nothing goes on the shelf twice,
+  // and never more than went out. The same booking as the event's home count.
   if (status === 'reconciled' && packlist.status !== 'reconciled') {
-    const owed = lines
-      .map((line) => ({ line, qty: round2(line.qtyReturned - (line.qtyBooked ?? 0)) }))
-      .filter(({ qty }) => qty > 0);
-    await recordMovements(
-      owed.map(({ line, qty }) => ({
-        itemId: line.itemId,
-        qty,
-        reason: 'return' as const,
-        refType: 'packlist' as const,
-        refId: packlist.id,
-        note: packlist.name,
-        by: options.by ?? '',
-      })),
-    );
-    for (const { line } of owed) await update(db.packlistLines, line.id, { qtyBooked: line.qtyReturned });
+    await bookReturns(packlist.eventId, options.by ?? '', new Set([packlist.id]));
   }
 
   await update(db.packlists, packlist.id, changes);

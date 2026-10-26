@@ -316,6 +316,18 @@ describe('adding lines by hand', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].qtyRequired).toBe(5);
   });
+
+  it('keeps one line when two adds land at the same moment', async () => {
+    const { packlist } = await makePacklist();
+    const item: Item = await makeItem('WATER');
+
+    // A double tap: both adds start before either has written.
+    await Promise.all([addLine(packlist.id, item.id, 2), addLine(packlist.id, item.id, 2)]);
+
+    const lines = await liveWhere(db.packlistLines, 'packlistId', packlist.id);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].qtyRequired).toBe(4);
+  });
 });
 
 describe('changing what a stop needs', () => {

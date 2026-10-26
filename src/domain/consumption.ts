@@ -1,6 +1,6 @@
 import { db } from '../db/db';
-import { create, liveWhere, nextSort, update } from '../db/repo';
-import type { ConsumptionLine, Destination, Item, Race, RaceEvent } from '../db/types';
+import { create, liveWhere, nextSort, softDelete, update } from '../db/repo';
+import type { ConsumptionLine, Destination, Item, PacklistLine, Race, RaceEvent } from '../db/types';
 import { createPacklist, packlistForDestination } from './packlists';
 import { round2 } from './stock';
 
@@ -124,6 +124,22 @@ export function lineQtyByDay(
 /** Everything a rule calls for at its station, all days together. */
 export function lineTotal(line: ConsumptionLine, destination: Destination, races: Race[]): number {
   return lineQtyByDay(line, destination, races).reduce((sum, [, qty]) => sum + qty, 0);
+}
+
+/**
+ * A number typed by a person: "1,5" is one and a half, the way half the crew
+ * writes it, and blank is nothing typed. Anything else that is not a number,
+ * or is below zero, comes back with what to tell them instead of quietly
+ * saving as 0 or NaN.
+ */
+export function parseAmount(raw: string): { value: number | null } | { error: string } {
+  const text = raw.trim().replace(/\s+/g, '').replace(',', '.');
+  if (!text) return { value: null };
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(text)) return { error: `"${raw.trim()}" is not a number` };
+  const value = Number(text);
+  if (!Number.isFinite(value)) return { error: `"${raw.trim()}" is not a number` };
+  if (value < 0) return { error: 'Can’t be below zero' };
+  return { value };
 }
 
 /** "Sat 12 Sep", or "Any day" for the undated bucket. */
@@ -310,11 +326,75 @@ export interface ApplyResult {
  * crew added by hand for items outside the plan are never touched, nor are
  * notes the crew wrote, and a plan line computing to zero leaves the packlist
  * alone rather than quietly blanking a quantity someone typed.
+ *
+ * The whole read-then-write runs in one transaction, so a double tap on the
+ * button queues the second run behind the first instead of both reading an
+ * empty list and both adding the line. A list that already got two lines for
+ * one planned item that way has them folded back into one here.
  */
 export async function applyPlanToPacklists(
   eventId: string,
   destinations: Destination[],
 ): Promise<ApplyResult> {
+  return db.transaction(
+    'rw',
+    [db.races, db.consumptionLines, db.packlists, db.packlistLines],
+    async () => applyPlan(eventId, destinations),
+  );
+}
+
+/**
+ * Fold every planned item's lines on a list into one, so later sends have a
+ * single line to set. The first line in list order stays; what was packed,
+ * sent, checked in or brought back on the others is added onto it so no count
+ * goes missing, and the others are taken off the list.
+ */
+async function mergeDuplicates(
+  lines: PacklistLine[],
+  itemIds: Set<string>,
+): Promise<{ lines: PacklistLine[]; merged: number }> {
+  const groups = new Map<string, PacklistLine[]>();
+  for (const line of lines) {
+    if (!itemIds.has(line.itemId)) continue;
+    groups.set(line.itemId, [...(groups.get(line.itemId) ?? []), line]);
+  }
+  const gone = new Set<string>();
+  const kept = new Map<string, PacklistLine>();
+  let merged = 0;
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const [keep, ...rest] = group;
+    const sum = (pick: (line: PacklistLine) => number | null | undefined) =>
+      round2(group.reduce((total, line) => total + (pick(line) ?? 0), 0));
+    const changes: Partial<PacklistLine> = {
+      qtyPacked: sum((line) => line.qtyPacked),
+      qtyReturned: sum((line) => line.qtyReturned),
+      mandatory: group.some((line) => line.mandatory),
+    };
+    // The optional counts stay unset unless one of the lines has a number:
+    // "nobody has said" must not turn into "none arrived".
+    if (group.some((line) => typeof line.qtyReceived === 'number')) changes.qtyReceived = sum((line) => line.qtyReceived);
+    if (group.some((line) => typeof line.qtyLeft === 'number')) changes.qtyLeft = sum((line) => line.qtyLeft);
+    if (group.some((line) => typeof line.qtyIssued === 'number')) changes.qtyIssued = sum((line) => line.qtyIssued);
+    if (group.some((line) => typeof line.qtyBooked === 'number')) changes.qtyBooked = sum((line) => line.qtyBooked);
+    if (group.some((line) => typeof line.qtyOnTruck === 'number')) changes.qtyOnTruck = sum((line) => line.qtyOnTruck);
+    const note = group.map((line) => line.note).find((text) => text && !text.startsWith(NOTE_PREFIX));
+    if (note) changes.note = note;
+    const updated = await update(db.packlistLines, keep.id, changes);
+    kept.set(keep.id, updated ?? keep);
+    for (const line of rest) {
+      await softDelete(db.packlistLines, line.id);
+      gone.add(line.id);
+    }
+    merged += 1;
+  }
+  return {
+    lines: lines.filter((line) => !gone.has(line.id)).map((line) => kept.get(line.id) ?? line),
+    merged,
+  };
+}
+
+async function applyPlan(eventId: string, destinations: Destination[]): Promise<ApplyResult> {
   const plan = await loadFoodPlan(eventId);
   const result: ApplyResult = { stations: 0, created: 0, lines: 0 };
 
@@ -337,10 +417,15 @@ export async function applyPlanToPacklists(
       result.created += 1;
     }
 
-    const existing = await liveWhere(db.packlistLines, 'packlistId', packlist.id);
-    const byItem = new Map(existing.map((line) => [line.itemId, line]));
+    const healed = await mergeDuplicates(
+      await liveWhere(db.packlistLines, 'packlistId', packlist.id),
+      new Set(wanted.keys()),
+    );
+    const existing = healed.lines;
+    const byItem = new Map<string, PacklistLine>();
+    for (const line of existing) if (!byItem.has(line.itemId)) byItem.set(line.itemId, line);
     let sort = nextSort(existing);
-    let touched = 0;
+    let touched = healed.merged;
 
     for (const [itemId, days] of wanted) {
       const byDay = sortDays(days.keys()).map(

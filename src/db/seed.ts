@@ -1,5 +1,5 @@
 import { db, getSettings, SYNCED_TABLES } from './db';
-import { create, createMany, liveWhere, softDelete, update } from './repo';
+import { alive, create, createMany, liveWhere, softDelete, update } from './repo';
 import { CATALOGUE, EVENT_LISTS } from './catalogue';
 import { EVENT_SEED } from './eventSeed';
 import { EXTRA_ITEMS } from './extrasCatalogue';
@@ -7,11 +7,12 @@ import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
 import { GPT_PACKLISTS } from './gptSeed';
+import { GPT_PLAN_2026 } from './gptSchedule';
 import { RCR_CONSUMPTION, RCR_PACKLISTS, RCR_RETIRED } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import { makeCode } from '../domain/codes';
 import { packlistForDestination } from '../domain/packlists';
-import type { Item, RaceVisit, SyncMeta, Unit } from './types';
+import type { Destination, Item, RaceVisit, SyncMeta, Unit } from './types';
 
 /**
  * The starting data: SingleTrack's real warehouse catalogue.
@@ -342,15 +343,28 @@ export async function seedStarterData(
         // `raceVisits` absent is "never set", while a list, even an empty
         // one, is the crew's and stays.
         const existing = await db.destinations.get(destinationId);
-        if (existing && !existing.deletedAt && existing.raceVisits === undefined && raceVisits.length) {
-          await update(db.destinations, destinationId, { raceVisits });
+        if (!existing || existing.deletedAt) continue;
+        const changes: Partial<Destination> = {};
+        if (existing.raceVisits === undefined && raceVisits.length) changes.raceVisits = raceVisits;
+        // This edition's plan reaches stations seeded before it, once each:
+        // a name still as seeded takes the new one, and a vehicle or schedule
+        // nobody has set is filled in. Anything the crew has set is theirs.
+        if (destination.title && existing.name === destination.name) {
+          changes.name = destination.title;
+          // Its list follows the rename while it still carries the old name.
+          for (const packlist of alive(await db.packlists.where('destinationId').equals(destinationId).toArray())) {
+            if (packlist.name === destination.name) await update(db.packlists, packlist.id, { name: destination.title });
+          }
         }
+        if (destination.vehicle && !existing.vehicle?.trim()) changes.vehicle = destination.vehicle;
+        if (destination.schedule && existing.schedule === undefined) changes.schedule = destination.schedule;
+        if (Object.keys(changes).length) await update(db.destinations, destinationId, changes);
         continue;
       }
       await create(db.destinations, {
         id: destinationId,
         eventId,
-        name: destination.name,
+        name: destination.title ?? destination.name,
         type: destination.type,
         courseKm: destination.courseKm ?? null,
         access: destination.access ?? '2wd',
@@ -359,11 +373,15 @@ export async function seedStarterData(
         lng: null,
         crewLead: '',
         phone: '',
-        openTime: '06:00',
-        closeTime: '16:00',
+        // Unknown until someone enters the real hours: a guess on a run sheet
+        // reads as a fact.
+        openTime: '',
+        closeTime: '',
         notes: destination.notes ?? '',
         sort: destination.sort ?? (index + 1) * 10,
         ...(raceVisits.length ? { raceVisits } : {}),
+        ...(destination.vehicle ? { vehicle: destination.vehicle } : {}),
+        ...(destination.schedule ? { schedule: destination.schedule } : {}),
       });
     }
   }
@@ -431,7 +449,11 @@ export async function seedStarterData(
       if (await untouched(packlistId, lineId)) await softDelete(db.packlistLines, lineId);
     }
     for (const list of lists) {
-      const notes = list.notes ? `${source} ${list.notes}` : source;
+      // Last year's "Vehicle: VAN #2" is wrong once the station carries this
+      // year's vehicle, and the list note is the first thing a volunteer reads.
+      const station = await db.destinations.get(seedId('dest', `${code}-${list.station}`));
+      const listNotes = station?.vehicle ? (list.notes ?? '').replace(/^Vehicle: [^.]*\.\s*/, '') : list.notes;
+      const notes = listNotes ? `${source} ${listNotes}` : source;
       const packlistId = seedId('plist', `${code}-${list.station}`);
       const destinationId = seedId('dest', `${code}-${list.station}`);
       /*
@@ -481,7 +503,8 @@ export async function seedStarterData(
           id: packlistId,
           eventId: seedId('event', code),
           destinationId,
-          name: list.station,
+          // A station this year's plan renamed gives its list the new name too.
+          name: (code === 'gpt26' && GPT_PLAN_2026[list.station]?.title) || list.station,
           code: makeCode(list.station),
           status: 'draft',
           packedBy: '',
@@ -578,6 +601,27 @@ export async function seedStarterData(
   }
 
   if (!options.onlyMissing) await liftSeedRevisions(previous);
+  await clearPlaceholderHours();
+}
+
+/**
+ * Earlier builds seeded every station open 06:00 to 16:00, which was never
+ * anyone's real hours. A seeded station still at its first revision with
+ * exactly those hours has never been edited, so the guess is cleared. One
+ * that anyone has touched is left as it is.
+ */
+async function clearPlaceholderHours(): Promise<void> {
+  const placeholders = await db.destinations
+    .filter(
+      (row) =>
+        row.id.startsWith('stw-') &&
+        row.rev === 1 &&
+        !row.deletedAt &&
+        row.openTime === '06:00' &&
+        row.closeTime === '16:00',
+    )
+    .toArray();
+  for (const row of placeholders) await update(db.destinations, row.id, { openTime: '', closeTime: '' });
 }
 
 /** Current revision of every seeded row, tombstoned ones included. */

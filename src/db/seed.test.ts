@@ -206,8 +206,30 @@ describe('the seeded season', () => {
     );
     const rosea = destinations.find((destination) => destination.name === 'Rosea Carpark');
     expect(rosea?.courseKm).toBe(59);
-    // 13 from the race page, and 3 more from the GPT 2025 pack list.
-    expect(destinations).toHaveLength(16);
+    // 13 from the race page, 3 more from the GPT 2025 pack list and 2 from
+    // the 2026 vehicle plan.
+    expect(destinations).toHaveLength(18);
+    // This year's plan names, times, vehicles and power.
+    const gar = destinations.find((destination) => destination.id === seedId('dest', 'gpt26-GAR Trailhead'))!;
+    expect(gar.vehicle).toBe('Pantech #1');
+    expect(gar.schedule?.windows[1]).toEqual({ label: 'Miler', firstRunner: '2026-11-06T09:26', cutoff: '2026-11-06T12:00' });
+    expect(destinations.some((destination) => destination.name === 'Jimmy Creek Campground')).toBe(true);
+  });
+
+  it('brings the 2026 plan to stations seeded before it, without touching the crew’s edits', async () => {
+    await seedStarterData();
+    const jimmy = seedId('dest', 'gpt26-Jimmy Creek Rd');
+    const borough = seedId('dest', 'gpt26-Borough Huts');
+    // As an older build left them: last year's name, no plan, one renamed by hand.
+    await db.destinations.update(jimmy, { name: 'Jimmy Creek Rd', schedule: undefined, vehicle: undefined });
+    await db.destinations.update(borough, { name: 'Borough Huts camp', schedule: undefined, vehicle: 'Van 9' });
+    await seedStarterData({ onlyMissing: true });
+    const after = (id: string) => db.destinations.get(id);
+    expect((await after(jimmy))!.name).toBe('Jimmy Creek Campground');
+    expect((await after(jimmy))!.schedule?.power).toBe('Light tower');
+    expect((await after(borough))!.name).toBe('Borough Huts camp');
+    expect((await after(borough))!.vehicle).toBe('Van 9');
+    expect((await after(borough))!.schedule?.connectivity).toBe('Starlink 4');
   });
 
   it('links Hounslow’s stations to its races, double passes included', async () => {
@@ -864,13 +886,13 @@ describe('the GPT100 starting packlists', () => {
     const packlists = alive(await db.packlists.toArray()).filter((entry) => entry.eventId === gpt);
     expect(packlists).toHaveLength(GPT_PACKLISTS.length);
     for (const spec of GPT_PACKLISTS) {
-      const packlist = packlists.find((entry) => entry.name === spec.station);
+      const packlist = packlists.find((entry) => entry.id === seedId('plist', `gpt26-${spec.station}`));
       expect(packlist, spec.station).toBeDefined();
       expect(destinations.some((entry) => entry.id === packlist!.destinationId), spec.station).toBe(true);
     }
     // The sites the pack list adds slot in between the race page's own.
     const order = destinations.sort((a, b) => a.sort - b.sort).map((entry) => entry.name);
-    expect(order.slice(0, 3)).toEqual(['Mt Zero Picnic Area', 'Coppermine', 'GAR Trailhead']);
+    expect(order.slice(0, 3)).toEqual(['Mt Zero (start line)', 'Copper Mine Track (water table)', 'GAR Trailhead']);
   });
 
   it('packs the black box as one Aid Station Box, with only the extras beside it', async () => {

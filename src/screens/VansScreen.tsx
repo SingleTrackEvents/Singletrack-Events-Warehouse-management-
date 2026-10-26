@@ -5,6 +5,7 @@ import { EmptyState, Pill, ProgressBar } from '../components/ui';
 import { useEvent } from '../hooks/useDb';
 import { remainderFor } from '../domain/truck';
 import { formatQty, plural } from '../domain/format';
+import { formatLocalWhen } from '../domain/runSheet';
 
 /**
  * The truck emptying into the vans.
@@ -33,7 +34,8 @@ export default function VansScreen() {
   const vansDone = remainder.vans.filter((van) => van.linesTotal > 0 && van.linesDone === van.linesTotal).length;
   const unitsLeft = onTruck.reduce((sum, line) => sum + line.remaining, 0);
 
-  if (!remainder.lines.length) {
+  // Vans ticked with nothing on the truck is not an empty truck: it never filled.
+  if (!remainder.lines.some((line) => line.onTruck > 0)) {
     return (
       <Screen title="Vans" subtitle={event.name} back={`/events/${event.id}`}>
         <EmptyState
@@ -76,6 +78,7 @@ export default function VansScreen() {
       <section className="section">
         <div className="section-head">
           <h2>Van packs</h2>
+          <span className="small muted">in the order they leave</span>
         </div>
         <div className="list">
           {remainder.vans.map((van) => {
@@ -86,6 +89,9 @@ export default function VansScreen() {
                 <span className="row-body">
                   <span className="row-title truncate">{van.destination.name}</span>
                   <span className="row-sub">
+                    {van.destination.schedule?.departsAt ? (
+                      <span className="strong">Leaves {formatLocalWhen(van.destination.schedule.departsAt)} · </span>
+                    ) : null}
                     {van.destination.vehicle ? `${van.destination.vehicle} · ` : ''}
                     {van.linesDone} of {plural(van.linesTotal, 'line')} in the van
                   </span>

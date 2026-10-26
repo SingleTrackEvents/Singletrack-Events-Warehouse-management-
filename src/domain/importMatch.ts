@@ -53,6 +53,83 @@ const SYNONYMS: Record<string, string> = {
   hivis: 'hi-vis',
 };
 
+/**
+ * What the crew call things against what the catalogue calls them.
+ *
+ * Each group is one thing, the catalogue's usual name first. Search tries every
+ * name in a group, so "zip ties" finds Cable Ties and "esky" finds the
+ * coolers; import matching reads them all as the first, so a sheet saying
+ * "alfoil" lines up with Aluminium Foil. Kept short and specific on purpose:
+ * "foil" alone is not here, because the foil blankets in the first aid kits
+ * are not kitchen foil.
+ */
+export const PHRASE_SYNONYMS: readonly (readonly string[])[] = [
+  ['cable tie', 'zip tie', 'ziptie'],
+  ['aluminium foil', 'alfoil', 'alufoil', 'tin foil', 'aluminum foil'],
+  ['aid station kit', 'aid station box', 'aid station tub'],
+  ['esky', 'eskies', 'cooler', 'chilly bin', 'cool box'],
+  ['marquee', 'gazebo', 'pop up tent'],
+  ['bin bag', 'garbage bag', 'rubbish bag', 'bin liner'],
+  ['toilet paper', 'toilet roll', 'loo roll', 'dunny roll'],
+  ['sunscreen', 'sunblock', 'suncream'],
+  ['traffic cone', 'witches hat'],
+  ['radio', 'walkie talkie'],
+  ['hi vis', 'high vis'],
+];
+
+/** A phrase as a pattern: whole words, spaces or hyphens or nothing between them. */
+function phrasePattern(phrase: string): RegExp {
+  const words = phrase.split(' ').map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  // A trailing "s" or "es" is left in place, so "zip ties" becomes "cable ties".
+  return new RegExp(`\\b${words.join('[\\s-]*')}(?=(?:e?s)?\\b)`, 'gi');
+}
+
+const PHRASE_PATTERNS = PHRASE_SYNONYMS.map((group) => group.map((phrase) => phrasePattern(phrase)));
+
+/** Text with every known phrase swapped for its group's catalogue name. */
+function canonicalPhrases(text: string): string {
+  let out = text;
+  PHRASE_PATTERNS.forEach((patterns, index) => {
+    const canonical = PHRASE_SYNONYMS[index][0];
+    for (const pattern of patterns.slice(1)) out = out.replace(pattern, canonical);
+  });
+  return out;
+}
+
+/**
+ * Every way of saying what was searched for: the words as typed, then with
+ * each known phrase swapped for the others in its group. A row matches the
+ * search if it matches any of them.
+ */
+export function searchVariants(query: string): string[] {
+  let variants = [query.trim().toLowerCase()];
+  PHRASE_PATTERNS.forEach((patterns, index) => {
+    const group = PHRASE_SYNONYMS[index];
+    const next: string[] = [];
+    for (const variant of variants) {
+      next.push(variant);
+      for (const pattern of patterns) {
+        if (!variant.match(pattern)) continue;
+        for (const other of group) next.push(variant.replace(pattern, other));
+      }
+    }
+    // A query naming three groups at once is rare; this keeps it bounded.
+    variants = [...new Set(next)].slice(0, 24);
+  });
+  return variants.filter(Boolean);
+}
+
+/** True when every word of some variant of the query is in the text. */
+export function matchesSearch(haystack: string, query: string): boolean {
+  const text = haystack.toLowerCase();
+  return searchVariants(query).some((variant) =>
+    variant
+      .split(/\s+/)
+      .filter(Boolean)
+      .every((term) => text.includes(term)),
+  );
+}
+
 /** A single word reduced to its comparable form. */
 function stem(word: string): string {
   const mapped = SYNONYMS[word] ?? word;
@@ -69,10 +146,12 @@ function stem(word: string): string {
  * "Marquee Walls - 3x3 (or equivalent)" → ["marquee", "wall", "3x3"].
  */
 export function tokens(name: string): string[] {
-  return name
-    .toLowerCase()
-    .replace(/[’']/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
+  return canonicalPhrases(
+    name
+      .toLowerCase()
+      .replace(/[’']/g, '')
+      .replace(/[^a-z0-9]+/g, ' '),
+  )
     .trim()
     .split(/\s+/)
     .filter((word) => word && !STOP.has(word))

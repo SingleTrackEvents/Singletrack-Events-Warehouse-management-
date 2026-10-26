@@ -1,9 +1,19 @@
 import { db } from '../db/db';
 import { create, liveWhere, nextSort, update } from '../db/repo';
 import type { Category, Destination, Item, PacklistLine, SyncMeta } from '../db/types';
-import type { ParsedGrid } from './importGrid';
-import { matchCategory, matchDestination, matchItem, nameKey } from './importMatch';
-import type { Confidence } from './importMatch';
+import { interpretGrids, parseQty } from './importGrid';
+import type { Grid, InterpretHints, ParsedGrid } from './importGrid';
+import {
+  RESERVED_HEADING,
+  isQuantityHeading,
+  matchCategory,
+  matchDestination,
+  matchItem,
+  nameKey,
+  similarity,
+  tokens,
+} from './importMatch';
+import type { Confidence, ItemMatch } from './importMatch';
 import { createPacklist, packlistForDestination } from './packlists';
 import { suggestSku } from './skus';
 import { round2 } from './stock';
@@ -50,7 +60,25 @@ export interface ItemPlan {
   totalQty: number;
   notes: string[];
   where: string[];
+  /** A quantity big enough to be a typo: shown for checking, never refused. */
+  large: boolean;
 }
+
+/** A row of the file that brought nothing in, and why, for the review. */
+export interface RowProblem {
+  where: string;
+  /** The item as the row names it, or the row's first words. */
+  name: string;
+  /** The cell that could not be used, exactly as written. */
+  text: string;
+  reason: 'negative' | 'not a number';
+}
+
+/**
+ * More than this of anything on one station is checked by a person first.
+ * A station's cups run to a couple of thousand; a million is a slipped key.
+ */
+export const LARGE_QTY = 5000;
 
 export interface ImportPlan {
   eventId: string;
@@ -61,6 +89,8 @@ export interface ImportPlan {
   unplacedLines: number;
   /** Rows passed over while reading, for the summary. */
   skippedRows: number;
+  /** Rows that wanted to say something and could not, shown one by one. */
+  problems: RowProblem[];
 }
 
 export interface PlanContext {
@@ -127,7 +157,7 @@ export function buildPlan(parsed: ParsedGrid[], context: PlanContext): ImportPla
     for (const line of grid.lines) {
       const spelling = nameKey(line.name);
       if (!spelling) continue;
-      if (!matches.has(spelling)) matches.set(spelling, matchItem(line.name, context.items));
+      if (!matches.has(spelling)) matches.set(spelling, sharpenMatch(line.name, matchItem(line.name, context.items), context.items));
       const match = matches.get(spelling) ?? null;
       const key = match ? `item:${match.item.id}` : `new:${spelling}`;
 
@@ -147,6 +177,7 @@ export function buildPlan(parsed: ParsedGrid[], context: PlanContext): ImportPla
           totalQty: 0,
           notes: [],
           where: [],
+          large: false,
         };
         byKey.set(key, plan);
       }
@@ -155,6 +186,7 @@ export function buildPlan(parsed: ParsedGrid[], context: PlanContext): ImportPla
       if (slot) slot.qty = round2(slot.qty + line.qty);
       else plan.quantities.push({ place: line.place, qty: line.qty });
       plan.totalQty = round2(plan.totalQty + line.qty);
+      if (plan.quantities.some((entry) => entry.qty > LARGE_QTY)) plan.large = true;
       if (line.note && !plan.notes.includes(line.note)) plan.notes.push(line.note);
       plan.where.push(line.where);
       if (line.section) plan.section = plan.section ?? line.section;
@@ -184,7 +216,107 @@ export function buildPlan(parsed: ParsedGrid[], context: PlanContext): ImportPla
     unplacedDestinationId: unplacedLines && live.length === 1 ? live[0].id : null,
     unplacedLines,
     skippedRows: parsed.reduce((sum, grid) => sum + grid.skipped, 0),
+    problems: [],
   };
+}
+
+/**
+ * Turn away a guess that drops a word the file used.
+ *
+ * "Starlink Mini" is not a Starlink: when every word of the catalogue name is
+ * in the file's name and the file says more, the extra word is usually what
+ * makes it a different thing. A catalogue item carrying every word the file
+ * used is offered instead, the plainest such name first; failing that,
+ * nothing is guessed and the line comes in as a new item for a person to
+ * match. An exact match is never second-guessed.
+ */
+export function sharpenMatch(name: string, match: ItemMatch | null, items: Item[]): ItemMatch | null {
+  if (!match || match.confidence === 'sure') return match;
+  const asked = tokens(name);
+  const offered = tokens(match.item.name);
+  const saysMore = asked.some((word) => !offered.includes(word));
+  const coversOffered = offered.every((word) => asked.includes(word));
+  if (!saysMore || !coversOffered) return match;
+  const fuller = items
+    .filter((item) => !item.deletedAt && !item.archived)
+    .map((item) => ({ item, words: tokens(item.name) }))
+    .filter(({ words }) => asked.every((word) => words.includes(word)))
+    .sort((a, b) => a.words.length - b.words.length || a.item.name.localeCompare(b.item.name))[0];
+  return fuller ? { item: fuller.item, score: similarity(name, fuller.item.name), confidence: 'likely' } : null;
+}
+
+/** A cell that is a number below zero: "-5", "- 2", "−3". */
+const NEGATIVE = /^\s*[-−–]\s*\d+(?:[.,]\d+)?\s*$/;
+
+/** The first words on a row, to name it in the review. */
+function rowName(row: string[], skip: ReadonlySet<number> = new Set()): string {
+  return row.find((value, col) => !skip.has(col) && value.trim() && parseQty(value) === null)?.trim() ?? '';
+}
+
+/**
+ * Read the files into a plan, with the rows that brought nothing in listed.
+ *
+ * A negative quantity is taken out before reading, because the reader sees
+ * the digits and not the sign, and "-5" would arrive as five. A word where
+ * the number goes ("abc") is found afterwards: a row that made no line but
+ * has words in a column the rest of the file uses for numbers.
+ */
+export function planImport(grids: Grid[], hints: InterpretHints, context: PlanContext): ImportPlan {
+  const problems: RowProblem[] = [];
+  const cleaned = grids.map((grid) => ({
+    ...grid,
+    rows: grid.rows.map((row, index) =>
+      row.map((value) => {
+        if (!NEGATIVE.test(value)) return value;
+        problems.push({ where: `${grid.name} row ${index + 1}`, name: rowName(row), text: value.trim(), reason: 'negative' });
+        return '0';
+      }),
+    ),
+  }));
+  const parsed = interpretGrids(cleaned, hints);
+  cleaned.forEach((grid, index) => problems.push(...unreadQuantities(grid, parsed[index])));
+  const order = (problem: RowProblem) => {
+    const match = problem.where.match(/^(.*) row (\d+)$/);
+    return { grid: grids.findIndex((grid) => grid.name === match?.[1]), row: Number(match?.[2] ?? 0) };
+  };
+  problems.sort((a, b) => order(a).grid - order(b).grid || order(a).row - order(b).row);
+  return { ...buildPlan(parsed, context), problems };
+}
+
+/** Rows whose number column holds words, so they were passed over. */
+function unreadQuantities(grid: Grid, parsed: ParsedGrid | undefined): RowProblem[] {
+  if (!parsed) return [];
+  const prefix = `${grid.name} row `;
+  const produced = new Set(
+    parsed.lines
+      .filter((line) => line.where.startsWith(prefix))
+      .map((line) => Number(line.where.slice(prefix.length)) - 1),
+  );
+  if (!produced.size) return [];
+  // The number columns are the ones the rows that did come in mostly have
+  // numbers in.
+  const width = Math.max(...grid.rows.map((row) => row.length));
+  const numberCols = new Set<number>();
+  for (let col = 0; col < width; col += 1) {
+    let numbers = 0;
+    for (const row of produced) if (parseQty(grid.rows[row]?.[col] ?? '') !== null) numbers += 1;
+    if (numbers * 2 >= produced.size) numberCols.add(col);
+  }
+  const headings = new Set(parsed.places.map((place) => place.trim().toLowerCase()));
+  const problems: RowProblem[] = [];
+  grid.rows.forEach((row, index) => {
+    if (produced.has(index)) return;
+    const name = rowName(row, numberCols);
+    if (!name || RESERVED_HEADING.test(name)) return;
+    const words = [...numberCols]
+      .map((col) => (row[col] ?? '').trim())
+      .filter((value) => value && parseQty(value) === null);
+    if (!words.length) return;
+    // A header row: the places across the top, or "Qty".
+    if (words.some((value) => headings.has(value.toLowerCase()) || isQuantityHeading(value))) return;
+    problems.push({ where: `${prefix}${index + 1}`, name, text: words[0], reason: 'not a number' });
+  });
+  return problems;
 }
 
 /* ---------------------------------------------------------------- commit -- */
@@ -245,8 +377,8 @@ export async function commitImport(plan: ImportPlan, options: CommitOptions): Pr
         lng: null,
         crewLead: '',
         phone: '',
-        openTime: '06:00',
-        closeTime: '16:00',
+        openTime: '',
+        closeTime: '',
         notes: sourceNote,
         sort: destinationSort,
       });

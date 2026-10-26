@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ToastContext } from './toastContext';
-import type { ToastTone } from './toastContext';
+import type { ToastOptions, ToastTone } from './toastContext';
 
 /** Shared building blocks, all sized for thumbs rather than mouse pointers. */
 
@@ -11,20 +11,30 @@ interface Toast {
   id: number;
   message: string;
   tone: ToastTone;
+  undo?: () => unknown;
 }
+
+/** Long enough to read; with an Undo, long enough to find the button too. */
+const TOAST_MS = 3200;
+const UNDO_TOAST_MS = 6500;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seq = useRef(0);
 
-  const push = useCallback((message: string, tone: ToastTone = 'ok') => {
-    seq.current += 1;
-    const toast = { id: seq.current, message, tone };
-    setToasts((current) => [...current, toast]);
-    setTimeout(() => {
-      setToasts((current) => current.filter((entry) => entry.id !== toast.id));
-    }, 3200);
+  const dismiss = useCallback((id: number) => {
+    setToasts((current) => current.filter((entry) => entry.id !== id));
   }, []);
+
+  const push = useCallback(
+    (message: string, tone: ToastTone = 'ok', options: ToastOptions = {}) => {
+      seq.current += 1;
+      const toast = { id: seq.current, message, tone, undo: options.undo };
+      setToasts((current) => [...current, toast]);
+      setTimeout(() => dismiss(toast.id), options.undo ? UNDO_TOAST_MS : TOAST_MS);
+    },
+    [dismiss],
+  );
 
   return (
     <ToastContext.Provider value={push}>
@@ -32,7 +42,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div className="toast-host" role="status" aria-live="polite">
         {toasts.map((toast) => (
           <div key={toast.id} className={`toast${toast.tone === 'ok' ? '' : ` toast-${toast.tone}`}`}>
-            {toast.message}
+            <span className="toast-text">{toast.message}</span>
+            {toast.undo ? (
+              <button
+                type="button"
+                className="toast-undo"
+                onClick={() => {
+                  // Once only: a second tap must not undo twice.
+                  const undo = toast.undo;
+                  dismiss(toast.id);
+                  void Promise.resolve(undo?.()).catch((cause) => console.error('Undo failed', cause));
+                }}
+              >
+                Undo
+              </button>
+            ) : null}
           </div>
         ))}
       </div>
@@ -135,6 +159,9 @@ export function ConfirmSheet({
  * Quantity control. The +/- buttons are 44px so they can be hit without
  * looking; the field itself accepts typing for big numbers.
  */
+/** The largest quantity any box accepts. */
+export const MAX_QTY = 99_999;
+
 export function Stepper({
   value,
   onChange,
@@ -143,6 +170,7 @@ export function Stepper({
   step = 1,
   label,
   placeholder,
+  whole = false,
 }: {
   /**
    * Null renders an empty box. Use it where no number has been entered yet and
@@ -156,9 +184,42 @@ export function Stepper({
   step?: number;
   label?: string;
   placeholder?: string;
+  /** Counted in whole units: half a Starlink is a typo, not a quantity. */
+  whole?: boolean;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
-  const clamp = (next: number) => Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min, next));
+  // No real line is ever a hundred thousand of anything; a number that big is
+  // a thumb resting on a key, and it would be taken out of stock as typed.
+  const clamp = (next: number) => {
+    const rounded = whole ? Math.round(next) : Math.round(next * 100) / 100;
+    return Math.min(max ?? MAX_QTY, Math.max(min, rounded));
+  };
+  const commit = () => {
+    if (draft === null) return;
+    const parsed = Number(draft.replace(',', '.'));
+    // A box cleared to nothing is left alone rather than read as zero;
+    // clearing an entry is a separate, deliberate action.
+    if (draft.trim() && Number.isFinite(parsed)) onChange(clamp(parsed));
+    setDraft(null);
+  };
+  // A typed number not yet tapped away from is saved if the app is put away
+  // or closed, rather than lost with the page.
+  const pending = useRef(commit);
+  useEffect(() => {
+    pending.current = commit;
+  });
+  useEffect(() => {
+    const flush = () => pending.current();
+    const hidden = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', hidden);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', hidden);
+    };
+  }, []);
   // Stepping from empty starts at the floor rather than treating blank as zero,
   // so the first tap of + on a blank line reads as one, not one-more-than-none.
   const current = value ?? min;
@@ -181,15 +242,15 @@ export function Stepper({
         value={draft ?? (value === null ? '' : String(value))}
         onFocus={(event) => event.currentTarget.select()}
         onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => {
-          if (draft !== null) {
-            const parsed = Number(draft);
-            // A box cleared to nothing is left alone rather than read as zero;
-            // clearing an entry is a separate, deliberate action.
-            if (draft.trim() && Number.isFinite(parsed)) onChange(clamp(parsed));
-            setDraft(null);
+        onKeyDown={(event) => {
+          // The keyboard's Go key saves the number, like tapping away does.
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.blur();
           }
         }}
+        onBlur={commit}
       />
       <button
         type="button"

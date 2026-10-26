@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daysUntil, formatQty, formatQtyDetail, initials, plural, relativeDays } from './format';
+import { daysUntil, formatQty, formatQtyDetail, initials, localIsoDate, plural, relativeDays } from './format';
 import type { Item } from '../db/types';
 
 describe('quantities', () => {
@@ -53,8 +53,14 @@ describe('dates', () => {
   const isoIn = (days: number) => {
     const date = new Date();
     date.setDate(date.getDate() + days);
-    return date.toISOString().slice(0, 10);
+    return localIsoDate(date);
   };
+
+  it('gives the local date, not the UTC one', () => {
+    // 8am in Melbourne is 9pm the day before in UTC.
+    const morning = new Date(2026, 9, 29, 8, 0);
+    expect(localIsoDate(morning)).toBe('2026-10-29');
+  });
 
   it('counts days to an event', () => {
     expect(daysUntil(isoIn(0))).toBe(0);

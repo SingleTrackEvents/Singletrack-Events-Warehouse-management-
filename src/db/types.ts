@@ -145,8 +145,24 @@ export interface RaceEvent extends SyncMeta {
   truckStage?: boolean;
   /** When the truck was last marked loaded, taking its stock out of the warehouse. */
   truckLoadedAt?: string | null;
+  /**
+   * Each time the truck (or the vehicles) was marked loaded, in order. GPT
+   * goes out in two runs, bulky gear first and the rest days later, and each
+   * run is its own load with its own manifest.
+   */
+  truckRuns?: TruckRun[];
   /** When the returns were last booked back into the warehouse. */
   truckUnloadedAt?: string | null;
+}
+
+export interface TruckRun {
+  at: string;
+  by: string;
+  /** Lines and units taken out of the warehouse by this run. */
+  lines: number;
+  units: number;
+  /** Units put back because they came off the truck before it left. */
+  returned: number;
 }
 
 /** What kind of place goods are going to. Drives which templates are suggested. */
@@ -214,6 +230,43 @@ export interface Destination extends SyncMeta {
    * shows up as gear with no way to travel. Absent or blank means unassigned.
    */
   vehicle?: string;
+  /**
+   * When the station runs and how it is set up, as the event's station
+   * schedule has it. Absent on stations nobody has scheduled.
+   */
+  schedule?: StationSchedule;
+}
+
+/**
+ * One window a station is open for: one race, or one stage, coming through.
+ * A station on a multi-day course opens several times, each with its own
+ * first runner and cut-off. Times are local, "2026-11-05T07:15".
+ */
+export interface StationWindow {
+  label: string;
+  firstRunner: string | null;
+  /** Null for a start line, which closes once the field is away. */
+  cutoff: string | null;
+}
+
+export interface StationSchedule {
+  windows: StationWindow[];
+  /** When the vehicle leaves the yard to set this station up, local time. Orders the yard. */
+  departsAt: string | null;
+  /** Set-up, in the schedule's words: who leaves when, set up by when. */
+  setup: string;
+  /** Pack-down and where the gear and vehicle go next. */
+  packDown: string;
+  /** "EcoFlow #1", "Generator", "Light tower", "Village power". */
+  power: string;
+  /** "Starlink 2", "5G (mobile)". */
+  connectivity: string;
+  /**
+   * Individual units at this station: "Starlink 2", "EcoFlow #1", "Light
+   * tower 1". Counted gear says how many; this says which one, so a unit
+   * moving between stations over the weekend can be found.
+   */
+  units?: string[];
 }
 
 /* ------------------------------------------------------------------- food -- */
@@ -351,6 +404,17 @@ export interface PacklistLine extends SyncMeta {
    * `qtyIssued` on the way out.
    */
   qtyBooked?: number;
+  /**
+   * The station this line's gear comes from, when it is not the warehouse.
+   *
+   * On a long course the northern stations are packed down and their gear
+   * rebuilt in the south: seven or eight stations' worth of marquees and
+   * tables serve twelve. A line that names its source is that gear moving on.
+   * It is not picked in the warehouse, does not take stock out a second time,
+   * and comes home once, from wherever it ends up. Absent or null means the
+   * warehouse supplies it.
+   */
+  fromDestinationId?: string | null;
   /**
    * Position in the van, counted in unload order (what comes out first).
    * Absent follows the default setup order by category.

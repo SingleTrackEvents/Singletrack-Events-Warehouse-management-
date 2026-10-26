@@ -5,12 +5,13 @@ import { Screen } from '../App';
 import { AssistantCheck } from '../components/AssistantCheck';
 import { ItemPicker } from '../components/ItemPicker';
 import { PackRuleSuggestions } from '../components/PackRuleSuggestions';
+import { RunSheetCard } from '../components/RunSheetCard';
 import { SwipeToDelete } from '../components/SwipeToDelete';
 import { MovePill } from '../components/Moves';
 import { ConfirmSheet, Field, ProgressBar, Sheet, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
-import { alive, byId, update } from '../db/repo';
+import { alive, byId, liveWhere, restore, softDelete, update } from '../db/repo';
 import { useCategories, useCrewName, useEvent, usePacklist, usePacklistLines } from '../hooks/useDb';
 import { moveInVan, resetVanOrder, unloadOrder } from '../domain/truck';
 import { useSession } from '../hooks/sessionContext';
@@ -24,18 +25,20 @@ import {
   clearNotes,
   hasIssued,
   isConfirmed,
+  stillOut,
   progressFor,
   receiptFor,
   received,
   removeLine,
   removePacklist,
   statusIndex,
+  templateLineQty,
 } from '../domain/packlists';
 import { formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
 import { addShoppingLine, inputForItem } from '../domain/shopping';
 import { isKit, kitLines } from '../domain/kits';
-import type { PacklistLine, Unit } from '../db/types';
+import type { Destination, PacklistLine, Template, TemplateLine, Unit } from '../db/types';
 
 type Filter = 'todo' | 'all' | 'packed' | 'musthave';
 
@@ -93,6 +96,15 @@ export default function PacklistScreen() {
     async () => (packlist ? db.destinations.get(packlist.destinationId) : undefined),
     [packlist?.destinationId],
   );
+  const eventStations = useLiveQuery(
+    async () =>
+      packlist
+        ? alive(await db.destinations.where('eventId').equals(packlist.eventId).toArray()).sort(
+            (a, b) => (a.courseKm ?? 0) - (b.courseKm ?? 0) || a.sort - b.sort,
+          )
+        : [],
+    [packlist?.eventId],
+  );
 
   const { session } = useSession();
   /*
@@ -119,7 +131,6 @@ export default function PacklistScreen() {
   const [applying, setApplying] = useState(false);
   const [checking, setChecking] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [removingLine, setRemovingLine] = useState<PacklistLine>();
   const [editingRequired, setEditingRequired] = useState<PacklistLine>();
   const [clearing, setClearing] = useState<'confirmations' | 'notes'>();
   const [deleting, setDeleting] = useState(false);
@@ -200,12 +211,20 @@ export default function PacklistScreen() {
   const modes = useMemo(() => {
     const available: Mode[] = [];
     if (canPack) available.push('pack');
-    if (canReceive) available.push('arrived', 'count', 'packdown');
+    // The station's jobs, for the station. Warehouse crew get them only once
+    // the list has left the warehouse: a packer tapping Arrived in Lavington
+    // otherwise moves the list to "at station" before it has gone anywhere.
+    const leftWarehouse =
+      move === 'station' ||
+      move === 'home' ||
+      (lines ?? []).some((line) => (line.qtyIssued ?? 0) > 0) ||
+      Boolean(packlist && hasIssued(packlist.status));
+    if (canReceive && (!canPack || leftWarehouse)) available.push('arrived', 'count', 'packdown');
     if (canPack && (move === 'home' || (packlist && statusIndex(packlist.status) >= statusIndex('delivered')))) {
       available.push('home');
     }
     return available;
-  }, [canPack, canReceive, move, packlist]);
+  }, [canPack, canReceive, move, packlist, lines]);
   const [chosenMode, setChosenMode] = useState<Mode>();
   const asked = searchParams.get('mode');
   const mode: Mode = (() => {
@@ -241,8 +260,11 @@ export default function PacklistScreen() {
       case 'pack':
         return line.qtyRequired;
       case 'arrived':
-      case 'packdown':
         return sent(line);
+      case 'packdown':
+        // What goes back in the van is at most what arrived: packing down
+        // against what was sent would hide a short delivery.
+        return isConfirmed(line) ? received(line) : sent(line);
       case 'count':
         return received(line);
       case 'home':
@@ -250,9 +272,19 @@ export default function PacklistScreen() {
     }
   };
 
-  /** True when this job is finished with the line. */
+  /**
+   * True when this job is finished with the line. Checking in is finished
+   * once the station has said how many arrived, short or not: their job is
+   * to say what turned up, and a short line must not keep it open forever.
+   */
   const doneOn = (line: PacklistLine): boolean =>
-    mode === 'count' || mode === 'packdown' ? hasLeft(line) : countOn(line) >= wantOn(line);
+    mode === 'count' || mode === 'packdown'
+      ? hasLeft(line)
+      : mode === 'arrived'
+        ? isConfirmed(line)
+        : mode === 'pack' && line.fromDestinationId
+          ? true
+          : countOn(line) >= wantOn(line);
 
   /** Only the lines this job is about: the food and drink to count, the gear to pack down. */
   const forMode = (line: PacklistLine): boolean => {
@@ -358,6 +390,10 @@ export default function PacklistScreen() {
     return <Navigate to="/" replace />;
   }
 
+  // A deleted list is still in the database as a tombstone, so Back or an old
+  // link would open it as if nothing happened. Off to the event instead.
+  if (packlist.deletedAt) return <Navigate to={`/events/${packlist.eventId}`} replace />;
+
   /**
    * Tapping a row is all-or-nothing; the stepper handles partial counts.
    *
@@ -365,14 +401,45 @@ export default function PacklistScreen() {
    * the number box is the control: a tap that quietly wrote "none left"
    * would be a tap that wrote the wrong number most of the time.
    */
+  /** A swipe is deliberate, so the line goes at once, with Undo on the toast. */
+  const removeWithUndo = (line: PacklistLine) => {
+    if (stillOut(line)) {
+      // Gone out of the warehouse on this line: removing it would drop the
+      // gear off the count home for good.
+      toast('This went out of the warehouse on this line. Count it home before removing it.', 'warn');
+      return;
+    }
+    void removeLine(line.id).then(() =>
+      toast(`${items?.get(line.itemId)?.name ?? 'Line'} removed`, 'ok', {
+        undo: () => restore(db.packlistLines, line.id),
+      }),
+    );
+  };
+
   const toggleLine = (line: PacklistLine) => {
     if (mode === 'count') return;
     const full = doneOn(line) && countOn(line) >= wantOn(line);
     if (mode === 'packdown') {
       if (hasLeft(line)) void update(db.packlistLines, line.id, { qtyLeft: null, countedBy: me });
       else packTo(line, wantOn(line));
+    } else if (mode === 'arrived' && isConfirmed(line)) {
+      // Unticking a checked-in line takes the answer back to "not checked",
+      // never to "none arrived": a mis-tap must not report a missing crate.
+      const before = line.qtyReceived ?? null;
+      void update(db.packlistLines, line.id, { qtyReceived: null });
+      toast(`${items?.get(line.itemId)?.name ?? 'Line'} not checked yet`, 'ok', {
+        undo: () => update(db.packlistLines, line.id, { qtyReceived: before }),
+      });
+    } else if (full) {
+      // A gloved mis-tap on a packed row would wipe its count, so the way
+      // back is one tap away rather than a recount.
+      const before = countOn(line);
+      packTo(line, 0);
+      toast(`${items?.get(line.itemId)?.name ?? 'Line'} cleared`, 'ok', {
+        undo: () => packTo(line, before),
+      });
     } else {
-      packTo(line, full ? 0 : wantOn(line));
+      packTo(line, wantOn(line));
     }
     if (!full && navigator.vibrate) navigator.vibrate(15);
   };
@@ -387,9 +454,12 @@ export default function PacklistScreen() {
   ) => {
             const item = items?.get(line.itemId);
             const unit = item?.unit ?? 'each';
+            const whole = unit !== 'litre' && unit !== 'kg';
             const count = countOn(line);
-            const packed = doneOn(line);
-            const short = !packed && (mode === 'count' || mode === 'packdown' ? false : count > 0);
+            // Checked in but fewer than were sent reads as short, not as done.
+            const shortArrival = mode === 'arrived' && isConfirmed(line) && count < wantOn(line);
+            const packed = doneOn(line) && !shortArrival;
+            const short = shortArrival || (!doneOn(line) && (mode === 'count' || mode === 'packdown' ? false : count > 0));
             const kit = isKit(item);
             const counting = mode === 'count' || mode === 'packdown';
             const stamp =
@@ -404,6 +474,9 @@ export default function PacklistScreen() {
                 tabIndex={0}
                 onClick={() => !returning && toggleLine(line)}
                 onKeyDown={(event) => {
+                  // Only the row's own keys: Enter in the number box (the
+                  // phone's Go key, or a Bluetooth scanner) must not toggle it.
+                  if (event.target !== event.currentTarget) return;
                   if (!returning && (event.key === 'Enter' || event.key === ' ')) {
                     event.preventDefault();
                     toggleLine(line);
@@ -460,6 +533,11 @@ export default function PacklistScreen() {
                     {item ? `${item.bin || 'no bin'} · ${item.sku}` : ''}
                     {line.note ? ` · ${line.note}` : ''}
                   </span>
+                  {line.fromDestinationId ? (
+                    <span className="row-sub strong">
+                      ↪ Comes from {eventStations?.find((entry) => entry.id === line.fromDestinationId)?.name ?? 'another station'}, not the warehouse
+                    </span>
+                  ) : null}
                   {kit ? (
                     <button
                       type="button"
@@ -508,7 +586,8 @@ export default function PacklistScreen() {
                     <Stepper
                       label="returned"
                       value={line.qtyReturned}
-                      max={sent(line)}
+                      whole={whole}
+                      max={Math.max(sent(line), wantOn(line))}
                       onChange={(value) => void update(db.packlistLines, line.id, { qtyReturned: value })}
                     />
                   </span>
@@ -519,7 +598,9 @@ export default function PacklistScreen() {
                       label={mode === 'count' ? `left over ${item?.name ?? ''}` : `back in the van ${item?.name ?? ''}`}
                       value={hasLeft(line) ? (line.qtyLeft as number) : null}
                       placeholder="?"
-                      max={mode === 'packdown' ? wantOn(line) : undefined}
+                      whole={whole}
+                      // No more can be left over, or go back in the van, than arrived.
+                      max={mode === 'packdown' ? wantOn(line) : isConfirmed(line) ? received(line) : sent(line)}
                       onChange={(value) => packTo(line, value)}
                     />
                   </span>
@@ -547,6 +628,9 @@ export default function PacklistScreen() {
                     <Stepper
                       label={mode === 'pack' ? 'packed' : 'arrived'}
                       value={count}
+                      whole={whole}
+                      // Room for spares, not for a thumb resting on a key.
+                      max={Math.max(wantOn(line) * 3, wantOn(line) + 10)}
                       onChange={(value) => packTo(line, value)}
                     />
                   </span>
@@ -571,7 +655,7 @@ export default function PacklistScreen() {
             // Swiping a line off the list is the crew's job; a driver checking a
             // delivery in gets the plain row.
             return canManage && mode === 'pack' ? (
-              <SwipeToDelete key={line.id} label="Remove" onDelete={() => setRemovingLine(line)}>
+              <SwipeToDelete key={line.id} label="Remove" onDelete={() => removeWithUndo(line)}>
                 {row}
               </SwipeToDelete>
             ) : (
@@ -611,9 +695,6 @@ export default function PacklistScreen() {
             Tap a line as it goes back in the van. The number is what came home from the station.
           </p>
         ) : null}
-        {destination?.accessNotes ? (
-          <p className="tiny muted mt-2">🚙 {destination.accessNotes}</p>
-        ) : null}
         {packlist.notes ? <p className="tiny muted mt-2">📝 {packlist.notes}</p> : null}
         {siblings?.length ? (
           <p className="tiny mt-2" style={{ color: 'var(--warn)' }}>
@@ -628,6 +709,21 @@ export default function PacklistScreen() {
           </p>
         ) : null}
       </div>
+
+      {/* The run sheet: open for the station's own crew, folded for the
+          warehouse, who are here for the lines. */}
+      {destination ? (
+        stationOnly ? (
+          <RunSheetCard destination={destination} />
+        ) : (
+          <details className="mb-3 no-print">
+            <summary className="small strong">Run sheet: hours, crew lead, vehicle, access</summary>
+            <div className="mt-2">
+              <RunSheetCard destination={destination} />
+            </div>
+          </details>
+        )
+      ) : null}
 
       {modes.length > 1 ? (
         <div className="chip-row mb-3" role="group" aria-label="Job">
@@ -676,17 +772,6 @@ export default function PacklistScreen() {
             </button>
           ) : null}
         </div>
-      ) : null}
-
-      {/* The pack rules, while the list can still change before stock leaves. */}
-      {canManage && mode === 'pack' && !hasIssued(packlist.status) && items ? (
-        <PackRuleSuggestions
-          packlistId={packlist.id}
-          lines={lines ?? []}
-          items={items}
-          destinationType={destination?.type}
-          eventId={packlist.eventId}
-        />
       ) : null}
 
       <div className="chip-row mb-3">
@@ -762,15 +847,29 @@ export default function PacklistScreen() {
                     ? '🎉 Everything is back in the van.'
                     : '🎉 Everything is counted in.'
             : mode === 'count'
-              ? 'No food or drink on this list.'
+              ? 'Nothing on this list gets used up.'
               : 'Nothing here yet.'}
         </div>
       )}
+
+      {/* Under the lines: the pack rules, while the list can still change before stock leaves. */}
+      {canManage && mode === 'pack' && !hasIssued(packlist.status) && items ? (
+        <PackRuleSuggestions
+          packlistId={packlist.id}
+          lines={lines ?? []}
+          items={items}
+          destinationType={destination?.type}
+          eventId={packlist.eventId}
+        />
+      ) : null}
 
       <div className="btn-row mt-4 no-print">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotesOpen(true)}>
           📝 Notes
         </button>
+        <Link className="btn btn-ghost btn-sm" to={`/packlists/${packlist.id}/print`}>
+          🖨 Print run sheet
+        </Link>
       </div>
 
       {canManage ? (
@@ -798,7 +897,7 @@ export default function PacklistScreen() {
               Clear notes{notedLines ? ` (${notedLines})` : ''}
             </button>
           </div>
-          {!hasIssued(packlist.status) ? (
+          {!hasIssued(packlist.status) && !(lines ?? []).some(stillOut) ? (
             <>
               <p className="tiny muted mt-3">
                 For a second list this station should not have. Nothing has left the warehouse
@@ -844,8 +943,8 @@ export default function PacklistScreen() {
         <ApplyTemplateSheet
           packlistId={packlist.id}
           onClose={() => setApplying(false)}
-          onApplied={(count) => {
-            toast(`${plural(count, 'template line')} merged in`);
+          onApplied={(name, undo) => {
+            toast(`${name} applied`, 'ok', { undo });
             setApplying(false);
           }}
         />
@@ -854,6 +953,7 @@ export default function PacklistScreen() {
       {notesOpen ? (
         <NotesSheet
           initial={packlist.notes}
+          appendAs={stationOnly ? me : undefined}
           onClose={() => setNotesOpen(false)}
           onSave={(notes) => {
             void update(db.packlists, packlist.id, { notes });
@@ -891,27 +991,13 @@ export default function PacklistScreen() {
                 }
               : undefined
           }
+          stations={(eventStations ?? []).filter((entry) => entry.id !== packlist.destinationId)}
           onClose={() => setEditingRequired(undefined)}
-          onSave={(qtyRequired) => {
-            void update(db.packlistLines, editingRequired.id, { qtyRequired }).then(() => {
+          onSave={(qtyRequired, fromDestinationId) => {
+            void update(db.packlistLines, editingRequired.id, { qtyRequired, fromDestinationId }).then(() => {
               toast(`Now needs ${formatQty(qtyRequired, items?.get(editingRequired.itemId)?.unit ?? 'each')}`);
               setEditingRequired(undefined);
             });
-          }}
-        />
-      ) : null}
-
-      {removingLine ? (
-        <ConfirmSheet
-          title="Remove this line?"
-          body={items?.get(removingLine.itemId)?.name ?? ''}
-          confirmLabel="Remove"
-          tone="danger"
-          onCancel={() => setRemovingLine(undefined)}
-          onConfirm={() => {
-            void removeLine(removingLine.id);
-            setRemovingLine(undefined);
-            toast('Line removed');
           }}
         />
       ) : null}
@@ -984,6 +1070,34 @@ export default function PacklistScreen() {
   );
 }
 
+/** What applying a template would do to a list, before anyone commits to it. */
+function templatePreview(
+  templateLines: TemplateLine[],
+  existing: PacklistLine[],
+  runners: number,
+): { adds: number; topUps: number } {
+  // Mirrors applyTemplate: an item already on the list is topped up, anything
+  // else becomes a new line.
+  const have = new Set(existing.map((line) => line.itemId));
+  let adds = 0;
+  let topUps = 0;
+  for (const line of templateLines) {
+    if (templateLineQty(line, runners) <= 0) continue;
+    if (have.has(line.itemId)) topUps += 1;
+    else adds += 1;
+  }
+  return { adds, topUps };
+}
+
+/**
+ * Pick a template, see what it will do, then apply it.
+ *
+ * One tap used to merge a template straight in, and a whole-event list landed
+ * ninety lines on one aid station. Now the tap shows how many lines it adds
+ * and tops up first, the whole-event lists stay out of the way unless asked
+ * for, and the toast carries an Undo that takes the new lines off and puts
+ * the topped-up amounts back.
+ */
 function ApplyTemplateSheet({
   packlistId,
   onClose,
@@ -991,15 +1105,109 @@ function ApplyTemplateSheet({
 }: {
   packlistId: string;
   onClose: () => void;
-  onApplied: (count: number) => void;
+  onApplied: (name: string, undo: () => Promise<void>) => void;
 }) {
   const templates = useLiveQuery(async () => alive(await db.templates.toArray()), []);
   const [runners, setRunners] = useState(0);
+  const [showEvent, setShowEvent] = useState(false);
+  const [chosen, setChosen] = useState<Template>();
+  const applyingNow = useRef(false);
+  const [busy, setBusy] = useState(false);
+
+  const preview = useLiveQuery(async () => {
+    if (!chosen) return undefined;
+    const [templateLines, existing] = await Promise.all([
+      liveWhere(db.templateLines, 'templateId', chosen.id),
+      liveWhere(db.packlistLines, 'packlistId', packlistId),
+    ]);
+    return templatePreview(templateLines, existing, runners);
+  }, [chosen?.id, packlistId, runners]);
+
+  const wholeEvent = (templates ?? []).filter((template) => template.scope === 'event');
+  const shown = (templates ?? []).filter((template) => showEvent || template.scope !== 'event');
+
+  const apply = async (template: Template) => {
+    if (applyingNow.current) return;
+    applyingNow.current = true;
+    setBusy(true);
+    try {
+      const before = new Map(
+        (await liveWhere(db.packlistLines, 'packlistId', packlistId)).map((line) => [line.id, line]),
+      );
+      await applyTemplate(packlistId, template, runners);
+      const after = await liveWhere(db.packlistLines, 'packlistId', packlistId);
+      const added = after.filter((line) => !before.has(line.id));
+      const topped = after.filter((line) => {
+        const was = before.get(line.id);
+        return was && (was.qtyRequired !== line.qtyRequired || was.mandatory !== line.mandatory);
+      });
+      const undo = async () => {
+        for (const line of added) await softDelete(db.packlistLines, line.id);
+        for (const line of topped) {
+          const was = before.get(line.id)!;
+          const now = await db.packlistLines.get(line.id);
+          // Only put back what the template set. A line someone has changed
+          // since keeps their number.
+          if (!now || now.deletedAt || now.qtyRequired !== line.qtyRequired) continue;
+          await update(db.packlistLines, line.id, { qtyRequired: was.qtyRequired, mandatory: was.mandatory });
+        }
+      };
+      onApplied(template.name, undo);
+    } finally {
+      applyingNow.current = false;
+      setBusy(false);
+    }
+  };
+
+  if (chosen) {
+    return (
+      <Sheet
+        title={`Apply ${chosen.name}?`}
+        onClose={onClose}
+        footer={
+          <>
+            <button type="button" className="btn btn-outline" onClick={() => setChosen(undefined)}>
+              Back
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !preview || !(preview.adds + preview.topUps)}
+              onClick={() => void apply(chosen)}
+            >
+              {busy ? 'Applying…' : 'Apply'}
+            </button>
+          </>
+        }
+      >
+        <p className="small">
+          {!preview
+            ? 'Working it out…'
+            : !(preview.adds + preview.topUps)
+              ? 'This template adds nothing to the list.'
+              : [
+                  preview.adds ? `Adds ${plural(preview.adds, 'new line')}` : '',
+                  preview.topUps
+                    ? `${preview.adds ? 'tops up' : 'Tops up'} ${plural(preview.topUps, 'line')} already on the list`
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(' and ') + '.'}
+        </p>
+        {chosen.scope === 'event' ? (
+          <p className="small mt-2" style={{ color: 'var(--danger)' }}>
+            This is a whole-event list, the totals for every station together, not one station&rsquo;s.
+          </p>
+        ) : null}
+        <p className="tiny muted mt-2">You can undo it from the message that follows.</p>
+      </Sheet>
+    );
+  }
 
   return (
     <Sheet title="Apply a template" onClose={onClose}>
       <p className="small muted mb-3">
-        Template quantities are added to what is already on the list — the same item is topped up, not
+        Template quantities are added to what is already on the list. The same item is topped up, not
         duplicated.
       </p>
       <Field label="Expected runners" hint="Used only by per-runner template lines.">
@@ -1015,59 +1223,99 @@ function ApplyTemplateSheet({
         )}
       </Field>
       <div className="list">
-        {(templates ?? []).map((template) => (
+        {shown.map((template) => (
           <button
             key={template.id}
             type="button"
             className="row"
-            onClick={() => {
-              void applyTemplate(packlistId, template, runners).then(onApplied);
-            }}
+            onClick={() => setChosen(template)}
           >
             <span className="row-icon">📋</span>
             <span className="row-body">
               <span className="row-title">{template.name}</span>
-              <span className="row-sub truncate">{template.description}</span>
+              <span className="row-sub truncate">
+                {template.scope === 'event' ? 'Whole event · ' : ''}
+                {template.description}
+              </span>
             </span>
             <span className="row-chevron">›</span>
           </button>
         ))}
       </div>
+      {wholeEvent.length ? (
+        <label className="checkbox mt-3">
+          <input type="checkbox" checked={showEvent} onChange={(event) => setShowEvent(event.target.checked)} />
+          <span>
+            Show whole-event lists too
+            <span className="small muted" style={{ display: 'block' }}>
+              {plural(wholeEvent.length, 'list')} with the totals for every station, not one.
+            </span>
+          </span>
+        </label>
+      ) : null}
     </Sheet>
   );
 }
 
 function NotesSheet({
   initial,
+  appendAs,
   onClose,
   onSave,
 }: {
   initial: string;
+  /**
+   * A station's own phone adds to the notes rather than editing them: the
+   * warehouse's note (the vehicle, the drop bags) must survive a volunteer
+   * reporting the extra crate that turned up. Their name heads what they add.
+   */
+  appendAs?: string;
   onClose: () => void;
   onSave: (notes: string) => void;
 }) {
-  const [value, setValue] = useState(initial);
+  const [value, setValue] = useState(appendAs !== undefined ? '' : initial);
+  const stamp = new Date().toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+  const result =
+    appendAs !== undefined
+      ? [initial.trim(), value.trim() ? `${appendAs || 'Station'}, ${stamp}: ${value.trim()}` : ''].filter(Boolean).join('\n\n')
+      : value;
   return (
     <Sheet
-      title="Packlist notes"
+      title={appendAs !== undefined ? 'Tell the warehouse' : 'Packlist notes'}
       onClose={onClose}
       footer={
         <>
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => onSave(value)}>
-            Save
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={appendAs !== undefined && !value.trim()}
+            onClick={() => onSave(result)}
+          >
+            {appendAs !== undefined ? 'Add note' : 'Save'}
           </button>
         </>
       }
     >
+      {appendAs !== undefined && initial.trim() ? (
+        <p className="small mb-3" style={{ whiteSpace: 'pre-wrap' }}>
+          {initial}
+        </p>
+      ) : null}
+      {appendAs !== undefined ? (
+        <p className="tiny muted mb-2">
+          Something extra arrived, something is broken, or you need more? Say so here and it goes to the
+          warehouse with your name.
+        </p>
+      ) : null}
       <textarea
         className="textarea"
         style={{ minHeight: 160 }}
         autoFocus
         value={value}
-        placeholder="Extra water for the plateau, chairs stay in the truck…"
+        placeholder={appendAs !== undefined ? 'An extra esky arrived that was not on the list' : 'Extra water for the plateau, chairs stay in the truck…'}
         onChange={(event) => setValue(event.target.value)}
       />
     </Sheet>
@@ -1089,6 +1337,7 @@ function RequiredSheet({
   line,
   itemName,
   unit,
+  stations,
   onShop,
   onClose,
   onSave,
@@ -1096,12 +1345,18 @@ function RequiredSheet({
   line: PacklistLine;
   itemName: string;
   unit: Unit;
+  /** The event's other stations, for gear that moves on from one of them. */
+  stations: Destination[];
   /** Put the shortfall on the shopping list. Absent when this account cannot. */
   onShop?: (qty: number) => void;
   onClose: () => void;
-  onSave: (qtyRequired: number) => void;
+  onSave: (qtyRequired: number, fromDestinationId: string | null) => void;
 }) {
   const [qty, setQty] = useState(line.qtyRequired);
+  const [from, setFrom] = useState(line.fromDestinationId ?? '');
+  // Once stock has gone out on this line it is warehouse gear, whatever it
+  // says now: switching it would take it out of the count home.
+  const fromLocked = (line.qtyIssued ?? 0) > 0;
   // What the shelf could not supply: the requirement less what is in the crate.
   const missing = Math.max(0, qty - line.qtyPacked);
 
@@ -1114,7 +1369,7 @@ function RequiredSheet({
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => onSave(qty)}>
+          <button type="button" className="btn btn-primary" onClick={() => onSave(qty, from || null)}>
             Save
           </button>
         </>
@@ -1152,6 +1407,23 @@ function RequiredSheet({
           Changes this stop only — the template it came from is left alone, so one busy station does
           not re-plan the rest of the race.
         </p>
+        {stations.length && !fromLocked ? (
+          <Field
+            label="Comes from"
+            hint="Gear packed down at another station and rebuilt here. It is not picked in the warehouse, does not come out of stock again, and comes home once, from here."
+          >
+            {(id) => (
+              <select id={id} className="select" value={from} onChange={(event) => setFrom(event.target.value)}>
+                <option value="">The warehouse</option>
+                {stations.map((station) => (
+                  <option key={station.id} value={station.id}>
+                    {station.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        ) : null}
         {line.qtyPacked > qty ? (
           <p className="tiny" style={{ color: 'var(--warn)' }}>
             {formatQty(line.qtyPacked, unit)} already packed, which is more than this. The extra

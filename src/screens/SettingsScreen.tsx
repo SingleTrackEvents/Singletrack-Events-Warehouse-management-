@@ -12,7 +12,7 @@ import { useSession } from '../hooks/sessionContext';
 import { can } from '../sync/permissions';
 import { downloadJson, exportAll, importBackup, isBackup, wipeAll } from '../domain/backup';
 import { openIntro } from '../domain/intro';
-import { plural } from '../domain/format';
+import { localIsoDate, plural } from '../domain/format';
 import type { Settings } from '../db/types';
 
 /**
@@ -42,7 +42,7 @@ export default function SettingsScreen() {
 
   const doExport = async () => {
     const backup = await exportAll('Full warehouse backup');
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = localIsoDate();
     downloadJson(backup, `singletrack-warehouse-${stamp}.json`);
     toast('Backup saved to downloads');
   };
