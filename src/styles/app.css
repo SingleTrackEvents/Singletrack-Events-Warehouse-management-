@@ -1199,3 +1199,27 @@ button, input, select, textarea {
 @media (min-width: 820px) {
   .app-main { padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + var(--space-10)); }
 }
+
+/* print and laptop */
+
+/* The line at the top of a printed sheet: what is packed and what is not,
+   before anyone reads a table. */
+.print-summary { font-weight: 700; padding: var(--space-2) var(--space-3); border-radius: var(--radius); margin-bottom: var(--space-3); }
+.print-summary.done { background: var(--ok-bg); }
+.print-summary.short { background: var(--warn-bg); }
+.print-missing { font-weight: 800; color: var(--danger); letter-spacing: 0.02em; }
+.print-lines tr.print-short td { background: var(--warn-bg); }
+.print-station { margin-top: var(--space-4); }
+.print-station-name { font-size: var(--text-lg); margin: 0 0 var(--space-2); }
+
+@media print {
+  /* One vehicle per page, so each van's sheet can go on its own clipboard. */
+  .print-page { break-after: page; margin: 0; border-radius: 0; }
+  .print-page:last-of-type { break-after: auto; }
+  .print-station-name { break-after: avoid; }
+  /* Ink, not tint: a shaded row on a black and white printer is a grey
+     smudge, so a missing item is a heavy border and bold black text. */
+  .print-summary { background: none !important; border: 2px solid #000; color: #000; }
+  .print-lines tr.print-short td { background: none; border-width: 2px; }
+  .print-missing { color: #000; }
+}
