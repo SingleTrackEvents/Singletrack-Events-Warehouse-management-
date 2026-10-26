@@ -58,4 +58,21 @@ export const KIT_CONTENTS: KitSpec[] = [
       ['First Aid Kit', 1],
     ],
   },
+  {
+    // GPT100 2026 Master Pack List: the water point box at Coppermine and the
+    // Mt Difficult ridgeline. Drinks only, so none of the food kit.
+    sku: 'KIT-90', // Water Point Box
+    contents: [
+      ['Serving Jugs (2L, marked)', 4],
+      ['Electrolyte Measuring Cup', 1],
+      ['Jug - 500ml (Ice Water)', 2],
+      ['Gloves', 1],
+      ['Hand Sanitiser', 5],
+      ['Sponges', 2],
+      ['Sunscreen', 1],
+      ['Cable Ties', 1],
+      ['Scissors / Snippers', 2], // scissors + snippers for cable ties
+      ['Small Freezer Bags', 3], // medium 35 × 25 tie, 80-packs
+    ],
+  },
 ];

@@ -12,7 +12,7 @@ import type { DestinationType, Item, PacklistLine } from '../db/types';
  *
  * Quantities come from the RCR26 Aid Station Cards, which spell most of
  * them out ("every marquee gets 1 steel weight on each leg and 4 ratchet
- * straps", "every table gets a SingleTrack table cloth"). Items are named by
+ * straps"); table cloths follow the GPT100 2026 Master Pack List. Items are named by
  * catalogue SKU, so renaming an item in the app does not break a rule.
  */
 
@@ -56,10 +56,26 @@ export const PACK_RULES: PackRule[] = [
     ],
   },
   {
+    // From the GPT100 2026 Master Pack List: cloths follow the marquees, not
+    // the tables, since a station's spare trestles stay folded.
     id: 'table-cloth',
-    when: { sku: 'FRN-01' }, // Trestle Tables
-    why: 'every table gets a SingleTrack table cloth',
-    add: [{ sku: 'FRN-03', per: 1 }], // Table Cloths
+    when: { sku: 'STR-02' }, // Marquee - ST 3x3
+    why: '3 table cloths for every 2 marquees',
+    add: [{ sku: 'FRN-03', per: 1.5 }], // Table Cloths
+  },
+  {
+    id: 'hired-structure-cloths',
+    when: { sku: 'STR-90' }, // Hired Structure (Prestige Hire)
+    why: 'at least 3 table cloths under a hired structure',
+    add: [{ sku: 'FRN-03', atLeast: 3 }], // Table Cloths
+  },
+  {
+    id: 'gpt-village-cloths',
+    when: { destination: 'event_village' },
+    // The seeded GPT100 2026 event: 16 trestle tables at the Halls Gap village.
+    events: ['stw-event-gpt26'],
+    why: 'the GPT100 village holds at least 12 table cloths',
+    add: [{ sku: 'FRN-03', atLeast: 12 }], // Table Cloths
   },
   {
     id: 'ibc-pipe',
@@ -149,8 +165,8 @@ export const PACK_RULES: PackRule[] = [
   {
     id: 'nap-bed',
     when: { sku: 'MED-02' }, // Camp Stretcher / Folding Bed
-    why: '5 blankets per nap bed',
-    add: [{ sku: 'MED-01', per: 5 }], // Blankets / Space Blankets
+    why: '3 blankets per nap bed',
+    add: [{ sku: 'MED-01', per: 3 }], // Blankets / Space Blankets
   },
   {
     id: 'flags',

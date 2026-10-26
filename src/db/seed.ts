@@ -433,7 +433,7 @@ export async function seedStarterData(
       code: 'gpt26',
       lists: GPT_PACKLISTS,
       retired: GPT_RETIRED,
-      notes: 'Starting quantities from the GPT 2025 pack list (draft).',
+      notes: 'Starting quantities from the GPT100 2026 Master Pack List v1.0.',
     },
   ];
   /*

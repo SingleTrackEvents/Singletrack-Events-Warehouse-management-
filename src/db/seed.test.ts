@@ -913,7 +913,7 @@ describe('the GPT100 starting packlists', () => {
     expect(qty('Sunscreen')).toBe(3);
     // Not box contents, so still their own lines.
     expect(qty('Ratchet Straps')).toBe(8);
-    expect(qty('Table Cloths')).toBe(2);
+    expect(qty('Table Cloths')).toBe(3);
   });
 });
 
@@ -1203,8 +1203,8 @@ describe('GPT100 2026 pack list, as handed over', () => {
     const lines = await gptLines();
     expect(total(lines, 'Gas Heater')).toBe(12);
     expect(total(lines, 'Generator')).toBe(2);
-    expect(total(lines, 'Large Generator (Hired)')).toBe(1);
-    expect(total(lines, 'EcoFlow Battery (1 kWh)')).toBe(5);
+    expect(total(lines, 'Large Generator (Hired)')).toBe(2); // Borough, on to Cassidys
+    expect(total(lines, 'EcoFlow Battery (1 kWh)')).toBe(3); // #1 moves on to Yarram Gap
     expect(total(lines, 'Light Tower (Diesel, Hired)')).toBe(3);
     expect(total(lines, 'Jerry Can 20 L (Diesel, labelled)')).toBe(6);
     expect(total(lines, 'Shoe Wash Kit')).toBe(23);
@@ -1218,6 +1218,28 @@ describe('GPT100 2026 pack list, as handed over', () => {
       seedId('dest', 'gpt26-Mt Difficult Rd'),
     );
     expect(total(lines.filter((line) => !line.fromDestinationId), 'Starlink Mini')).toBe(3);
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'Starlink')).toBe(5);
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'Large Generator (Hired)')).toBe(1);
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'EcoFlow Battery (1 kWh)')).toBe(2);
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'Picket Fence')).toBe(1);
+    expect(total(lines, 'Blankets / Space Blankets')).toBe(3 * total(lines, 'Camp Stretcher / Folding Bed'));
+  });
+
+  it('retires the 2025 firewood and fills the water point box', async () => {
+    await seedStarterData();
+    const firewood = seedId('pline', 'gpt26-Borough Huts-Firewood');
+    const wood = alive(await db.items.toArray()).find((item) => item.name === 'Firewood')!;
+    // As a phone holds it after the 2025 seed: a raw write keeps revision 1.
+    await db.packlistLines.put({
+      ...(await db.packlistLines.get(seedId('pline', 'gpt26-Borough Huts-Tarps')))!,
+      id: firewood,
+      itemId: wood.id,
+      qtyRequired: 2,
+    });
+    await seedStarterData({ onlyMissing: true });
+    expect((await db.packlistLines.get(firewood))?.deletedAt).toBeTruthy();
+    const box = alive(await db.items.toArray()).find((item) => item.name === 'Water Point Box')!;
+    expect(box.contents?.length).toBe(10);
   });
 
   it('takes sugar out of the aid station box', async () => {

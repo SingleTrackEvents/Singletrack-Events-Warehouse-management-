@@ -222,10 +222,11 @@ export const GPT_PLAN_2026: Record<string, StationPlan> = {
       ],
       departsAt: '2026-11-06T16:30',
       setup:
-        'Fri 16:30 Pantech #4 departs Halls Gap with tent, water, glucose, salts, timing kit, Starlink Mini 3 and 3 EcoFlows. Set up about 17:10 to 18:00, then on to Griffin.',
+        'Fri 16:30 Pantech #4 departs Halls Gap with tent, water, glucose, salts, timing kit and Starlink Mini 3. Set up about 17:10 to 18:00, then on to Griffin.',
       packDown: 'Sat after the 18:30 cut-off, Van #2 collects about 19:30, back at Halls Gap about 20:30.',
-      power: '3 EcoFlows overnight (units to be confirmed)',
+      power: 'EcoFlow #1, on from Mt Difficult Rd after its Friday cut-off',
       connectivity: 'Starlink Mini 3',
+      units: ['EcoFlow #1', 'Starlink Mini 3'],
     },
   },
   'Griffin Fireline': {
@@ -255,8 +256,9 @@ export const GPT_PLAN_2026: Record<string, StationPlan> = {
       departsAt: '2026-11-06T20:30',
       setup: 'Fri 20:30 Pantech #1 departs Halls Gap loaded for Cassidys and Bainggug, Cassidys set up by 00:30.',
       packDown: 'Sun 10:00 to 11:00, then Pantech #1 moves to the Bainggug pack-down.',
-      power: 'Generator',
-      connectivity: 'Spare Starlink, unit to be confirmed',
+      power: 'Generator (2.3kVA), and the large hired generator on from Borough Huts',
+      connectivity: 'Starlink 3, on from Rosea Carpark',
+      units: ['Starlink 3'],
     },
   },
   'Bainggug Carpark': {
@@ -269,8 +271,9 @@ export const GPT_PLAN_2026: Record<string, StationPlan> = {
       departsAt: '2026-11-06T21:00',
       setup: 'Fri 21:00 Van #1 departs Halls Gap as the parked vehicle. Sat 00:30 Pantech #1 continues from Cassidys, set up by 02:30.',
       packDown: 'Sun 13:30 to 14:30, back at Halls Gap about 16:00.',
-      power: 'Generator',
-      connectivity: 'Spare Starlink, unit to be confirmed',
+      power: 'Generator (2.3kVA)',
+      connectivity: 'Starlink 4, on from Borough Huts',
+      units: ['Starlink 4'],
     },
   },
   'Dunkeld Finish': {

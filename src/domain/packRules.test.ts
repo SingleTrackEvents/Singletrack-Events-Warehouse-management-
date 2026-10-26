@@ -45,16 +45,18 @@ describe('the pack rules', () => {
     expect(named.filter((sku) => !skus.has(sku))).toEqual([]);
   });
 
-  it('asks for straps, weights and walls with a marquee at an aid station', () => {
-    expect(asked(list([['STR-02', 3]]), 'checkpoint')).toEqual({ 'ANC-01': 12, 'ANC-03': 12, 'STR-01': 6 });
+  it('asks for straps, weights, walls and cloths with a marquee at an aid station', () => {
+    expect(asked(list([['STR-02', 3]]), 'checkpoint')).toEqual({
+      'ANC-01': 12, 'ANC-03': 12, 'STR-01': 6, 'FRN-03': 5,
+    });
   });
 
   it('leaves the village walls to the crew', () => {
-    expect(asked(list([['STR-02', 15]]), 'event_village')).toEqual({ 'ANC-01': 60, 'ANC-03': 60 });
+    expect(asked(list([['STR-02', 15]]), 'event_village')).toEqual({ 'ANC-01': 60, 'ANC-03': 60, 'FRN-03': 23 });
   });
 
   it('offers only the shortfall', () => {
-    expect(asked(list([['STR-02', 2], ['ANC-01', 5], ['ANC-03', 16]]), 'checkpoint')).toEqual({
+    expect(asked(list([['STR-02', 2], ['ANC-01', 5], ['ANC-03', 16], ['FRN-03', 3]]), 'checkpoint')).toEqual({
       'ANC-01': 3,
       'STR-01': 4,
     });
@@ -81,8 +83,8 @@ describe('the pack rules', () => {
     });
   });
 
-  it('puts 5 blankets on every nap bed, and a pole and cone under every flag', () => {
-    expect(asked(list([['MED-02', 2]]), 'checkpoint')).toEqual({ 'MED-01': 10 });
+  it('puts 3 blankets on every nap bed, and a pole and cone under every flag', () => {
+    expect(asked(list([['MED-02', 2]]), 'checkpoint')).toEqual({ 'MED-01': 6 });
     expect(asked(list([['OTH-02', 25]]), 'start')).toEqual({ 'OTH-03': 25, 'CRS-90': 25 });
   });
 
@@ -93,13 +95,18 @@ describe('the pack rules', () => {
       );
     expect(gpt('finish')).toEqual({ 'COM-01': 1 });
     expect(gpt('aid_station')['COM-01']).toBe(1);
-    expect(gpt('event_village')).toEqual({});
+    expect(gpt('event_village')).toEqual({ 'FRN-03': 12 }); // the village's table cloth floor
     expect(asked([], 'finish')).toEqual({});
     // No black bins at GPT100 this year, and a Starlink Mini is the station's Starlink.
     expect(gpt('aid_station')['WST-01']).toBeUndefined();
     expect(asked([], 'aid_station')['WST-01']).toBe(2);
     const withMini = suggestionsFor(list([['COM-90', 1]]), items, 'aid_station', 'stw-event-gpt26');
     expect(withMini.some((entry) => entry.item.sku === 'COM-01')).toBe(false);
+  });
+
+  it('gives 3 table cloths for every 2 marquees, and at least 3 under a hired structure', () => {
+    expect(asked(list([['STR-02', 2], ['ANC-01', 8], ['ANC-03', 8]]), 'event_village')).toEqual({ 'FRN-03': 3 });
+    expect(asked(list([['STR-90', 1]]), 'checkpoint')).toEqual({ 'FRN-03': 3 });
   });
 
   it('finds nothing missing on the RCR26 cards, bar a cover for the recovery power board', () => {
