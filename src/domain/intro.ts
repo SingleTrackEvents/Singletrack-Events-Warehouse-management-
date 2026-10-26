@@ -129,7 +129,10 @@ export function introFor(
 ): { role: Role; kind: IntroKind; steps: IntroStep[] } {
   const role = session?.role ?? 'admin';
   const kind = introKind(session);
-  const name = (session?.displayName || fallbackName).trim().split(/\s+/)[0] ?? '';
+  const first = (session?.displayName || fallbackName).trim().split(/\s+/)[0] ?? '';
+  // A fresh device is stamped "Warehouse" as its crew name, which is a place,
+  // not a person. "Hi Warehouse" is worse than no name at all.
+  const name = first.toLowerCase() === 'warehouse' ? '' : first;
   return { role, kind, steps: stepsFor(kind, name) };
 }
 

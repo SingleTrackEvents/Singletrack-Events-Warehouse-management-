@@ -54,6 +54,7 @@ describe('the welcome tour', () => {
     expect(introFor(session('admin', { displayName: 'Chad Thompson' })).steps[0].title).toBe('Hi Chad');
     expect(introFor(null, 'Jess').steps[0].title).toBe('Hi Jess');
     expect(introFor(null).steps[0].title).toBe('Hi there');
+    expect(introFor(null, 'Warehouse').steps[0].title).toBe('Hi there');
     for (const role of ROLES) {
       expect(JSON.stringify(introFor(session(role)).steps), role).not.toMatch(/Welcome, admin/);
     }
