@@ -224,6 +224,38 @@ export async function addShortfalls(eventId: string, totals: FoodTotal[], by = '
   return feed(inputs, 'set');
 }
 
+/** One thing an event is short of, as the "What's missing" screen works it out. */
+export interface EventWant {
+  item: Item;
+  /** How far short the event is, before anything already bought. */
+  qty: number;
+  source: ShoppingSource;
+}
+
+/**
+ * Put everything an event is short of on the list in one go: gear the
+ * warehouse cannot cover and food the plan says to buy.
+ *
+ * Set rather than topped up, like the food plan's shortfalls, so a second tap
+ * lands the same figures instead of doubling them. What has already been
+ * bought for this event and is waiting to be booked in counts against the
+ * shortfall: the shelf does not show it yet, but nobody needs to go back to
+ * the shop for it.
+ */
+export async function addEventShortfalls(eventId: string, wants: EventWant[], by = ''): Promise<FeedResult> {
+  const lines = alive(await db.shoppingLines.toArray());
+  const inputs: ShoppingInput[] = [];
+  for (const want of wants) {
+    const onTheWay = awaitingBooking(lines)
+      .filter((line) => line.itemId === want.item.id && (line.eventId ?? null) === eventId)
+      .reduce((sum, line) => sum + line.qty, 0);
+    const qty = round2(want.qty - onTheWay);
+    if (qty <= 0) continue;
+    inputs.push(inputForItem(want.item, qty, { eventId, source: want.source, by }));
+  }
+  return feed(inputs, 'set');
+}
+
 /**
  * How much of a low item to buy: enough to get back above the reorder
  * point, and never nothing, since the item is on the list because it is low.

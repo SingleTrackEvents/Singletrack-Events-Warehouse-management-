@@ -1199,3 +1199,41 @@ button, input, select, textarea {
 @media (min-width: 820px) {
   .app-main { padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + var(--space-10)); }
 }
+
+/* missing and planning */
+
+/* "What's missing" is read by people new to the app, often on a laptop
+   across a table, so the rows are bigger and the numbers stand out. */
+.missing-intro { margin-bottom: var(--space-4); color: var(--text-muted); }
+.missing-section .section-head h2 {
+  font-size: var(--text-lg);
+  text-transform: none;
+  letter-spacing: 0;
+  color: inherit;
+}
+.missing-station .row-title { font-size: var(--text-lg); }
+.missing-row { min-height: 56px; }
+.missing-row .row-title { font-size: var(--text-lg); font-weight: 600; }
+.missing-qty { font-weight: 700; font-size: var(--text-lg); white-space: nowrap; }
+.missing-empty { color: var(--text-muted); margin: 0; }
+.missing-unknown { border-color: var(--warn); }
+.missing-names { margin: 0; padding-left: 1.2em; }
+.missing-names li + li { margin-top: 2px; }
+
+/* Food plan: the amount sheet asks per runner first, with suggestions. */
+.plan-amount-row { display: grid; gap: var(--space-2); padding: var(--space-3) 0; }
+.plan-amount-row + .plan-amount-row { border-top: 1px solid var(--border); }
+
+/* Phone-only hints on the shopping list: a laptop has no swipe. */
+@media (hover: hover) and (pointer: fine) {
+  .touch-only { display: none; }
+}
+@media (hover: none), (pointer: coarse) {
+  .pointer-only { display: none; }
+}
+
+/* A heading only on paper: the title bar is not printed. */
+.print-only { display: none; }
+@media print {
+  .print-only { display: block; }
+}
