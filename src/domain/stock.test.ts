@@ -67,6 +67,13 @@ describe('recording movements', () => {
     expect((await db.items.get(item.id))!.qtyOnHand).toBe(2);
   });
 
+  it('keeps a count that matches, so an empty shelf reads as counted', async () => {
+    const item = await makeItem({ qtyOnHand: 0 });
+    const written = await setQuantity(item.id, 0, 'stocktake', { keepZero: true });
+    expect(written).toHaveLength(1);
+    expect((await countedItemIds()).has(item.id)).toBe(true);
+  });
+
   it('ignores zero-quantity movements rather than cluttering the ledger', async () => {
     const item = await makeItem();
     const written = await recordMovements([{ itemId: item.id, qty: 0, reason: 'adjustment' }]);

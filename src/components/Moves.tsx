@@ -53,6 +53,15 @@ export function MoveStrip({
 }
 
 /** Where one station's gear is, as a pill. */
-export function MovePill({ move, truckStage }: { move: Move; truckStage: boolean }) {
-  return <Pill tone={MOVE_TONE[move]}>{moveState(move, truckStage)}</Pill>;
+export function MovePill({
+  move,
+  truckStage,
+  progress,
+}: {
+  move: Move;
+  truckStage: boolean;
+  /** How far through the move the list is, so the pill can say packing or packed. */
+  progress?: { done: number; total: number };
+}) {
+  return <Pill tone={MOVE_TONE[move]}>{moveState(move, truckStage, progress)}</Pill>;
 }

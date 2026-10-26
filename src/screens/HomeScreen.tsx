@@ -15,14 +15,15 @@ import { countedItemIds, lowStockItems } from '../domain/stock';
 import { addLowStock, awaitingBooking, groupByShop, toBuy } from '../domain/shopping';
 import { uncountedSummary } from '../domain/stocktake';
 import { describeSource, packlistForDestination, primaryPacklist, progressFor, startPacklist } from '../domain/packlists';
-import { boardCounts, currentMove, hasLeft, moveLabel, moveOf, moveProgress, sent } from '../domain/moves';
+import { boardCounts, currentMove, hasLeft, moveOf, moveProgress, sent } from '../domain/moves';
 import { DELIVERY_LABELS, checkInFor, deliveryOf, describeCheckIn } from '../domain/runSheet';
 import { RunSheetCard } from '../components/RunSheetCard';
 import type { BoardRow, Move } from '../domain/moves';
-import { DESTINATION_ICONS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
+import { DESTINATION_ICONS, DESTINATION_LABELS, daysUntil, formatDateRange, plural, relativeDays } from '../domain/format';
 import type { Destination, Item, Packlist, PacklistLine } from '../db/types';
 import logo from '../assets/logo-white.png';
 import { openIntro } from '../domain/intro';
+import { lastOpenedEvent } from '../domain/format';
 
 /**
  * The screen the crew lands on: the board for the next event.
@@ -62,6 +63,10 @@ export default function HomeScreen() {
   // the most recent. Anything "live" jumps the queue.
   const focus = (() => {
     if (!events?.length) return undefined;
+    // The event someone last opened, while it is still to come: planning
+    // Mt Buller and tapping Event should not land back on GPT100.
+    const chosen = events.find((event) => event.id === lastOpenedEvent());
+    if (chosen && chosen.status !== 'closed' && daysUntil(chosen.endDate) >= 0) return chosen;
     const live = events.find((event) => event.status === 'live');
     if (live) return live;
     const upcoming = events
@@ -104,6 +109,7 @@ export default function HomeScreen() {
   }, [focus?.id, truckStage]);
   const [showing, setShowing] = useState<Move | null>(null);
   const canBuild = can(session, 'packlist:manage', focus ? { eventId: focus.id } : undefined);
+  const canPackHere = can(session, 'packlist:pack', focus ? { eventId: focus.id } : undefined);
 
   // The shopping list is the crew's; its hook already narrows the lines to
   // what this account may see, so only the card needs gating.
@@ -146,11 +152,6 @@ export default function HomeScreen() {
   return (
     // The artwork is white on transparent, so it sits straight on the teal header.
     <Screen title={<img className="header-logo" src={logo} alt="SingleTrack Events" />}>
-      {/* Scanning is the fastest way in, so it gets the biggest button. */}
-      <button type="button" className="btn btn-primary btn-lg btn-block mb-4" onClick={() => navigate('/scan')}>
-        ⛶ Scan a barcode or packlist code
-      </button>
-
       {focus ? (
         <section className="section">
           <div className="section-head">
@@ -202,17 +203,26 @@ export default function HomeScreen() {
                         <span className="row-body">
                           <span className="row-title truncate">{row.destination.name}</span>
                           <span className="row-sub">
+                            {/* What kind of place it is, so the Halls Gap aid
+                                station and the Halls Gap village can't be mixed up. */}
+                            {DESTINATION_LABELS[row.destination.type]} ·{' '}
                             {row.packlistId
-                              ? `${row.progress.done} of ${row.progress.total} lines ${moveLabel(row.move, truckStage).toLowerCase() === 'plan' ? 'planned' : 'done'}`
+                              ? row.move === 'plan'
+                                ? `${plural(row.progress.total, 'item')} to pack`
+                                : `${row.progress.done} of ${plural(row.progress.total, 'item')} done`
                               : 'No list yet'}
                             {row.lists > 1 ? ` · ${row.lists} lists` : ''}
                           </span>
                         </span>
                         <span className="row-end">
-                          {row.packlistId ? <MovePill move={row.move} truckStage={truckStage} /> : <Pill tone="accent">Start list</Pill>}
+                          {row.packlistId ? (
+                            <MovePill move={row.move} truckStage={truckStage} progress={row.progress} />
+                          ) : (
+                            <Pill tone="accent">Start list</Pill>
+                          )}
                           {row.blocking ? (
                             <div className="tiny" style={{ color: 'var(--danger)', marginTop: 4 }}>
-                              {row.blocking} must-have short
+                              {row.blocking} essential{row.blocking === 1 ? '' : 's'} to pack
                             </div>
                           ) : null}
                         </span>
@@ -223,6 +233,28 @@ export default function HomeScreen() {
                 <p className="small muted">No stations yet. Open the event to add them.</p>
               )}
               <BoardAction eventId={focus.id} current={board.current} remaining={board.remaining} truckStage={truckStage} />
+              {/* The event's other screens, one tap from the board rather than
+                  found by accident through a back arrow. */}
+              <div className="btn-grid mt-2">
+                {canBuild ? (
+                  <Link className="btn btn-outline" to={`/events/${focus.id}/missing`}>
+                    ❓ What's missing
+                  </Link>
+                ) : null}
+                {canPackHere ? (
+                  <Link className="btn btn-outline" to={`/events/${focus.id}/warehouse`}>
+                    📋 Warehouse list
+                  </Link>
+                ) : null}
+                {canShop ? (
+                  <Link className="btn btn-outline" to="/shopping">
+                    🛒 Shopping list
+                  </Link>
+                ) : null}
+                <button type="button" className="btn btn-outline" onClick={() => navigate('/scan')}>
+                  ⛶ Scan a code
+                </button>
+              </div>
             </>
           ) : null}
         </section>
@@ -230,7 +262,7 @@ export default function HomeScreen() {
         <EmptyState
           glyph="🏃"
           title="No events yet"
-          body="Add your first race to start building packlists."
+          body="Add your first race to start building packing lists."
           action={
             <Link to="/events" className="btn btn-primary">
               Add an event
@@ -270,7 +302,7 @@ export default function HomeScreen() {
               <span className="row-body">
                 <span className="row-title">
                   {shoppingOpen.length
-                    ? `${plural(shoppingOpen.length, 'line')} to buy`
+                    ? `${plural(shoppingOpen.length, 'thing')} to buy`
                     : `${plural(shoppingToBook.length, 'thing')} bought, not in stock yet`}
                 </span>
                 <span className="row-sub">
@@ -369,12 +401,12 @@ function BoardAction({
 }) {
   const { session } = useSession();
   const canPack = can(session, 'packlist:pack', { eventId });
-  const left = remaining ? ` · ${plural(remaining, 'line')} to go` : '';
+  const left = remaining ? ` · ${plural(remaining, 'item')} to go` : '';
   switch (current) {
     case 'plan':
       return (
         <Link className="btn btn-primary btn-block mt-3" to={`/events/${eventId}`}>
-          Plan the stations{left}
+          Open the stations{left}
         </Link>
       );
     case 'truck':
@@ -441,7 +473,7 @@ function StationHome({
         <EmptyState
           glyph="📦"
           title="Nothing here yet"
-          body="Your packlist has not reached this phone. It will appear once the warehouse has built it and the phone has signal."
+          body="Your packing list has not reached this phone. It will appear once the warehouse has built it and the phone has signal."
         />
         <p className="tiny muted center mt-3">
           Signed in as {session?.displayName}. <Link to="/access">Account</Link>
@@ -470,7 +502,7 @@ function StationHome({
       mode: 'arrived',
       icon: '✅',
       title: 'Arrived',
-      sub: checkIn.checked ? describeCheckIn(checkIn) : `${checkIn.total} lines to check in off the van`,
+      sub: checkIn.checked ? describeCheckIn(checkIn) : `${plural(checkIn.total, 'item')} to check in off the van`,
       done: checkIn.done,
     },
     {
@@ -486,7 +518,7 @@ function StationHome({
       mode: 'packdown',
       icon: '🚐',
       title: 'Pack down',
-      sub: gear.length ? `${packedDown} of ${gear.length} gear lines back in the van` : 'No gear on this list',
+      sub: gear.length ? `${packedDown} of ${plural(gear.length, 'gear item')} back in the van` : 'No gear on this list',
       done: gear.length > 0 && packedDown === gear.length,
     },
   ];
@@ -494,6 +526,18 @@ function StationHome({
 
   return (
     <Screen title={name} subtitle={session ? `Signed in as ${session.displayName}` : undefined}>
+      {/* Said in words, big: a volunteer handed a phone should know at once
+          this is their station and nobody else's. */}
+      <div className="station-hello mb-3">
+        <div className="small muted">Your station</div>
+        <div className="station-hello-name">{name}</div>
+        {station.destination ? (
+          <div className="small">
+            {DESTINATION_LABELS[station.destination.type]}
+            {station.destination.courseKm !== null ? ` · ${station.destination.courseKm} km` : ''}
+          </div>
+        ) : null}
+      </div>
       {station.destination ? <RunSheetCard destination={station.destination} /> : null}
       <div className="list mb-2">
         {jobs.map((job) => (

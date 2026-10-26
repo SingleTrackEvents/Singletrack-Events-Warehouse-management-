@@ -68,7 +68,7 @@ export default function SettingsScreen() {
           <h2>This device</h2>
         </div>
         <div className="card card-pad stack">
-          <Field label="Your name" hint="Stamped on packlists, counts and stock movements.">
+          <Field label="Your name" hint="Stamped on packing lists, counts and stock changes.">
             {(id) => (
               <input
                 id={id}
@@ -127,8 +127,8 @@ export default function SettingsScreen() {
             <Link to="/templates" className="row">
               <span className="row-icon">📋</span>
               <span className="row-body">
-                <span className="row-title">Packlist templates</span>
-                <span className="row-sub">Standing patterns for each destination type</span>
+                <span className="row-title">Standard packing lists</span>
+                <span className="row-sub">Standard packing lists for each kind of station</span>
               </span>
               <span className="row-chevron">›</span>
             </Link>
@@ -188,7 +188,7 @@ export default function SettingsScreen() {
           {counts ? (
             <p className="tiny muted mt-2">
               On this device: {plural(counts.items, 'item')}, {plural(counts.events, 'event')},{' '}
-              {plural(counts.packlists, 'packlist')}, {plural(counts.movements, 'stock movement')}.
+              {plural(counts.packlists, 'packing list')}, {plural(counts.movements, 'stock movement')}.
             </p>
           ) : null}
         </div>

@@ -132,10 +132,10 @@ export default function ImportPacklistScreen() {
     try {
       const result = await commitImport(plan, { existing, source: fileName });
       const parts = [
-        `${plural(result.linesAdded, 'line')} added`,
+        `${plural(result.linesAdded, 'item')} added`,
         result.linesUpdated ? `${result.linesUpdated} updated` : '',
         result.itemsCreated ? `${plural(result.itemsCreated, 'new item')}` : '',
-        result.destinationsCreated ? `${plural(result.destinationsCreated, 'new destination')}` : '',
+        result.destinationsCreated ? `${plural(result.destinationsCreated, 'new station')}` : '',
       ].filter(Boolean);
       toast(`Imported · ${parts.join(', ')}`);
       navigate(`/events/${event.id}`);
@@ -178,7 +178,7 @@ export default function ImportPacklistScreen() {
     return (
       <Screen title="Import a pack list" back={eventId ? `/events/${eventId}` : '/events'}>
         <div className="stack">
-          <Field label="Event" hint="Every line lands on this event's packlists.">
+          <Field label="Event" hint="Every item lands on this event's packing lists.">
             {(id) => (
               <select id={id} className="select" value={eventId} onChange={(entry) => setEventId(entry.target.value)}>
                 {!events?.length ? <option value="">No events yet</option> : null}
@@ -299,7 +299,7 @@ export default function ImportPacklistScreen() {
                         {place.heading}
                         {place.guessed && place.action === 'existing' ? <Pill tone="info"> guessed</Pill> : null}
                       </span>
-                      <span className="row-sub">{plural(place.lines, 'line')} in the file</span>
+                      <span className="row-sub">{plural(place.lines, 'item')} in the file</span>
                     </span>
                     <select
                       className="select"
@@ -319,7 +319,7 @@ export default function ImportPacklistScreen() {
                           {destination.name}
                         </option>
                       ))}
-                      <option value={CREATE}>Create “{place.heading}” as a new destination</option>
+                      <option value={CREATE}>Create “{place.heading}” as a new station</option>
                     </select>
                   </div>
                 ))}
@@ -327,7 +327,7 @@ export default function ImportPacklistScreen() {
                   <div className="row row-static" style={{ flexWrap: 'wrap' }}>
                     <span className="row-body">
                       <span className="row-title">Lines with no station named</span>
-                      <span className="row-sub">{plural(plan.unplacedLines, 'line')} in the file</span>
+                      <span className="row-sub">{plural(plan.unplacedLines, 'item')} in the file</span>
                     </span>
                     <select
                       className="select"
@@ -455,7 +455,7 @@ export default function ImportPacklistScreen() {
 
           <section className="section">
             <div className="section-head">
-              <h2>Already on a packlist</h2>
+              <h2>Already on a packing list</h2>
             </div>
             <div className="card card-pad stack-sm">
               <label className="checkbox">

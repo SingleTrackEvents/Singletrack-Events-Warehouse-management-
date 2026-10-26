@@ -7,7 +7,6 @@ import { ItemPicker } from '../components/ItemPicker';
 import { PackRuleSuggestions } from '../components/PackRuleSuggestions';
 import { RunSheetCard } from '../components/RunSheetCard';
 import { SwipeToDelete } from '../components/SwipeToDelete';
-import { MovePill } from '../components/Moves';
 import { ConfirmSheet, Field, ProgressBar, Sheet, Stepper } from '../components/ui';
 import { useToast } from '../components/toastContext';
 import { db } from '../db/db';
@@ -34,7 +33,7 @@ import {
   statusIndex,
   templateLineQty,
 } from '../domain/packlists';
-import { formatQty, plural } from '../domain/format';
+import { DESTINATION_LABELS, formatQty, plural } from '../domain/format';
 import { categoryLabel, groupByCategory } from '../domain/grouping';
 import { addShoppingLine, inputForItem } from '../domain/shopping';
 import { isKit, kitLines } from '../domain/kits';
@@ -57,7 +56,7 @@ const MODE_LABELS: Record<Mode, string> = {
   arrived: '✅ Arrived',
   count: '🔢 Count',
   packdown: '🚐 Pack down',
-  home: '🏠 Home',
+  home: '🏠 Count home',
 };
 
 /** How long a completed line stays on the "To pack" list before it goes. */
@@ -65,11 +64,20 @@ const LINGER_MS = 1000;
 
 /** The same four filters, worded for each job. */
 const FILTER_LABELS: Record<Mode, Record<Filter, string>> = {
-  pack: { todo: 'To pack', all: 'All', packed: 'Packed', musthave: 'Must-have' },
-  arrived: { todo: 'To check', all: 'All', packed: 'Confirmed', musthave: 'Must-have' },
-  count: { todo: 'To count', all: 'All', packed: 'Counted', musthave: 'Must-have' },
-  packdown: { todo: 'To pack down', all: 'All', packed: 'In the van', musthave: 'Must-have' },
-  home: { todo: 'To count in', all: 'All', packed: 'Counted in', musthave: 'Must-have' },
+  pack: { all: 'All', todo: 'To pack', packed: 'Packed', musthave: 'Essentials' },
+  arrived: { all: 'All', todo: 'To check', packed: 'Checked', musthave: 'Essentials' },
+  count: { all: 'All', todo: 'To count', packed: 'Counted', musthave: 'Essentials' },
+  packdown: { all: 'All', todo: 'To pack down', packed: 'In the van', musthave: 'Essentials' },
+  home: { all: 'All', todo: 'To count in', packed: 'Counted in', musthave: 'Essentials' },
+};
+
+/** What the progress line counts, per job: "3 of 23 items packed". */
+const DONE_WORDS: Record<Mode, string> = {
+  pack: 'packed',
+  arrived: 'checked',
+  count: 'counted',
+  packdown: 'back in the van',
+  home: 'counted in',
 };
 
 function isMode(value: string | null): value is Mode {
@@ -126,7 +134,9 @@ export default function PacklistScreen() {
   // to check.
   const canAsk = Boolean(session) && can(session, 'assistant:use');
 
-  const [filter, setFilter] = useState<Filter>('todo');
+  // Everything shows, ticked or not: a ticked item vanishing from "To pack"
+  // read as a deleted one. Ticked items stay in place, struck through.
+  const [filter, setFilter] = useState<Filter>('all');
   const [picking, setPicking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -298,7 +308,8 @@ export default function PacklistScreen() {
     const changes: Partial<PacklistLine> = (() => {
       switch (mode) {
         case 'pack':
-          return { qtyPacked: qty };
+          // Emptying a box line empties its ticked contents with it.
+          return qty === 0 && line.kitTicked?.length ? { qtyPacked: 0, kitTicked: [] } : { qtyPacked: qty };
         case 'arrived':
           return { qtyReceived: qty };
         case 'count':
@@ -376,7 +387,7 @@ export default function PacklistScreen() {
 
   if (!packlist) {
     return (
-      <Screen title="Packlist" back="-1">
+      <Screen title="Packing list" back="-1">
         <p className="muted">Loading…</p>
       </Screen>
     );
@@ -401,6 +412,22 @@ export default function PacklistScreen() {
    * the number box is the control: a tap that quietly wrote "none left"
    * would be a tap that wrote the wrong number most of the time.
    */
+  /**
+   * Tick one thing into the box. The box line itself counts as packed once
+   * everything in it is ticked, and goes back to not packed if one comes out.
+   */
+  const tickInKit = async (line: PacklistLine, itemId: string, all: string[]) => {
+    const current = new Set(line.qtyPacked >= line.qtyRequired ? all : line.kitTicked ?? []);
+    if (current.has(itemId)) current.delete(itemId);
+    else current.add(itemId);
+    const complete = all.every((id) => current.has(id));
+    await update(db.packlistLines, line.id, {
+      kitTicked: [...current],
+      qtyPacked: complete ? line.qtyRequired : line.qtyPacked >= line.qtyRequired ? 0 : line.qtyPacked,
+    });
+    if (complete) toast(`${items?.get(line.itemId)?.name ?? 'Box'} packed`);
+  };
+
   /** A swipe is deliberate, so the line goes at once, with Undo on the toast. */
   const removeWithUndo = (line: PacklistLine) => {
     if (stillOut(line)) {
@@ -527,11 +554,12 @@ export default function PacklistScreen() {
                 <span className="row-body">
                   <span className="row-title">
                     {item?.name ?? 'Unknown item'}
-                    {line.mandatory ? <span style={{ color: 'var(--danger)' }}> *</span> : null}
+                    {line.mandatory ? <span className="essential-tag">Essential</span> : null}
                   </span>
                   <span className="row-sub">
-                    {item ? `${item.bin || 'no bin'} · ${item.sku}` : ''}
-                    {line.note ? ` · ${line.note}` : ''}
+                    {/* Where it lives, once someone has said; the catalogue code
+                        and "no bin" meant nothing to anyone packing. */}
+                    {[item?.bin ? `Shelf ${item.bin}` : '', line.note].filter(Boolean).join(' · ')}
                   </span>
                   {line.fromDestinationId ? (
                     <span className="row-sub strong">
@@ -549,7 +577,10 @@ export default function PacklistScreen() {
                         toggleKit(line.id);
                       }}
                     >
-                      📦 {kitsOpen.has(line.id) ? 'Hide' : 'What’s inside'} · {item?.contents?.length}
+                      📦 {kitsOpen.has(line.id) ? 'Hide what’s inside' : 'What’s inside'} ·{' '}
+                      {line.kitTicked?.length && !packed
+                        ? `${line.kitTicked.length} of ${item?.contents?.length} in`
+                        : item?.contents?.length}
                     </button>
                   ) : null}
                   {/* The station's own numbers, where this job has them. */}
@@ -610,19 +641,19 @@ export default function PacklistScreen() {
                       <button
                         type="button"
                         className="pack-qty need-btn mb-2"
-                        aria-label={`Change how many ${item?.name ?? 'items'} this stop needs`}
+                        aria-label={`Change how many ${item?.name ?? 'items'} this station needs`}
                         onClick={(event) => {
                           // The row itself toggles packed; this must not do both.
                           event.stopPropagation();
                           setEditingRequired(line);
                         }}
                       >
-                        of {formatQty(wantOn(line), unit)}{' '}
+                        need {formatQty(wantOn(line), unit)}{' '}
                         <span aria-hidden>✎</span>
                       </button>
                     ) : (
                       <span className="pack-qty mb-2">
-                        of {formatQty(wantOn(line), unit)}
+                        need {formatQty(wantOn(line), unit)}
                       </span>
                     )}
                     <Stepper
@@ -639,15 +670,37 @@ export default function PacklistScreen() {
               {kit && kitsOpen.has(line.id) ? (
                 <div className="kit-contents">
                   <div className="kit-contents-note">
-                    Packing this line packs everything below
-                    {line.qtyRequired > 1 ? ` — quantities are for ${line.qtyRequired} kits` : ''}.
+                    {mode === 'pack' && canPack
+                      ? 'Tick each one as it goes in the box. The box is packed when all are in.'
+                      : 'What is in the box.'}
+                    {line.qtyRequired > 1 ? ` Quantities are for ${line.qtyRequired} boxes.` : ''}
                   </div>
-                  {kitLines(item, items ?? new Map(), line.qtyRequired).map((inside) => (
-                    <div key={inside.itemId} className="kit-line">
-                      <span className="truncate">{inside.item?.name ?? 'Unknown item'}</span>
-                      <span className="muted">× {inside.qty}</span>
-                    </div>
-                  ))}
+                  {(() => {
+                    const inside = kitLines(item, items ?? new Map(), line.qtyRequired);
+                    const ticked = new Set(packed ? inside.map((entry) => entry.itemId) : line.kitTicked ?? []);
+                    return inside.map((entry) =>
+                      mode === 'pack' && canPack ? (
+                        <button
+                          key={entry.itemId}
+                          type="button"
+                          className={`kit-line kit-tick${ticked.has(entry.itemId) ? ' done' : ''}`}
+                          aria-pressed={ticked.has(entry.itemId)}
+                          onClick={() => void tickInKit(line, entry.itemId, inside.map((each) => each.itemId))}
+                        >
+                          <span className="pack-check" aria-hidden>
+                            ✓
+                          </span>
+                          <span className="grow">{entry.item?.name ?? 'Unknown item'}</span>
+                          <span className="muted">× {entry.qty}</span>
+                        </button>
+                      ) : (
+                        <div key={entry.itemId} className="kit-line">
+                          <span className="truncate">{entry.item?.name ?? 'Unknown item'}</span>
+                          <span className="muted">× {entry.qty}</span>
+                        </div>
+                      ),
+                    );
+                  })()}
                 </div>
               ) : null}
               </>
@@ -666,22 +719,20 @@ export default function PacklistScreen() {
   return (
     <Screen
       title={packlist.name}
-      subtitle={`${packlist.code} · ${moveState(move, truckStage)}`}
+      subtitle={`${destination ? `${DESTINATION_LABELS[destination.type]} · ` : ''}${moveState(move, truckStage, { done: progress.linesDone, total: progress.linesTotal })}`}
       back={stationOnly ? '/' : `/events/${packlist.eventId}`}
     >
       <div className="card card-pad mb-3">
         <div className="spread mb-2">
           <span className="strong">
-            {progress.linesDone} / {progress.linesTotal}{' '}
-            {mode === 'pack' ? 'lines' : mode === 'arrived' ? 'lines confirmed' : mode === 'count' ? 'counted' : mode === 'packdown' ? 'in the van' : 'counted in'}
+            {progress.linesDone} of {plural(progress.linesTotal, 'item')} {DONE_WORDS[mode]}
           </span>
-          <MovePill move={move} truckStage={truckStage} />
         </div>
         <ProgressBar percent={progress.percent} done={progress.percent === 100} />
         {(mode === 'pack' || mode === 'arrived') && progress.blocking.length ? (
           <p className="tiny mt-2" style={{ color: 'var(--danger)' }}>
-            ⚠ {plural(progress.blocking.length, 'must-have item')}{' '}
-            {mode === 'pack' ? 'still short' : 'not confirmed yet'}
+            ⚠ {plural(progress.blocking.length, 'essential')}{' '}
+            {mode === 'pack' ? 'not packed yet' : 'not checked yet'}
           </p>
         ) : null}
         {mode === 'count' ? (
@@ -692,7 +743,7 @@ export default function PacklistScreen() {
         ) : null}
         {mode === 'packdown' ? (
           <p className="tiny muted mt-2">
-            Tap a line as it goes back in the van. The number is what came home from the station.
+            Tap an item as it goes back in the van. The number is how many are going back.
           </p>
         ) : null}
         {packlist.notes ? <p className="tiny muted mt-2">📝 {packlist.notes}</p> : null}
@@ -735,7 +786,7 @@ export default function PacklistScreen() {
               aria-pressed={mode === option}
               onClick={() => {
                 setChosenMode(option);
-                setFilter('todo');
+                setFilter('all');
               }}
             >
               {MODE_LABELS[option]}
@@ -758,30 +809,18 @@ export default function PacklistScreen() {
         ))}
       </div>
 
-      {canManage && mode === 'pack' ? (
-        <div className="btn-row mb-3 no-print">
-          <button type="button" className="btn btn-outline" onClick={() => setPicking(true)}>
-            + Add items
+      {/* How the list is sorted is the crew's choice; the station's own phone
+          gets the order that suits checking a van in, without the toggle. */}
+      {!stationOnly ? (
+        <div className="chip-row mb-3">
+          <button type="button" className="chip" aria-pressed={!vanView} onClick={() => setView('category')}>
+            By category
           </button>
-          <button type="button" className="btn btn-outline" onClick={() => setApplying(true)}>
-            📋 Apply template
+          <button type="button" className="chip" aria-pressed={vanView} onClick={() => setView('van')}>
+            🚐 Loading order
           </button>
-          {canAsk ? (
-            <button type="button" className="btn btn-outline" onClick={() => setChecking(true)}>
-              ✨ Check this list
-            </button>
-          ) : null}
         </div>
       ) : null}
-
-      <div className="chip-row mb-3">
-        <button type="button" className="chip" aria-pressed={!vanView} onClick={() => setView('category')}>
-          By category
-        </button>
-        <button type="button" className="chip" aria-pressed={vanView} onClick={() => setView('van')}>
-          🚐 Van order
-        </button>
-      </div>
 
       {vanView ? (
         <p className="tiny muted mb-3">
@@ -852,6 +891,30 @@ export default function PacklistScreen() {
         </div>
       )}
 
+      {/* Changing what is on the list comes after the list itself: the job on
+          this screen is packing it, and the editing tools pushed the first
+          item below the fold. */}
+      {canManage && mode === 'pack' ? (
+        <section className="section no-print">
+          <div className="section-head">
+            <h2>Change this list</h2>
+          </div>
+          <div className="btn-grid">
+            <button type="button" className="btn btn-outline" onClick={() => setPicking(true)}>
+              + Add items
+            </button>
+            <button type="button" className="btn btn-outline" onClick={() => setApplying(true)}>
+              📋 Add a standard list
+            </button>
+            {canAsk ? (
+              <button type="button" className="btn btn-outline" onClick={() => setChecking(true)}>
+                ✨ Check this list
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
       {/* Under the lines: the pack rules, while the list can still change before stock leaves. */}
       {canManage && mode === 'pack' && !hasIssued(packlist.status) && items ? (
         <PackRuleSuggestions
@@ -915,7 +978,7 @@ export default function PacklistScreen() {
 
       {picking ? (
         <ItemPicker
-          title="Add to packlist"
+          title="Add to the packing list"
           exclude={(lines ?? []).map((line) => line.itemId)}
           onClose={() => setPicking(false)}
           onPick={(picks) => {
@@ -1031,7 +1094,7 @@ export default function PacklistScreen() {
           body={
             clearing === 'confirmations' ? (
               <>
-                {plural(confirmedLines, 'line')} will go back to unconfirmed, so the aid station can
+                {plural(confirmedLines, 'item')} will go back to not checked, so the aid station can
                 count them again from scratch. What the warehouse packed is untouched.
               </>
             ) : (
@@ -1205,7 +1268,7 @@ function ApplyTemplateSheet({
   }
 
   return (
-    <Sheet title="Apply a template" onClose={onClose}>
+    <Sheet title="Add a standard list" onClose={onClose}>
       <p className="small muted mb-3">
         Template quantities are added to what is already on the list. The same item is topped up, not
         duplicated.
@@ -1281,7 +1344,7 @@ function NotesSheet({
       : value;
   return (
     <Sheet
-      title={appendAs !== undefined ? 'Tell the warehouse' : 'Packlist notes'}
+      title={appendAs !== undefined ? 'Tell the warehouse' : 'Notes'}
       onClose={onClose}
       footer={
         <>
@@ -1362,7 +1425,7 @@ function RequiredSheet({
 
   return (
     <Sheet
-      title={`How many does this stop need?`}
+      title={`How many does this station need?`}
       onClose={onClose}
       footer={
         <>
@@ -1404,7 +1467,7 @@ function RequiredSheet({
           ) : null}
         </div>
         <p className="tiny muted">
-          Changes this stop only — the template it came from is left alone, so one busy station does
+          Changes this station only. The standard list it came from is left alone, so one busy station does
           not re-plan the rest of the race.
         </p>
         {stations.length && !fromLocked ? (

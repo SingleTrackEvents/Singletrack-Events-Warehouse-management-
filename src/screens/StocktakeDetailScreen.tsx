@@ -263,7 +263,7 @@ export default function StocktakeDetailScreen() {
         {summary.discrepancies ? (
           <p className="tiny muted mt-2">
             Net {summary.netDelta > 0 ? '+' : ''}
-            {summary.netDelta} units across {plural(summary.discrepancies, 'line')}.
+            {summary.netDelta} units across {plural(summary.discrepancies, 'item')}.
           </p>
         ) : null}
         {!open ? (

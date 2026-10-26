@@ -31,6 +31,7 @@ import {
   relativeDays,
 } from '../domain/format';
 import { gearStillOut } from '../domain/returns';
+import { rememberOpenedEvent } from '../domain/format';
 import { ScheduleSheet } from '../components/ScheduleSheet';
 import type {
   AccessType,
@@ -46,12 +47,24 @@ import { ACCESS_TYPES, DESTINATION_TYPES, EVENT_STATUSES } from '../db/types';
  * One race: its destinations, the packlist behind each, and the shortcuts to
  * build them all from templates in one go.
  */
+/** One station's list, as the event screen shows it. */
+interface StationSummary {
+  move: Move;
+  percent: number;
+  done: number;
+  total: number;
+  id: string;
+  blocking: number;
+  lists: number;
+}
+
 export default function EventDetailScreen() {
   const { eventId } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
   const event = useEvent(eventId);
   const destinations = useDestinations(eventId);
+  useEffect(() => rememberOpenedEvent(eventId), [eventId]);
   const [addingDestination, setAddingDestination] = useState(false);
   const [editingDestination, setEditingDestination] = useState<Destination>();
   const [scheduling, setScheduling] = useState<Destination>();
@@ -80,7 +93,7 @@ export default function EventDetailScreen() {
 
   // Packlists, where each one is up to, keyed by destination for the list below.
   const summaries = useLiveQuery(async () => {
-    if (!eventId) return new Map<string, { move: Move; percent: number; id: string; blocking: number; lists: number }>();
+    if (!eventId) return new Map<string, StationSummary>();
     const packlists = alive(await db.packlists.where('eventId').equals(eventId).toArray());
     const allLines = alive(await db.packlistLines.toArray());
     const linesOf = (packlist: Packlist) => allLines.filter((line) => line.packlistId === packlist.id);
@@ -88,16 +101,19 @@ export default function EventDetailScreen() {
     for (const packlist of packlists) {
       byDestination.set(packlist.destinationId, [...(byDestination.get(packlist.destinationId) ?? []), packlist]);
     }
-    const map = new Map<string, { move: Move; percent: number; id: string; blocking: number; lists: number }>();
+    const map = new Map<string, StationSummary>();
     for (const [destinationId, candidates] of byDestination) {
       const packlist = primaryPacklist(candidates, (entry) => linesOf(entry).length);
       if (!packlist) continue;
       const own = linesOf(packlist);
       const move = moveOf(own, truckStage, packlist.status);
+      const progress = moveProgress(own, move, truckStage);
       map.set(destinationId, {
         id: packlist.id,
         move,
-        percent: moveProgress(own, move, truckStage).percent,
+        percent: progress.percent,
+        done: progress.done,
+        total: progress.total,
         blocking: progressFor(own).blocking.length,
         lists: candidates.length,
       });
@@ -163,7 +179,7 @@ export default function EventDetailScreen() {
 
       <section className="section">
         <div className="section-head">
-          <h2>Destinations</h2>
+          <h2>Stations</h2>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingDestination(true)}>
             + Add
           </button>
@@ -182,7 +198,7 @@ export default function EventDetailScreen() {
         {destinations && !destinations.length ? (
           <EmptyState
             glyph="⛺"
-            title="No destinations yet"
+            title="No stations yet"
             body="Add each aid station, the event village and any water drops."
             action={
               <button type="button" className="btn btn-primary" onClick={() => setAddingDestination(true)}>
@@ -228,10 +244,14 @@ export default function EventDetailScreen() {
                 <span className="row-end">
                   {summary ? (
                     <>
-                      <MovePill move={summary.move} truckStage={truckStage} />
+                      <MovePill
+                        move={summary.move}
+                        truckStage={truckStage}
+                        progress={{ done: summary.done, total: summary.total }}
+                      />
                       {summary.blocking ? (
                         <div className="tiny" style={{ color: 'var(--danger)', marginTop: 4 }}>
-                          {summary.blocking} short
+                          {summary.blocking} essential{summary.blocking === 1 ? '' : 's'} to pack
                         </div>
                       ) : null}
                       {/* Only one list opens from here, so a second one would
@@ -257,7 +277,7 @@ export default function EventDetailScreen() {
             className="btn btn-primary btn-block mt-3"
             onClick={() => setBuildingLists(true)}
           >
-            Build {plural(withoutPacklist.length, 'packlist')} from templates
+            Build {plural(withoutPacklist.length, 'packing list')} from standard lists
           </button>
         ) : null}
       </section>
@@ -336,7 +356,7 @@ export default function EventDetailScreen() {
           destinations={withoutPacklist}
           onClose={() => setBuildingLists(false)}
           onDone={(count) => {
-            toast(`${plural(count, 'packlist')} created`);
+            toast(`${plural(count, 'packing list')} created`);
             setBuildingLists(false);
           }}
         />
@@ -346,7 +366,7 @@ export default function EventDetailScreen() {
         <ConfirmSheet
           title={`Remove ${removing.name}?`}
           body={
-            'Its packlist is removed too. Stock already issued stays on the ledger.' +
+            'Its packing list is removed too. Stock already issued stays on the ledger.' +
             (stillOpen && (stillOpen.invites || stillOpen.members)
               ? ` ${[
                   stillOpen.invites ? plural(stillOpen.invites, 'invite') : '',
@@ -377,7 +397,7 @@ export default function EventDetailScreen() {
                 await softDelete(db.packlists, packlist.id);
               }
               await softDelete(db.destinations, target.id);
-              toast('Destination removed');
+              toast('Station removed');
             })();
           }}
         />
@@ -469,7 +489,7 @@ function DestinationSheet({
           }
         }
       }
-      toast('Destination updated');
+      toast('Station updated');
       onClose();
       return;
     }
@@ -493,13 +513,13 @@ function DestinationSheet({
     // The list starts with the station, from last year's list for the same
     // station where there was one, so nobody builds Borough Huts from nothing.
     const { source } = await startPacklist(created);
-    toast(`Destination added. ${describeSource(source)}.`);
+    toast(`Station added. ${describeSource(source)}.`);
     onClose();
   };
 
   return (
     <Sheet
-      title={destination ? 'Edit destination' : 'New destination'}
+      title={destination ? 'Edit station' : 'New station'}
       onClose={onClose}
       footer={
         <>
@@ -865,7 +885,7 @@ function BuildListsSheet({
 
   return (
     <Sheet
-      title="Build packlists"
+      title="Build packing lists"
       onClose={onClose}
       footer={
         <>

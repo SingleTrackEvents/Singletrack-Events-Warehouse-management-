@@ -301,7 +301,7 @@ export default function ItemScreen() {
           unit={item.unit}
           onClose={() => setCounting(false)}
           onSave={(value) => {
-            void setQuantity(item.id, value, 'stocktake', { by: crew, note: 'Spot count' }).then(() =>
+            void setQuantity(item.id, value, 'stocktake', { by: crew, note: 'Spot count', keepZero: true }).then(() =>
               toast('Count recorded'),
             );
             setCounting(false);
@@ -606,8 +606,10 @@ function CountSheet({
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" disabled={delta === 0} onClick={() => onSave(value)}>
-            Save count
+          {/* Saving the number the system already has is a real answer: it
+              says someone looked, and an empty shelf counted as 0 is counted. */}
+          <button type="button" className="btn btn-primary" onClick={() => onSave(value)}>
+            {delta === 0 ? 'Yes, that is right' : 'Save count'}
           </button>
         </>
       }
@@ -618,7 +620,7 @@ function CountSheet({
       </p>
       <div className="center mb-3">
         <div style={{ display: 'inline-block' }}>
-          <Stepper value={value} onChange={setValue} label={`count in ${unit}`} />
+          <Stepper value={value} onChange={setValue} label={`count in ${unit}`} live whole={unit !== 'kg' && unit !== 'litre'} />
         </div>
       </div>
       <p className="center small">

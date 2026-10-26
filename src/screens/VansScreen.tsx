@@ -93,7 +93,7 @@ export default function VansScreen() {
                       <span className="strong">Leaves {formatLocalWhen(van.destination.schedule.departsAt)} · </span>
                     ) : null}
                     {van.destination.vehicle ? `${van.destination.vehicle} · ` : ''}
-                    {van.linesDone} of {plural(van.linesTotal, 'line')} in the van
+                    {van.linesDone} of {plural(van.linesTotal, 'item')} in the van
                   </span>
                 </span>
                 <span className="row-chevron">›</span>

@@ -747,6 +747,21 @@ button, input, select, textarea {
 .pack-row .row-body { flex: 1 1 0; min-width: 0; }
 
 .pack-row.done { background: var(--ok-bg); }
+/* A ticked item stays where it was, struck through, so it reads as done
+   rather than gone. */
+.pack-row.done .row-title { text-decoration: line-through; text-decoration-thickness: 2px; }
+.essential-tag {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: var(--text-xs);
+  font-weight: 800;
+  vertical-align: middle;
+  text-decoration: none;
+}
 .pack-row.short { background: var(--warn-bg); }
 
 .pack-check {
@@ -1090,6 +1105,25 @@ button, input, select, textarea {
 }
 .kit-line .muted { color: var(--text-muted); }
 
+/* Box contents that can be ticked one by one: each is its own tap target. */
+.kit-tick {
+  align-items: center;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 4px 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+}
+.kit-tick .pack-check { width: 28px; height: 28px; }
+.kit-tick.done .pack-check { background: var(--ok); border-color: var(--ok); color: #fff; }
+.kit-tick.done .grow { text-decoration: line-through; }
+
 /* ------------------------------------------------------------- assistant -- */
 
 .assistant-thinking { display: inline-block; animation: pulse 1.4s ease-in-out infinite; }
@@ -1199,3 +1233,8 @@ button, input, select, textarea {
 @media (min-width: 820px) {
   .app-main { padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + var(--space-10)); }
 }
+
+/* ------------------------------------------------------------ station hello -- */
+
+.station-hello-name { font-size: var(--text-2xl); font-weight: 800; line-height: 1.2; }
+.header-btn-label { font-size: var(--text-sm); font-weight: 700; }

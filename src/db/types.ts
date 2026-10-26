@@ -416,6 +416,12 @@ export interface PacklistLine extends SyncMeta {
    */
   fromDestinationId?: string | null;
   /**
+   * For a kit (the aid station box): which of its contents have gone in, by
+   * item id. Lets the box be packed item by item; the line counts as packed
+   * once every one is in. Absent means none ticked separately.
+   */
+  kitTicked?: string[];
+  /**
    * Position in the van, counted in unload order (what comes out first).
    * Absent follows the default setup order by category.
    */

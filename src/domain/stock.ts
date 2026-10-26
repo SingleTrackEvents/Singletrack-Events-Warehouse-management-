@@ -18,6 +18,11 @@ export interface MovementInput {
   refId?: string | null;
   note?: string;
   by?: string;
+  /**
+   * Write the row even at zero: a shelf counted and found to match is a
+   * fact worth keeping, and it is what marks an item as counted.
+   */
+  keepZero?: boolean;
 }
 
 /**
@@ -42,7 +47,7 @@ export function round2(value: number): number {
  * Returns the ledger rows that were written.
  */
 export async function recordMovements(inputs: MovementInput[]): Promise<Movement[]> {
-  const usable = inputs.filter((input) => input.qty !== 0);
+  const usable = inputs.filter((input) => input.qty !== 0 || input.keepZero);
   if (!usable.length) return [];
 
   return db.transaction('rw', db.items, db.movements, async () => {
@@ -75,12 +80,19 @@ export async function setQuantity(
   itemId: string,
   target: number,
   reason: MovementReason,
-  options: { note?: string; by?: string; refType?: Movement['refType']; refId?: string | null } = {},
+  options: {
+    note?: string;
+    by?: string;
+    refType?: Movement['refType'];
+    refId?: string | null;
+    /** Record a count that matches too, so the item reads as counted. */
+    keepZero?: boolean;
+  } = {},
 ): Promise<Movement[]> {
   const item = await db.items.get(itemId);
   if (!item) return [];
   const delta = round2(target - item.qtyOnHand);
-  if (delta === 0) return [];
+  if (delta === 0 && !options.keepZero) return [];
   return recordMovements([{ itemId, qty: delta, reason, ...options }]);
 }
 

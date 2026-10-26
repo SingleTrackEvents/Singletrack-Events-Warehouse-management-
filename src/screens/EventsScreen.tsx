@@ -63,7 +63,7 @@ export default function EventsScreen() {
           title="No events yet"
           body={
             canAdd
-              ? 'An event holds the aid stations and their packlists for one race.'
+              ? 'An event holds the aid stations and their packing lists for one race.'
               : 'The event you were given has not reached this phone yet. It will appear once the phone has signal.'
           }
           action={
@@ -146,8 +146,8 @@ export default function EventsScreen() {
           title={`Delete ${removing.event.name}?`}
           body={
             <>
-              This also removes {plural(removing.summary.destinations, 'destination')},{' '}
-              {plural(removing.summary.packlists, 'packlist')} and{' '}
+              This also removes {plural(removing.summary.destinations, 'station')},{' '}
+              {plural(removing.summary.packlists, 'packing list')} and{' '}
               {plural(removing.summary.loads, 'transport run')}.
               <div className="mt-2">
                 Stock movements are kept — the ledger is the record of what actually left the

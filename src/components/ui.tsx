@@ -171,6 +171,7 @@ export function Stepper({
   label,
   placeholder,
   whole = false,
+  live = false,
 }: {
   /**
    * Null renders an empty box. Use it where no number has been entered yet and
@@ -186,6 +187,12 @@ export function Stepper({
   placeholder?: string;
   /** Counted in whole units: half a Starlink is a typo, not a quantity. */
   whole?: boolean;
+  /**
+   * Report each typed number as it is typed, not only when the box loses
+   * focus: a Save button next to it must know about the number before the
+   * tap that would blur the box lands on it.
+   */
+  live?: boolean;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   // No real line is ever a hundred thousand of anything; a number that big is
@@ -241,7 +248,11 @@ export function Stepper({
         placeholder={placeholder}
         value={draft ?? (value === null ? '' : String(value))}
         onFocus={(event) => event.currentTarget.select()}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          const parsed = Number(event.target.value.replace(',', '.'));
+          if (live && event.target.value.trim() && Number.isFinite(parsed)) onChange(clamp(parsed));
+        }}
         onKeyDown={(event) => {
           // The keyboard's Go key saves the number, like tapping away does.
           if (event.key === 'Enter') {

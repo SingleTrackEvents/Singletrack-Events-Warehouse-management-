@@ -275,7 +275,8 @@ export function Screen({
             aria-label="Scan a code"
             onClick={() => navigate('/scan')}
           >
-            ⛶
+            {/* Worded, not just an icon: nobody knew what ⛶ did. */}
+            <span className="header-btn-label">Scan</span>
           </button>
         )}
       </header>

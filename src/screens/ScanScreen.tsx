@@ -95,8 +95,8 @@ export default function ScanScreen() {
     <Screen title="Scan" back="-1">
       <p className="small muted mb-3">
         {canReadBarcodes()
-          ? 'Point the camera at a list’s QR code or the barcode on a carton, or type a packlist code in. Handy when the lens is covered in mud.'
-          : 'Point the camera at a list’s QR code, or type a packlist code in. This phone reads QR codes only, so type a carton’s barcode number in.'}
+          ? 'Point the camera at a list’s QR code or the barcode on a carton, or type a list code in. Handy when the lens is covered in mud.'
+          : 'Point the camera at a list’s QR code, or type a list code in. This phone reads QR codes only, so type a carton’s barcode number in.'}
       </p>
 
       <Scanner onDetect={(value) => void handle(value)} />
