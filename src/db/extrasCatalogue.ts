@@ -166,4 +166,58 @@ export const EXTRA_ITEMS: ExtraItem[] = [
     consumable: false,
     note: '',
   },
+  // GPT100 2026 power, lights and comms, from the vehicle plan and Chad's
+  // warehouse handover (22 Oct): five 1 kWh EcoFlows and three Starlink Minis
+  // owned, three diesel light towers hired with two labelled diesel jerries
+  // each. Diesel gets its own jerry so it never goes in a petrol generator.
+  {
+    name: 'EcoFlow Battery (1 kWh)',
+    sku: 'PWR-92',
+    category: 'Power & Cabling',
+    unit: 'each',
+    packSize: 1,
+    hold: 5,
+    consumable: false,
+    note: 'Runs a Starlink and a kettle at the less critical sites',
+  },
+  {
+    name: 'Jerry Can 20 L (Diesel, labelled)',
+    sku: 'PWR-93',
+    category: 'Power & Cabling',
+    unit: 'each',
+    packSize: 1,
+    hold: 6,
+    consumable: false,
+    note: 'Two sit with each light tower',
+  },
+  {
+    name: 'Light Tower (Diesel, Hired)',
+    sku: 'LGT-90',
+    category: 'Lighting',
+    unit: 'each',
+    packSize: 1,
+    hold: 3,
+    consumable: false,
+    note: 'Hired, probably from Bendigo or Ballarat. Comes with crew, not a hire vehicle.',
+  },
+  {
+    name: 'Starlink Mini',
+    sku: 'COM-90',
+    category: 'Comms & AV',
+    unit: 'each',
+    packSize: 1,
+    hold: 3,
+    consumable: false,
+    note: '',
+  },
+  {
+    name: 'Orange Wire Flags',
+    sku: 'CRS-91',
+    category: 'Course Marking & Traffic',
+    unit: 'pack',
+    packSize: 1,
+    hold: 1,
+    consumable: false,
+    note: '',
+  },
 ];

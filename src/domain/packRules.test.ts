@@ -95,6 +95,11 @@ describe('the pack rules', () => {
     expect(gpt('aid_station')['COM-01']).toBe(1);
     expect(gpt('event_village')).toEqual({});
     expect(asked([], 'finish')).toEqual({});
+    // No black bins at GPT100 this year, and a Starlink Mini is the station's Starlink.
+    expect(gpt('aid_station')['WST-01']).toBeUndefined();
+    expect(asked([], 'aid_station')['WST-01']).toBe(2);
+    const withMini = suggestionsFor(list([['COM-90', 1]]), items, 'aid_station', 'stw-event-gpt26');
+    expect(withMini.some((entry) => entry.item.sku === 'COM-01')).toBe(false);
   });
 
   it('finds nothing missing on the RCR26 cards, bar a cover for the recovery power board', () => {

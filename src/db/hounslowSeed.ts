@@ -19,6 +19,11 @@ export interface HounslowPackLine {
   item: string;
   qty: number;
   note?: string;
+  /**
+   * The seeded station this gear comes on from, not the warehouse: a unit
+   * packed down at one station and set up at the next.
+   */
+  from?: string;
 }
 
 export interface HounslowPacklist {

@@ -1184,3 +1184,68 @@ describe('the Roller Coaster Run truck stage', () => {
     expect((await db.events.get(rcr))?.truckStage).toBe(false);
   });
 });
+
+describe('GPT100 2026 pack list, as handed over', () => {
+  const gptLines = async () => {
+    const event = seedId('event', 'gpt26');
+    const packlists = alive(await db.packlists.toArray()).filter((entry) => entry.eventId === event);
+    const ids = new Set(packlists.map((entry) => entry.id));
+    const items = new Map(alive(await db.items.toArray()).map((item) => [item.id, item]));
+    return alive(await db.packlistLines.toArray())
+      .filter((line) => ids.has(line.packlistId))
+      .map((line) => ({ ...line, name: items.get(line.itemId)!.name }));
+  };
+  const total = (lines: Array<{ name: string; qtyRequired: number }>, name: string) =>
+    lines.filter((line) => line.name === name).reduce((sum, line) => sum + line.qtyRequired, 0);
+
+  it('carries this year’s power, heaters, shoe wash, beds and units', async () => {
+    await seedStarterData();
+    const lines = await gptLines();
+    expect(total(lines, 'Gas Heater')).toBe(12);
+    expect(total(lines, 'Generator')).toBe(2);
+    expect(total(lines, 'Large Generator (Hired)')).toBe(1);
+    expect(total(lines, 'EcoFlow Battery (1 kWh)')).toBe(5);
+    expect(total(lines, 'Light Tower (Diesel, Hired)')).toBe(3);
+    expect(total(lines, 'Jerry Can 20 L (Diesel, labelled)')).toBe(6);
+    expect(total(lines, 'Shoe Wash Kit')).toBe(23);
+    expect(total(lines, 'Bins - Large Round Black')).toBe(0);
+    expect(total(lines, 'Orange Wire Flags')).toBe(1);
+    const dunkeld = seedId('plist', 'gpt26-Dunkeld Finish');
+    expect(lines.find((line) => line.packlistId === dunkeld && line.name === 'Camp Stretcher / Folding Bed')!.qtyRequired).toBe(8);
+    // Units move on rather than leaving the warehouse twice.
+    const griffin = seedId('plist', 'gpt26-Griffin Fireline');
+    expect(lines.find((line) => line.packlistId === griffin && line.name === 'Starlink')!.fromDestinationId).toBe(
+      seedId('dest', 'gpt26-Mt Difficult Rd'),
+    );
+    expect(total(lines.filter((line) => !line.fromDestinationId), 'Starlink Mini')).toBe(3);
+  });
+
+  it('takes sugar out of the aid station box', async () => {
+    await seedStarterData();
+    const items = alive(await db.items.toArray());
+    const kit = items.find((item) => item.sku === 'KIT-01')!;
+    const sugar = items.find((item) => item.name === 'Sugar')!;
+    expect(kit.contents!.some((content) => content.itemId === sugar.id)).toBe(false);
+    // A kit seeded with sugar in it loses it on the next top-up.
+    await db.items.update(kit.id, { contents: [...kit.contents!, { itemId: sugar.id, qty: 1 }] });
+    await seedStarterData({ onlyMissing: true });
+    const after = (await db.items.get(kit.id))!;
+    expect(after.contents!.some((content) => content.itemId === sugar.id)).toBe(false);
+  });
+
+  it('swaps last year’s generator for an EcoFlow on a list nobody has touched', async () => {
+    await seedStarterData();
+    const mtDifficult = seedId('plist', 'gpt26-Mt Difficult Rd');
+    const generator = seedId('pline', 'gpt26-Mt Difficult Rd-Generator');
+    // As an older build left it: the generator still on the list, untouched.
+    const generatorItem = alive(await db.items.toArray()).find((item) => item.name === 'Generator')!;
+    await create(db.packlistLines, {
+      id: generator, packlistId: mtDifficult, itemId: generatorItem.id, qtyRequired: 1, qtyPacked: 0,
+      qtyReturned: 0, mandatory: false, containerId: null, note: '', sort: 10,
+    });
+    await seedStarterData({ onlyMissing: true });
+    expect((await db.packlistLines.get(generator))?.deletedAt).toBeTruthy();
+    const ecoflow = seedId('pline', 'gpt26-Mt Difficult Rd-EcoFlow Battery (1 kWh)');
+    expect((await db.packlistLines.get(ecoflow))?.packlistId).toBe(mtDifficult);
+  });
+});
