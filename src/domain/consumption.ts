@@ -1,6 +1,6 @@
 import { db } from '../db/db';
 import { create, liveWhere, nextSort, softDelete, update } from '../db/repo';
-import type { ConsumptionLine, Destination, Item, PacklistLine, Race, RaceEvent } from '../db/types';
+import type { ConsumptionLine, Destination, Item, PacklistLine, Race, RaceEvent, SyncMeta } from '../db/types';
 import { createPacklist, packlistForDestination } from './packlists';
 import { round2 } from './stock';
 
@@ -245,14 +245,18 @@ export async function loadFoodPlan(eventId: string): Promise<FoodPlan> {
 
 /**
  * Add items to a station's plan as rules for every race, skipping any item
- * that already has a rule there. New lines start with the picked quantity as
- * the flat amount — the ratio is a deliberate second step, because a sensible
- * per-runner figure is not something a picker stepper can express.
+ * that already has a rule there.
+ *
+ * Each pick says how much one runner takes, a fixed amount, or both. Asking
+ * for the per-runner figure up front is the point: a station that starts on
+ * "1 Coke" and is meant to be fixed later is a station that turns up on race
+ * morning with one can for three hundred runners. `qty` is the fixed amount,
+ * kept under that name for the callers that only ever had a number.
  */
 export async function addPlanItems(
   eventId: string,
   destinationId: string,
-  picks: Array<{ itemId: string; qty: number }>,
+  picks: Array<{ itemId: string; qty?: number; perRunner?: number }>,
 ): Promise<number> {
   const existing = await liveWhere(db.consumptionLines, 'destinationId', destinationId);
   const have = new Set(existing.map((line) => line.itemId));
@@ -260,12 +264,13 @@ export async function addPlanItems(
   let added = 0;
   for (const pick of picks) {
     if (have.has(pick.itemId)) continue;
+    have.add(pick.itemId);
     await create(db.consumptionLines, {
       eventId,
       destinationId,
       itemId: pick.itemId,
-      perRunner: 0,
-      flatQty: pick.qty,
+      perRunner: Math.max(0, pick.perRunner ?? 0),
+      flatQty: Math.max(0, pick.qty ?? 0),
       note: '',
       sort,
       raceId: null,
@@ -274,6 +279,120 @@ export async function addPlanItems(
     added += 1;
   }
   return added;
+}
+
+/**
+ * Starting points for how much one runner takes at an aid station, for the
+ * common items. These are guesses to save typing, not the warehouse's own
+ * figures: the crew should correct them against what came back from the last
+ * event, and once they have, the plan uses theirs. Matched by the food
+ * catalogue's code first, then by a word in the name, so a "Coke Zero" added
+ * by hand still gets the Coke figure.
+ */
+export const SUGGESTED_PER_RUNNER: Array<{ skus: string[]; words: RegExp; perRunner: number }> = [
+  // A 375 ml can between five runners.
+  { skus: ['FD-05'], words: /\b(coke|coca|cola)\b/i, perRunner: 0.2 },
+  // A 200 ml can between five runners.
+  { skus: ['FD-23'], words: /\bginger beer\b/i, perRunner: 0.2 },
+  // Half a litre each, for topping up bottles and the cups on the table.
+  { skus: ['FD-01'], words: /\bwater\b/i, perRunner: 0.5 },
+  // A 1 kg pack makes about 25 litres: one pack for every 50 runners.
+  { skus: ['FD-03'], words: /\b(electrolyte|tailwind|gatorade|hydralyte)\b/i, perRunner: 0.02 },
+  { skus: ['FD-04'], words: /\bgels?\b/i, perRunner: 0.5 },
+  // Cut into pieces: one banana for every four runners.
+  { skus: ['FD-06'], words: /\bbananas?\b/i, perRunner: 0.25 },
+  { skus: ['FD-07'], words: /\boranges?\b/i, perRunner: 0.15 },
+  { skus: ['FD-08'], words: /\bwatermelons?\b/i, perRunner: 0.02 },
+  // About 20 g each out of a 1 kg bag.
+  { skus: ['FD-13'], words: /\b(lollies|lolly|jelly|snakes)\b/i, perRunner: 0.02 },
+  // A 6-pack of small bags between twenty runners.
+  { skus: ['FD-11'], words: /\bchips\b/i, perRunner: 0.05 },
+  { skus: ['FD-12'], words: /\b(mars|snickers)\b/i, perRunner: 0.02 },
+  { skus: ['FD-14', 'FD-15'], words: /\bnoodles?\b/i, perRunner: 0.1 },
+  { skus: ['FD-24'], words: /\bpotato(es)?\b/i, perRunner: 0.2 },
+];
+
+/** A starting per-runner amount for an item, or null when there is no sensible guess. */
+export function suggestedPerRunner(item: Pick<Item, 'name' | 'sku'>): number | null {
+  const sku = (item.sku ?? '').trim().toUpperCase();
+  const bySku = SUGGESTED_PER_RUNNER.find((entry) => entry.skus.includes(sku));
+  if (bySku) return bySku.perRunner;
+  return SUGGESTED_PER_RUNNER.find((entry) => entry.words.test(item.name))?.perRunner ?? null;
+}
+
+/** A food rule as it would be written, before it has an id. */
+export type NewRule = Omit<ConsumptionLine, keyof SyncMeta>;
+
+/** What copying one station's food rules to the others would do. */
+export interface CopyPlan {
+  /** The rules to write, each already pointing at its new station. */
+  rules: NewRule[];
+  /** Stations that would get at least one rule. */
+  stations: Destination[];
+}
+
+/**
+ * Work out copying a station's food rules to every other aid station.
+ *
+ * Only aid stations with races through them: the start line and the event
+ * village feed nobody on course, and a station with no races would work every
+ * rule out to nothing. An item the other station already has a rule for is
+ * left alone, so its crew's own figures win and copying twice adds nothing.
+ * A rule for one race only goes where that race runs. The fixed amount goes
+ * too, because each station needs its own salt shaker.
+ */
+export function planCopyToStations(
+  source: Destination,
+  destinations: Destination[],
+  rules: ConsumptionLine[],
+  races: Race[],
+): CopyPlan {
+  const live = rules.filter((rule) => !rule.deletedAt);
+  const own = live.filter((rule) => rule.destinationId === source.id);
+  const plan: CopyPlan = { rules: [], stations: [] };
+  for (const target of destinations) {
+    if (target.id === source.id || target.deletedAt || target.type !== 'aid_station') continue;
+    const visits = stationVisits(target, races);
+    if (!visits.length) continue;
+    const theirs = live.filter((rule) => rule.destinationId === target.id);
+    const have = new Set(theirs.map((rule) => rule.itemId));
+    let sort = nextSort(theirs);
+    let added = 0;
+    for (const rule of own) {
+      if (have.has(rule.itemId)) continue;
+      if (rule.raceId && !visits.some((visit) => visit.race.id === rule.raceId)) continue;
+      plan.rules.push({
+        eventId: target.eventId,
+        destinationId: target.id,
+        itemId: rule.itemId,
+        perRunner: rule.perRunner,
+        flatQty: rule.flatQty,
+        note: rule.note,
+        sort,
+        raceId: rule.raceId ?? null,
+      });
+      sort += 10;
+      added += 1;
+    }
+    if (added) plan.stations.push(target);
+  }
+  return plan;
+}
+
+/**
+ * Copy a station's food rules to every other aid station with races through
+ * it. Worked out afresh inside one transaction, so a double tap copies once.
+ */
+export async function copyRulesToStations(source: Destination): Promise<{ stations: number; rules: number }> {
+  return db.transaction('rw', [db.races, db.destinations, db.consumptionLines], async () => {
+    const [plan, destinations] = await Promise.all([
+      loadFoodPlan(source.eventId),
+      liveWhere(db.destinations, 'eventId', source.eventId),
+    ]);
+    const copy = planCopyToStations(source, destinations, plan.lines, plan.races);
+    for (const rule of copy.rules) await create(db.consumptionLines, rule);
+    return { stations: copy.stations.length, rules: copy.rules.length };
+  });
 }
 
 /**
