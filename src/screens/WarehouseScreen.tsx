@@ -328,7 +328,7 @@ export default function WarehouseScreen() {
                     <span className="row-body">
                       <span className="row-title truncate">{entry.item?.name ?? 'Unknown item'}</span>
                       <span className="row-sub">
-                        {entry.item?.bin || 'no bin'} · {entry.item?.sku ?? ''}
+                        {entry.item?.bin ? `Shelf ${entry.item.bin}` : ''}
                       </span>
                     </span>
                     <span className="row-end">
@@ -479,7 +479,7 @@ function PullRow({
         <span className="row-body">
           <span className="row-title truncate">{line.item?.name ?? 'Unknown item'}</span>
           <span className="row-sub">
-            {line.item?.bin || 'no bin'} · {line.item?.sku ?? ''} ·{' '}
+            {line.item?.bin ? `Shelf ${line.item.bin} · ` : ''}
             {plural(line.going.length, 'station')}
           </span>
         </span>

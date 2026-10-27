@@ -135,7 +135,7 @@ export function moveOf(
  */
 export function countAt(line: PacklistLine, move: Move, truckStage: boolean): { got: number; want: number } {
   // Gear moving on from another station is not the warehouse's to load.
-  if (line.fromDestinationId && (move === 'truck' || move === 'vans')) return { got: 1, want: 1 };
+  if (line.fromDestinationId && (move === 'plan' || move === 'truck' || move === 'vans')) return { got: 1, want: 1 };
   switch (move) {
     case 'plan':
       // A list nobody has started is 0% packed, not 100% planned: a full

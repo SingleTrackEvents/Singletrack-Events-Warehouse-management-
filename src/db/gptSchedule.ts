@@ -11,6 +11,8 @@ import type { StationSchedule, StationWindow } from './types';
  */
 export interface StationPlan {
   title?: string;
+  /** Names an earlier build gave it, renamed like the seeded name if untouched. */
+  formerTitles?: string[];
   vehicle: string;
   schedule: StationSchedule;
 }
@@ -104,7 +106,10 @@ export const GPT_PLAN_2026: Record<string, StationPlan> = {
     },
   },
   'Halls Gap': {
-    title: 'Halls Gap (village)',
+    // "Halls Gap (village)" sat next to "Halls Gap Event Village" on the board
+    // and a volunteer could not tell which was the aid station.
+    title: 'Halls Gap aid station',
+    formerTitles: ['Halls Gap (village)'],
     vehicle: 'STE van (static village)',
     schedule: {
       windows: [

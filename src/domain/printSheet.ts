@@ -72,8 +72,11 @@ export function summaryText(summary: SheetSummary): string {
   if (!total) return 'No items for the warehouse to pack.';
   const noun = total === 1 ? 'item' : 'items';
   if (!missing.length) return total === 1 ? 'The one item is packed.' : `All ${total} items packed.`;
-  const named = missing.slice(0, NAMES_SHOWN).join(', ');
-  const more = missing.length > NAMES_SHOWN ? ` and ${missing.length - NAMES_SHOWN} more` : '';
+  // Each name once: two stations on one van both short of marquee walls is
+  // one thing to find, not two names in the list.
+  const names = [...new Set(missing)];
+  const named = names.slice(0, NAMES_SHOWN).join(', ');
+  const more = names.length > NAMES_SHOWN ? ` and ${names.length - NAMES_SHOWN} more` : '';
   return `${packed} of ${total} ${noun} packed, ${missing.length} missing: ${named}${more}.`;
 }
 

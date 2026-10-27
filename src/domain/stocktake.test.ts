@@ -374,7 +374,7 @@ describe('the counting still to do', () => {
   it('points at the open stocktake while lines are left, then at items never counted', async () => {
     const cubes = await makeItem('cubes', 0);
     await makeItem('gels', 0);
-    expect((await uncountedSummary())?.title).toBe('2 items have never been counted');
+    expect((await uncountedSummary())?.title).toBe('2 items in the warehouse have never been counted');
 
     const stocktake = await startStocktake('Spring count');
     const summary = await uncountedSummary();

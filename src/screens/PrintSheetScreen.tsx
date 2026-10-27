@@ -49,6 +49,8 @@ export default function PrintSheetScreen() {
       </Screen>
     );
   }
+  // A Shelf column with nothing in it is a column of blanks to puzzle over.
+  const anyShelf = ordered.some((entry) => items.get(entry.line.itemId)?.bin);
   if (!can(session, 'packlist:read', { eventId: packlist.eventId, destinationId: packlist.destinationId })) {
     return <Navigate to="/" replace />;
   }
@@ -85,7 +87,7 @@ export default function PrintSheetScreen() {
           <div>
             <h1 className="print-title">{destination?.name ?? packlist.name}</h1>
             <div className="small">
-              {event?.name} · list {packlist.code}
+              {event?.name}
             </div>
           </div>
           <QrCode value={link} size={96} alt={`QR code for ${packlist.code}`} />
@@ -111,7 +113,7 @@ export default function PrintSheetScreen() {
               <th scope="col" aria-label="Ticked" />
               <th scope="col">#</th>
               <th scope="col">Item</th>
-              <th scope="col">Shelf</th>
+              {anyShelf ? <th scope="col">Shelf</th> : null}
               <th scope="col">Needed</th>
               <th scope="col">Packed</th>
               <th scope="col">Arrived</th>
@@ -131,7 +133,7 @@ export default function PrintSheetScreen() {
                     {line.mandatory ? ' *' : ''}
                     {line.note ? <div className="tiny">{line.note}</div> : null}
                   </td>
-                  <td>{item?.bin || ''}</td>
+                  {anyShelf ? <td>{item?.bin || ''}</td> : null}
                   <td className="nowrap">{formatQty(entry.needed, unit)}</td>
                   {entry.fromStationId ? (
                     <td>Comes from {stationName(entry.fromStationId)}</td>

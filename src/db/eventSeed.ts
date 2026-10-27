@@ -35,6 +35,8 @@ export interface SeedDestination {
    * so a station renamed for a new edition keeps its packlist and its links.
    */
   title?: string;
+  /** Names an earlier build gave it, renamed like the seeded name if untouched. */
+  formerTitles?: string[];
   /** The vehicle that carries the station's gear. */
   vehicle?: string;
   /** When the station runs, and how it is set up and packed down. */

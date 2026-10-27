@@ -261,7 +261,7 @@ function HomeRow({
           <span className="row-body">
             <span className="row-title truncate">{line.item?.name ?? 'Unknown item'}</span>
             <span className="row-sub">
-              {line.item?.bin || 'no bin'} · sent {formatQty(line.sent, unit)} · {plural(line.going.length, 'station')}
+              {line.item?.bin ? `Shelf ${line.item.bin} · ` : ''}sent {formatQty(line.sent, unit)} · {plural(line.going.length, 'station')}
             </span>
           </span>
           <span className="row-end stack-sm" style={{ alignItems: 'flex-end' }}>

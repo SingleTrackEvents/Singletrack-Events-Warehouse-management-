@@ -36,6 +36,8 @@ export interface StationShort {
   destination: Destination;
   packlist: Packlist;
   items: ShortItem[];
+  /** True once anything on the list has been packed. */
+  started: boolean;
 }
 
 export interface WhatsMissing {
@@ -54,13 +56,15 @@ export interface WhatsMissing {
   food: FoodTotal[];
 }
 
-/** Course order, the way the race runs and the way the crew read stations. */
+/**
+ * Course order, the way the race runs and the way the crew read stations.
+ * By kilometre where both stations have one; otherwise by the event's own
+ * order, which keeps a water point with no published kilometre (Copper Mine)
+ * between its neighbours instead of after the finish.
+ */
 function byCourse(a: Destination, b: Destination): number {
-  return (
-    (a.courseKm ?? Number.MAX_SAFE_INTEGER) - (b.courseKm ?? Number.MAX_SAFE_INTEGER) ||
-    a.sort - b.sort ||
-    a.name.localeCompare(b.name)
-  );
+  if (a.courseKm !== null && b.courseKm !== null && a.courseKm !== b.courseKm) return a.courseKm - b.courseKm;
+  return a.sort - b.sort || a.name.localeCompare(b.name);
 }
 
 /**
@@ -89,9 +93,11 @@ export function notPackedByStation(
     const packlist = packlistByDestination.get(destination.id);
     if (!packlist) continue;
     const short: ShortItem[] = [];
+    let started = false;
     for (const line of alive(lines)) {
       if (line.packlistId !== packlist.id || line.fromDestinationId) continue;
       const done = truck ? (line.qtyOnTruck ?? 0) : line.qtyPacked;
+      if (done > 0) started = true;
       if (line.qtyRequired <= 0 || done >= line.qtyRequired) continue;
       short.push({
         lineId: line.id,
@@ -104,7 +110,7 @@ export function notPackedByStation(
     }
     if (!short.length) continue;
     short.sort((a, b) => (a.item?.name ?? '').localeCompare(b.item?.name ?? ''));
-    out.push({ destination, packlist, items: short });
+    out.push({ destination, packlist, items: short, started });
   }
   return out;
 }

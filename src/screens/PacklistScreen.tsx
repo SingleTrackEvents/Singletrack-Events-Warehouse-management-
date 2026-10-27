@@ -561,6 +561,11 @@ export default function PacklistScreen() {
                         and "no bin" meant nothing to anyone packing. */}
                     {[item?.bin ? `Shelf ${item.bin}` : '', line.note].filter(Boolean).join(' · ')}
                   </span>
+                  {mode === 'pack' && line.qtyPacked > line.qtyRequired ? (
+                    <span className="row-sub" style={{ color: 'var(--warn)' }}>
+                      {formatQty(line.qtyPacked - line.qtyRequired, unit)} more than needed
+                    </span>
+                  ) : null}
                   {line.fromDestinationId ? (
                     <span className="row-sub strong">
                       ↪ Comes from {eventStations?.find((entry) => entry.id === line.fromDestinationId)?.name ?? 'another station'}, not the warehouse

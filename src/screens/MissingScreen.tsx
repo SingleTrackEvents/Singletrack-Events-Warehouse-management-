@@ -49,6 +49,8 @@ export default function MissingScreen() {
   const canCount = can(session, 'stocktake:manage');
   const wants = wantsFor(missing);
   const shortCount = missing.notPacked.reduce((sum, station) => sum + station.items.length, 0);
+  const started = missing.notPacked.filter((station) => station.started);
+  const notStarted = missing.notPacked.filter((station) => !station.started);
   const nothingAtAll =
     !missing.notPacked.length && !missing.warehouseShort.length && !missing.uncounted.length && !missing.food.length;
 
@@ -123,70 +125,6 @@ export default function MissingScreen() {
           }
         />
       ) : null}
-
-      {/* ------------------------------------------------------- not packed */}
-      <section className="section missing-section">
-        <div className="section-head">
-          <h2>Not packed yet</h2>
-          {shortCount ? <Pill tone="warn">{plural(shortCount, 'item')}</Pill> : null}
-        </div>
-        {missing.truck ? (
-          <p className="small muted mb-2">
-            This event is packed onto a truck first, so &ldquo;packed&rdquo; here means on the truck.
-          </p>
-        ) : null}
-        {missing.notPacked.length ? (
-          missing.notPacked.map((station) => (
-            <div key={station.destination.id} className="card mb-3">
-              <Link to={`/packlists/${station.packlist.id}`} className="row missing-station">
-                <span className="row-icon" aria-hidden>
-                  {DESTINATION_ICONS[station.destination.type]}
-                </span>
-                <span className="row-body">
-                  <span className="row-title">{station.destination.name}</span>
-                  <span className="row-sub">
-                    {plural(station.items.length, 'item')} still to pack. Open the packing list
-                  </span>
-                </span>
-                <span className="row-chevron" aria-hidden>
-                  ›
-                </span>
-              </Link>
-              <div className="list">
-                {station.items.map((entry) => (
-                  <div key={entry.lineId} className="row row-static missing-row">
-                    <span className="row-body">
-                      <span className="row-title">{entry.item?.name ?? 'Unknown item'}</span>
-                      <span className="row-sub">
-                        {formatQty(entry.done, entry.item?.unit ?? 'each')} of{' '}
-                        {formatQty(entry.needed, entry.item?.unit ?? 'each')} {doneWord}
-                      </span>
-                    </span>
-                    <span className="row-end missing-qty">
-                      {formatQty(entry.short, entry.item?.unit ?? 'each')} to go
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        ) : (
-          <p className="card card-pad missing-empty">
-            {!missing.stations
-              ? 'No stations yet. Add them on the event page, then give each one a packing list.'
-              : missing.noList.length
-                ? 'Every packing list made so far is fully packed.'
-                : 'Every station is fully packed.'}
-          </p>
-        )}
-        {missing.noList.length ? (
-          <p className="small muted mt-2">
-            No packing list yet for {missing.noList.map((destination) => destination.name).join(', ')}. Add one
-            from the{' '}
-            <Link to={`/events/${event.id}`}>event page</Link> so you can see what they need.
-          </p>
-        ) : null}
-      </section>
 
       {/* ------------------------------------------------------- warehouse */}
       <section className="section missing-section">
@@ -275,6 +213,92 @@ export default function MissingScreen() {
             the <Link to={`/events/${event.id}/food`}>food plan</Link>.
           </p>
         )}
+      </section>
+
+      {/* ------------------------------------------------------- not packed */}
+      <section className="section missing-section">
+        <div className="section-head">
+          <h2>Not packed yet</h2>
+          {shortCount ? <Pill tone="warn">{plural(shortCount, 'item')}</Pill> : null}
+        </div>
+        {missing.truck ? (
+          <p className="small muted mb-2">
+            This event is packed onto a truck first, so &ldquo;packed&rdquo; here means on the truck.
+          </p>
+        ) : null}
+        {/* Stations that have started, first and in full: that is where the
+            gaps that matter today are. Untouched ones fold to a line each, or
+            every item of every station buries the two that are short. */}
+        {started.length ? (
+          started.map((station) => (
+            <div key={station.destination.id} className="card mb-3">
+              <Link to={`/packlists/${station.packlist.id}`} className="row missing-station">
+                <span className="row-icon" aria-hidden>
+                  {DESTINATION_ICONS[station.destination.type]}
+                </span>
+                <span className="row-body">
+                  <span className="row-title">{station.destination.name}</span>
+                  <span className="row-sub">
+                    {plural(station.items.length, 'item')} still to pack. Open the packing list
+                  </span>
+                </span>
+                <span className="row-chevron" aria-hidden>
+                  ›
+                </span>
+              </Link>
+              <div className="list">
+                {station.items.map((entry) => (
+                  <div key={entry.lineId} className="row row-static missing-row">
+                    <span className="row-body">
+                      <span className="row-title">{entry.item?.name ?? 'Unknown item'}</span>
+                      <span className="row-sub">
+                        {formatQty(entry.done, entry.item?.unit ?? 'each')} of{' '}
+                        {formatQty(entry.needed, entry.item?.unit ?? 'each')} {doneWord}
+                      </span>
+                    </span>
+                    <span className="row-end missing-qty">
+                      {formatQty(entry.short, entry.item?.unit ?? 'each')} to go
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        ) : null}
+        {notStarted.length ? (
+          <div className="card list mb-3">
+            {notStarted.map((station) => (
+              <Link key={station.destination.id} to={`/packlists/${station.packlist.id}`} className="row">
+                <span className="row-icon" aria-hidden>
+                  {DESTINATION_ICONS[station.destination.type]}
+                </span>
+                <span className="row-body">
+                  <span className="row-title">{station.destination.name}</span>
+                  <span className="row-sub">Not started · {plural(station.items.length, 'item')} to pack</span>
+                </span>
+                <span className="row-chevron" aria-hidden>
+                  ›
+                </span>
+              </Link>
+            ))}
+          </div>
+        ) : null}
+        {!missing.notPacked.length ? (
+          <p className="card card-pad missing-empty">
+            {!missing.stations
+              ? 'No stations yet. Add them on the event page, then give each one a packing list.'
+              : missing.noList.length
+                ? 'Every packing list made so far is fully packed.'
+                : 'Every station is fully packed.'}
+          </p>
+        ) : null}
+        {missing.noList.length ? (
+          <p className="small muted mt-2">
+            No packing list yet for {missing.noList.map((destination) => destination.name).join(', ')}. Add one
+            from the{' '}
+            <Link to={`/events/${event.id}`}>event page</Link> so you can see what they need.
+          </p>
+        ) : null}
       </section>
 
       {wants.length && canShop ? (

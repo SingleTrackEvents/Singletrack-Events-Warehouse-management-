@@ -349,11 +349,12 @@ export async function seedStarterData(
         // This edition's plan reaches stations seeded before it, once each:
         // a name still as seeded takes the new one, and a vehicle or schedule
         // nobody has set is filled in. Anything the crew has set is theirs.
-        if (destination.title && existing.name === destination.name) {
+        const asSeeded = [destination.name, ...(destination.formerTitles ?? [])];
+        if (destination.title && existing.name !== destination.title && asSeeded.includes(existing.name)) {
           changes.name = destination.title;
-          // Its list follows the rename while it still carries the old name.
+          // Its list follows the rename while it still carries an old name.
           for (const packlist of alive(await db.packlists.where('destinationId').equals(destinationId).toArray())) {
-            if (packlist.name === destination.name) await update(db.packlists, packlist.id, { name: destination.title });
+            if (asSeeded.includes(packlist.name)) await update(db.packlists, packlist.id, { name: destination.title });
           }
         }
         if (destination.vehicle && !existing.vehicle?.trim()) changes.vehicle = destination.vehicle;

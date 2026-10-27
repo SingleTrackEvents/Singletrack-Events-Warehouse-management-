@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Screen } from '../App';
@@ -24,6 +24,16 @@ import type { Item, PacklistLine } from '../db/types';
  * nobody drives off thinking it is in the back.
  */
 export default function VanSheetScreen() {
+  // One van printed on its own: the sheet for the driver at the yard, not
+  // all fifteen of them.
+  const [printOnly, setPrintOnly] = useState<string | null>(null);
+  useEffect(() => {
+    if (printOnly === null) return;
+    const done = () => setPrintOnly(null);
+    window.addEventListener('afterprint', done, { once: true });
+    window.print();
+    return () => window.removeEventListener('afterprint', done);
+  }, [printOnly]);
   const { eventId } = useParams();
   const event = useEvent(eventId);
   const destinations = useDestinations(eventId);
@@ -96,10 +106,20 @@ export default function VanSheetScreen() {
           .map((station) => station.destination.schedule?.departsAt)
           .find(Boolean);
         return (
-          <section key={group.vehicle ?? 'none'} className="print-sheet print-page mb-4">
+          <section
+            key={group.vehicle ?? 'none'}
+            className={`print-sheet print-page mb-4${printOnly !== null && printOnly !== (group.vehicle ?? 'none') ? ' no-print' : ''}`}
+          >
             <div className="print-head">
               <div>
                 <h1 className="print-title">{group.vehicle ?? 'No vehicle yet'}</h1>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm no-print mt-2"
+                  onClick={() => setPrintOnly(group.vehicle ?? 'none')}
+                >
+                  🖨 Print this van only
+                </button>
                 <div className="small">
                   {event.name}
                   {departs ? ` · leaves ${formatLocalWhen(departs)}` : ''}
@@ -148,6 +168,8 @@ function StationTable({
   items: Map<string, Item>;
   stationName: (id: string) => string;
 }) {
+  // No shelves recorded yet: no column of blanks.
+  const anyShelf = lines.some((entry) => items.get(entry.line.itemId)?.bin);
   return (
     <div className="print-scroll">
     <table className="print-lines">
@@ -155,7 +177,7 @@ function StationTable({
         <tr>
           <th scope="col" aria-label="Ticked" />
           <th scope="col">Item</th>
-          <th scope="col">Shelf</th>
+          {anyShelf ? <th scope="col">Shelf</th> : null}
           <th scope="col">Needed</th>
           <th scope="col">Packed</th>
         </tr>
@@ -171,7 +193,7 @@ function StationTable({
                 {item?.name ?? 'Unknown item'}
                 {entry.line.mandatory ? ' *' : ''}
               </td>
-              <td>{item?.bin || ''}</td>
+              {anyShelf ? <td>{item?.bin || ''}</td> : null}
               <td className="nowrap">{formatQty(entry.needed, unit)}</td>
               {entry.fromStationId ? (
                 <td>Comes from {stationName(entry.fromStationId)}</td>
