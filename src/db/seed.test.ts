@@ -10,7 +10,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
-import { GPT_PACKLISTS } from './gptSeed';
+import { GPT_CONSUMPTION, GPT_PACKLISTS } from './gptSeed';
 import { RCR_CONSUMPTION, RCR_PACKLISTS } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
 import type { AccessType, DestinationType, SyncMeta, Template } from './types';
@@ -206,9 +206,9 @@ describe('the seeded season', () => {
     );
     const rosea = destinations.find((destination) => destination.name === 'Rosea Carpark');
     expect(rosea?.courseKm).toBe(59);
-    // 13 from the race page, 3 more from the GPT 2025 pack list and 2 from
-    // the 2026 vehicle plan.
-    expect(destinations).toHaveLength(18);
+    // 13 from the race page, 3 more from the GPT 2025 pack list, 2 from the
+    // 2026 consumptions sheet and 2 from the 2026 vehicle plan.
+    expect(destinations).toHaveLength(20);
     // This year's plan names, times, vehicles and power.
     const gar = destinations.find((destination) => destination.id === seedId('dest', 'gpt26-GAR Trailhead'))!;
     expect(gar.vehicle).toBe('Pantech #1');
@@ -488,7 +488,7 @@ describe('the Hounslow starting packlists and food plan', () => {
     await seedStarterData();
 
     const lines = alive(await db.consumptionLines.toArray());
-    expect(lines).toHaveLength(HOUNSLOW_CONSUMPTION.length + RCR_CONSUMPTION.length);
+    expect(lines).toHaveLength(HOUNSLOW_CONSUMPTION.length + RCR_CONSUMPTION.length + GPT_CONSUMPTION.length);
     // Blue Gum has a food plan but no run-sheet packlist — the walk-in station
     // gets its list when quantities are sent from the food plan.
     const packlists = alive(await db.packlists.toArray());
@@ -1112,6 +1112,48 @@ describe('a seeded list for a station the crew already keeps a list for', () => 
     await ensureSeeded();
 
     expect((await listsAtStation()).map((list) => list.id)).toContain(seeded);
+  });
+});
+
+describe('the GPT100 food plan', () => {
+  it('names only food the catalogue has, at stations and races the event has', () => {
+    const skus = new Set(FOOD_CATALOGUE.map((item) => item.sku));
+    const gpt = EVENT_SEED.find((spec) => spec.code === 'gpt26')!;
+    const stations = new Set(gpt.destinations.map((entry) => entry.name));
+    const races = new Set((gpt.races ?? []).map((race) => race.name));
+    expect(GPT_CONSUMPTION.filter((line) => !skus.has(line.sku))).toEqual([]);
+    expect(GPT_CONSUMPTION.filter((line) => !stations.has(line.station))).toEqual([]);
+    expect(GPT_CONSUMPTION.filter((line) => !races.has(line.race))).toEqual([]);
+    // Every rule is at a station its race passes through.
+    const visits = new Set(
+      gpt.destinations.flatMap((entry) => (entry.visits ?? []).map(([race]) => `${entry.name}|${race}`)),
+    );
+    expect(GPT_CONSUMPTION.filter((line) => !visits.has(`${line.station}|${line.race}`))).toEqual([]);
+  });
+
+  it('works out the sheet’s station totals', async () => {
+    await seedStarterData();
+
+    const gpt = seedId('event', 'gpt26');
+    const destinations = alive(await db.destinations.toArray()).filter((entry) => entry.eventId === gpt);
+    const races = alive(await db.races.toArray()).filter((race) => race.eventId === gpt);
+    const lines = alive(await db.consumptionLines.toArray());
+    const bySku = new Map(alive(await db.items.toArray()).map((item) => [item.id, item.sku]));
+    const total = (station: string, sku: string, day?: string) => {
+      const destination = destinations.find((entry) => entry.id === seedId('dest', `gpt26-${station}`))!;
+      return lines
+        .filter((line) => line.destinationId === destination.id && bySku.get(line.itemId) === sku)
+        .flatMap((line) => lineQtyByDay(line, destination, races))
+        .filter(([lineDay]) => !day || lineDay === day)
+        .reduce((sum, [, qty]) => sum + qty, 0);
+    };
+
+    expect(total('GAR Trailhead', 'FD-01', '2026-11-05')).toBe(1564); // 50k and Stage 1, 391 × 4
+    expect(total('GAR Trailhead', 'FD-01', '2026-11-06')).toBe(984); // miler, 246 × 4
+    expect(total('Dunkeld Finish', 'FD-01')).toBe(876); // miler, Stage 4 and GPT33, kids and family
+    expect(total('Borough Huts', 'FD-25')).toBe(19); // loaves for 123 toasties
+    expect(total('Mt Difficult Ridgeline', 'FD-03')).toBe(20); // 10 packets each day
+    expect(total('Wonderland Trailhead', 'FD-01')).toBe(220); // GPT6k and GPT14k
   });
 });
 

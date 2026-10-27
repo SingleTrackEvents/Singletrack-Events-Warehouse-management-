@@ -195,33 +195,66 @@ export const EVENT_SEED: SeedEvent[] = [
     notes:
       'Mt Zero → Dunkeld, 162 km, 50 h limit; miler starts Fri 6 Nov 8:00 am. Hub at Halls Gap. ' +
       'Every station Trail Sisters compliant, with ice, salt and sunscreen. Km and cutoffs from gpt100.com.au.',
+    // From GPT_2026_Aid Station Consumptions, projected from the 12 Oct entry
+    // report. Relay teams count as one runner per leg in progress: the miler
+    // is 220 solo, 16 pairs and 40 teams (as 10); the stage race 90 solo and
+    // 33 teams (as 11), with a tenth gone by Stage 3.
+    races: [
+      { name: 'Miler', projection: 246, day: '2026-11-06' },
+      { name: '50k', projection: 290, day: '2026-11-05' },
+      { name: 'Stage 1', projection: 101, day: '2026-11-05' },
+      { name: 'Stage 2', projection: 101, day: '2026-11-06' },
+      { name: 'Stage 3', projection: 91, day: '2026-11-07' },
+      { name: 'Stage 4', projection: 91, day: '2026-11-08' },
+      { name: '33k', projection: 180, day: '2026-11-08' },
+      { name: 'GPT14k', projection: 100, day: '2026-11-05' },
+      { name: 'GPT6k', projection: 120, day: '2026-11-05' },
+      { name: '5k Family', projection: 50, day: '2026-11-08' },
+      { name: '2k Kids', projection: 50, day: '2026-11-08' },
+    ],
     destinations: withPlan([
-      { name: 'Mt Zero Picnic Area', type: 'start', courseKm: 0, notes: 'Miler and stage race start.' },
-      { name: 'GAR Trailhead', type: 'aid_station', courseKm: 15.5, notes: 'Crew OK. Cutoff Fri 12:00 pm.' },
+      {
+        name: 'Mt Zero Picnic Area',
+        type: 'start',
+        courseKm: 0,
+        notes: 'Miler and stage race start.',
+        visits: [['Miler', 1], ['50k', 1], ['Stage 1', 1]],
+      },
+      {
+        name: 'GAR Trailhead',
+        type: 'aid_station',
+        courseKm: 15.5,
+        notes: 'Crew OK. Cutoff Fri 12:00 pm.',
+        visits: [['Miler', 1], ['50k', 1], ['Stage 1', 1]],
+      },
       {
         name: 'Mt Difficult Rd',
         type: 'aid_station',
         courseKm: 35.5,
         accessNotes: 'No crew access.',
         notes: 'Hot soup and noodles. Cutoff Fri 5:00 pm.',
+        visits: [['Miler', 1], ['50k', 1], ['Stage 1', 1]],
       },
       {
         name: 'Halls Gap',
         type: 'aid_station',
         courseKm: 49.5,
         notes: 'Full crew access, drop bags. Stage 1 finish. Cutoff Fri 8:00 pm.',
+        visits: [['Miler', 1], ['50k', 1], ['Stage 1', 1]],
       },
       {
         name: 'Rosea Carpark',
         type: 'aid_station',
         courseKm: 59,
         notes: 'Crew OK, 12 min from Halls Gap. Hot meals. Cutoff Fri 11:00 pm.',
+        visits: [['Miler', 1], ['Stage 2', 1]],
       },
       {
         name: 'Borough Huts',
         type: 'aid_station',
         courseKm: 72,
         notes: 'Crew OK. Nap beds. Cutoff Sat 2:15 am.',
+        visits: [['Miler', 1], ['Stage 2', 1]],
       },
       {
         name: 'Mt William Carpark',
@@ -229,6 +262,7 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 87,
         accessNotes: 'No crew access.',
         notes: 'Drop bags, nap beds. Stage 2 finish. Cutoff Sat 8:15 am.',
+        visits: [['Miler', 1], ['Stage 2', 1]],
       },
       {
         name: 'Jimmy Creek Rd',
@@ -236,6 +270,7 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 106,
         accessNotes: 'Limited crew parking.',
         notes: 'Drop bags, nap beds. Cutoff Sat 2:30 pm.',
+        visits: [['Miler', 1], ['Stage 3', 1]],
       },
       {
         name: 'Yarram Gap Rd',
@@ -243,6 +278,7 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 117,
         accessNotes: 'No crew access.',
         notes: 'Hot meals. Cutoff Sat 6:30 pm.',
+        visits: [['Miler', 1], ['Stage 3', 1]],
       },
       {
         name: 'Griffin Fireline',
@@ -250,6 +286,7 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 129,
         accessNotes: 'Shuttle access only.',
         notes: 'Drop bags, nap beds. Stage 3 finish. Cutoff Sat 10:15 pm.',
+        visits: [['Miler', 1], ['Stage 3', 1]],
       },
       {
         name: 'Cassidys Gap',
@@ -257,6 +294,7 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 140.5,
         accessNotes: 'Shuttle access only.',
         notes: 'Stage 4 / GPT33 start. Cutoff Sun 2:00 am.',
+        visits: [['Miler', 1], ['Stage 4', 1], ['33k', 1]],
       },
       {
         name: 'Bainggug Carpark',
@@ -264,12 +302,14 @@ export const EVENT_SEED: SeedEvent[] = [
         courseKm: 151.5,
         accessNotes: 'Shuttle access only.',
         notes: 'Cutoff Sun 6:30 am.',
+        visits: [['Miler', 1], ['Stage 4', 1], ['33k', 1]],
       },
       {
         name: 'Dunkeld Finish',
         type: 'finish',
         courseKm: 162,
         notes: 'Full access, 46 min from Halls Gap. Course closes Sun 10:00 am.',
+        visits: [['Miler', 1], ['Stage 4', 1], ['33k', 1], ['5k Family', 1], ['2k Kids', 1]],
       },
       // Sites the GPT 2025 pack list carries that the race page does not.
       {
@@ -277,6 +317,7 @@ export const EVENT_SEED: SeedEvent[] = [
         type: 'water_drop',
         notes: 'Drinks and ice, no food. Between Mt Zero and GAR Trailhead on the pack list.',
         sort: 15,
+        visits: [['Miler', 1], ['50k', 1], ['Stage 1', 1]],
       },
       {
         name: 'Mt Difficult Ridgeline',
@@ -285,12 +326,28 @@ export const EVENT_SEED: SeedEvent[] = [
         accessNotes: 'Hiked in.',
         notes: 'Drinks only. Between GAR Trailhead and Mt Difficult Rd on the pack list.',
         sort: 25,
+        visits: [['Miler', 1], ['50k', 1], ['Stage 1', 1]],
       },
       {
         name: 'Halls Gap Event Village',
         type: 'event_village',
         notes: 'Event hub, registration and merch.',
         sort: 45,
+      },
+      // Thursday's short races, from the 2026 consumptions sheet.
+      {
+        name: 'Wonderland Carpark',
+        type: 'aid_station',
+        notes: 'GPT14k aid station, Thursday.',
+        visits: [['GPT14k', 1]],
+        sort: 46,
+      },
+      {
+        name: 'Wonderland Trailhead',
+        type: 'water_drop',
+        notes: 'Water, electrolyte and lollies for the GPT6k and GPT14k, Thursday.',
+        visits: [['GPT14k', 1], ['GPT6k', 1]],
+        sort: 47,
       },
       // Sites the 2026 vehicle plan has that earlier lists did not.
       {
@@ -299,6 +356,7 @@ export const EVENT_SEED: SeedEvent[] = [
         accessNotes: "Marshal's own vehicle.",
         notes: 'Safety marshal only, no aid station.',
         sort: 65,
+        visits: [['Miler', 1], ['Stage 2', 1]],
       },
       {
         name: 'Stockyard Track',
@@ -307,6 +365,7 @@ export const EVENT_SEED: SeedEvent[] = [
         accessNotes: 'Drive straight to the site. Parks to confirm road access.',
         notes: 'Safety checkpoint. Wilderness first aid certified volunteers. Takes the Stockyard kit.',
         sort: 75,
+        visits: [['Miler', 1], ['Stage 3', 1]],
       },
     ], GPT_PLAN_2026),
   },

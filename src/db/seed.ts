@@ -6,7 +6,7 @@ import { EXTRA_ITEMS } from './extrasCatalogue';
 import { FOOD_CATALOGUE, FOOD_CATEGORY } from './foodCatalogue';
 import { HOUNSLOW_CONSUMPTION, HOUNSLOW_PACKLISTS } from './hounslowSeed';
 import { KIT_CONTENTS } from './kitContents';
-import { GPT_PACKLISTS, GPT_RETIRED } from './gptSeed';
+import { GPT_CONSUMPTION, GPT_PACKLISTS, GPT_RETIRED } from './gptSeed';
 import { GPT_PLAN_2026 } from './gptSchedule';
 import { RCR_CONSUMPTION, RCR_PACKLISTS, RCR_RETIRED } from './rollerCoasterSeed';
 import { STATION_TEMPLATES } from './stationTemplates';
@@ -589,10 +589,12 @@ export async function seedStarterData(
     }
   }
 
-  // The Roller Coaster Run's food plan comes from its own consumptions sheet.
+  // The Roller Coaster Run's and GPT100's food plans come from their own
+  // consumptions sheets.
   const foodPlans = [
     { code: 'hc26', lines: HOUNSLOW_CONSUMPTION },
     { code: 'rcr26', lines: RCR_CONSUMPTION },
+    { code: 'gpt26', lines: GPT_CONSUMPTION },
   ];
   for (const { code, lines } of foodPlans) {
     let consumptionSort = 10;
