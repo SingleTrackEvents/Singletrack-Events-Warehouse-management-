@@ -30,7 +30,7 @@ export function AccountChip() {
             : 'ok';
 
   const label = !backend
-    ? 'This device only. Tap to sign in and sync with the crew'
+    ? 'Saved on this device only. Tap to share with the crew'
     : session
       ? `${session.displayName}. ${
           state === 'ok'

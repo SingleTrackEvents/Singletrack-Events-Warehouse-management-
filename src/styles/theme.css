@@ -68,7 +68,8 @@
   /* Type scale — nudged up from web defaults for arm's-length reading. */
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
-  --text-xs: 0.75rem;
+  /* 13px, not 12: the smallest text still has to be read in the sun. */
+  --text-xs: 0.8125rem;
   --text-sm: 0.875rem;
   --text-base: 1rem;
   --text-lg: 1.125rem;

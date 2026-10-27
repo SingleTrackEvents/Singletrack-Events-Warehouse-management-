@@ -61,7 +61,7 @@ export default function TemplateDetailScreen() {
                     {line.mandatory ? <span style={{ color: 'var(--danger)' }}> *</span> : null}
                   </span>
                   <span className="row-sub">
-                    {item?.bin || 'no bin'}
+                    {item?.bin ? `Shelf ${item.bin}` : ''}
                     {line.perRunner ? ' · per runner' : ''}
                   </span>
                   <span className="row-flex mt-2">

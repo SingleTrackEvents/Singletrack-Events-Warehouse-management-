@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { Screen } from '../App';
 import { QrCode } from '../components/QrCode';
@@ -60,48 +61,62 @@ export default function AccessScreen() {
   }, [backend, session, inviteVersion]);
 
   if (!backend) {
+    /*
+     * Most people open this screen to invite someone, so that comes first.
+     * Testers on a laptop landed on a wall of sync and server text and could
+     * not see how to bring anyone in. One sentence says what inviting needs,
+     * and the button right under it does it.
+     */
     return (
       <Screen title="Accounts & sync" back="/more">
         <div className="card card-pad mb-4">
-          <h3>This device only</h3>
-          <p className="small muted mt-2">
-            Everything you enter lives on this phone. It works with no signal and costs nothing, but
-            nobody else can see it — the crew swap data by exporting a file.
-          </p>
-        </div>
-
-        <div className="card card-pad mb-3">
-          <h3>Turn on sync</h3>
+          <h3>Invite someone</h3>
           <p className="small muted mt-2 mb-3">
-            A shared database lets the warehouse, the drivers and each aid station work from the same
-            live packlists, with different levels of access.
-          </p>
-          <button
-            type="button"
-            className="btn btn-primary btn-lg btn-block"
-            disabled={!SUPABASE_CONFIGURED}
-            onClick={() => void connectServer()}
-          >
-            ☁️ Connect to the SingleTrack server
-          </button>
-          <p className="tiny muted mt-2">
             {SUPABASE_CONFIGURED
-              ? 'The first person to sign in becomes the admin. Everyone after that needs an invite.'
-              : 'This build has no server set up, so nothing it does can reach the real data. Use the demo server below to try sign-in.'}
+              ? 'Inviting people needs the shared SingleTrack server, so connect to it first.'
+              : 'Inviting people needs the shared server, and this copy has none set up, so try it on the demo server.'}
+          </p>
+          {SUPABASE_CONFIGURED ? (
+            <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => void connectServer()}>
+              ☁️ Connect to the SingleTrack server
+            </button>
+          ) : (
+            <button type="button" className="btn btn-primary btn-lg btn-block" onClick={connectDemo}>
+              Try it on the demo server
+            </button>
+          )}
+          {SUPABASE_CONFIGURED ? (
+            <p className="tiny muted mt-2">
+              The first person to sign in becomes the admin. Everyone after that needs an invite.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="card card-pad mb-4">
+          <h3>Saved on this phone/computer only</h3>
+          <p className="small muted mt-2">
+            Everything you enter stays on this device. It works with no signal, but nobody else can
+            see it until you connect to the shared server.
           </p>
         </div>
 
-        <details className="card card-pad">
-          <summary className="small strong">Try it without a server</summary>
-          <p className="tiny muted mt-3">
-            The <span className="strong">on-device demo server</span> exercises the sign-in, roles
-            and invite flow without touching the real database. It stores everything on this phone,
-            so it will not move data between devices.
+        {SUPABASE_CONFIGURED ? (
+          <details className="card card-pad">
+            <summary className="small strong">Try it without the real server</summary>
+            <p className="tiny muted mt-3">
+              The <span className="strong">demo server</span> lets you try signing in, roles and
+              invites without touching the real data. It keeps everything on this device, so it
+              will not move data between devices.
+            </p>
+            <button type="button" className="btn btn-outline btn-block mt-3" onClick={connectDemo}>
+              Use the demo server
+            </button>
+          </details>
+        ) : (
+          <p className="tiny muted">
+            The demo server keeps everything on this device, so it will not move data between devices.
           </p>
-          <button type="button" className="btn btn-outline btn-block mt-3" onClick={connectDemo}>
-            Use the demo server
-          </button>
-        </details>
+        )}
       </Screen>
     );
   }
@@ -121,7 +136,7 @@ export default function AccessScreen() {
         <div className="card card-pad mb-3">
           <p className="small muted">
             {backend.isReal
-              ? 'This phone is connected to the SingleTrack server. Sign in to see the crew’s events and packlists.'
+              ? 'This device is connected to the SingleTrack server. Sign in to see the crew’s events and lists.'
               : `Connected to ${backend.name}, a stand-in for trying the flow rather than a real server.`}
           </p>
         </div>
@@ -155,13 +170,13 @@ export default function AccessScreen() {
           guess from two buttons that look equally valid.
         */}
         <div className="card card-pad mb-3">
-          <p className="small strong">First time on this phone?</p>
+          <p className="small strong">First time on this device?</p>
           <p className="tiny muted mt-2">
             {backend.signInWithPassword
               ? 'Sign in with your email and password. No password yet? Have a code emailed instead, ' +
-                'then set one under Accounts & sync. Add a passkey after that and this phone will sign ' +
+                'then set one under Accounts & sync. Add a passkey after that and this device will sign ' +
                 'you in with your face or fingerprint from then on.'
-              : 'Sign in with email once. Then add a passkey and this phone will sign you in with your ' +
+              : 'Sign in with email once. Then add a passkey and this device will sign you in with your ' +
                 'face or fingerprint from then on, no email involved.'}
           </p>
         </div>
@@ -233,7 +248,7 @@ export default function AccessScreen() {
 
         {backend.isReal ? null : (
           <button type="button" className="btn btn-ghost btn-block mt-4" onClick={() => void disconnect()}>
-            Go back to this device only
+            Stop using the demo server
           </button>
         )}
 
@@ -245,6 +260,42 @@ export default function AccessScreen() {
 
   return (
     <Screen title="Accounts & sync" back="/more">
+      {/*
+        An admin comes here to bring someone in, so that is the first thing
+        on the screen. Testers on a laptop opened this onto sync and passkey
+        text and never found the invite button further down.
+      */}
+      {session.role === 'admin' ? (
+        <>
+          <div className="card card-pad mb-4">
+            <h3>Invite someone</h3>
+            <p className="small muted mt-2 mb-3">
+              Make a QR card for a volunteer, driver or crew member. They scan it, type their name
+              and they are in.
+            </p>
+            <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => setInviting(true)}>
+              + Invite someone
+            </button>
+          </div>
+
+          {invites?.length ? (
+            <section className="section">
+              <div className="section-head">
+                <h2>Invites</h2>
+              </div>
+              <div className="stack">
+                {invites.map((invite) => (
+                  <InviteCard key={invite.id} invite={invite} onChanged={refreshInvites} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {/* Bumped with the invites, since changing an invite changes its people. */}
+          <PeopleSection version={inviteVersion} />
+        </>
+      ) : null}
+
       <div className="card card-pad mb-4">
         <div className="spread mb-2">
           <div className="grow">
@@ -320,38 +371,9 @@ export default function AccessScreen() {
 
       <PasskeySection />
 
-      {session.role === 'admin' ? (
-        <section className="section">
-          <div className="section-head">
-            <h2>Invites</h2>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setInviting(true)}>
-              + New invite
-            </button>
-          </div>
-          {invites?.length ? (
-            <div className="stack">
-              {invites.map((invite) => (
-                <InviteCard key={invite.id} invite={invite} onChanged={refreshInvites} />
-              ))}
-            </div>
-          ) : (
-            <div className="card card-pad center muted small">
-              No invites yet. Create one per aid station and print it with the crate labels.
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      {/* Bumped with the invites, since changing an invite changes its people. */}
-      {session.role === 'admin' ? <PeopleSection version={inviteVersion} /> : null}
-
       <button type="button" className="btn btn-ghost btn-block mt-4" onClick={() => setSigningOut(true)}>
         Sign out
       </button>
-
-      {invites?.length ? (
-        <p className="tiny muted center mb-3">Swipe an invite left to delete it.</p>
-      ) : null}
 
       {inviting ? (
         <InviteSheet onClose={() => setInviting(false)} onCreated={refreshInvites} />
@@ -516,7 +538,7 @@ function SignInSheet({ onClose }: { onClose: () => void }) {
           <LinkFailureNotice />
           <Field
             label="Email"
-            hint="Any email you can check on this phone. We send a short numeric code: no password to set or share."
+            hint="Any email you can check on this device. We send a short numeric code: no password to set or share."
           >
             {(id) => (
               // No autoFocus on the sign-in fields: an iPhone focuses a field
@@ -673,7 +695,7 @@ function PasswordSheet({ onClose }: { onClose: () => void }) {
               Account ready, access not yet
             </p>
             <p className="tiny mt-2">
-              Your account is on this phone. To use it you need the invite code from the crew: type
+              Your account is on this device. To use it you need the invite code from the crew: type
               it next and it attaches to this account.
             </p>
             <Link className="btn btn-primary btn-block mt-3" to="/join" onClick={onClose}>
@@ -943,7 +965,7 @@ function PasskeySection() {
         </div>
       ) : (
         <div className="card card-pad small muted">
-          Add a passkey and this phone signs in with your face, fingerprint or PIN — no email link
+          Add a passkey and this device signs you in with your face, fingerprint or PIN. No email
           to wait for, which matters when reception is poor.
         </div>
       )}
@@ -1036,9 +1058,57 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
   const [deleting, setDeleting] = useState(false);
   const [extending, setExtending] = useState(false);
   const [editingAccess, setEditingAccess] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const url = joinUrl(invite.token);
   const expired = Boolean(invite.expiresAt && new Date(invite.expiresAt) <= new Date());
   const dead = expired || Boolean(invite.revokedAt);
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
+  /*
+   * Printing one card, not the whole screen.
+   *
+   * The card is drawn again on its own at the top of the page, and the print
+   * styles hide everything else while it is up. It waits a frame so the QR
+   * is drawn before the print dialog takes its picture, and goes away once
+   * the dialog closes.
+   */
+  useEffect(() => {
+    if (!printing) return;
+    document.body.classList.add('printing-invite');
+    const done = () => setPrinting(false);
+    window.addEventListener('afterprint', done);
+    const timer = window.setTimeout(() => window.print(), 300);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('afterprint', done);
+      document.body.classList.remove('printing-invite');
+    };
+  }, [printing]);
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast('Link copied');
+    } catch {
+      // Some browsers only allow the clipboard on a secure page; the code is
+      // on the card to read out or type instead.
+      toast('Could not copy here. Read out the code instead.', 'error');
+    }
+  };
+
+  const share = async () => {
+    try {
+      await navigator.share({
+        title: invite.label,
+        text: `Your SingleTrack invite. Open the link, or type the code ${invite.token}.`,
+        url,
+      });
+    } catch (cause) {
+      // Closing the share sheet without picking anything is not a failure.
+      if (cause instanceof Error && cause.name === 'AbortError') return;
+      toast('Could not share from here. Copy the link instead.', 'error');
+    }
+  };
 
   return (
     <>
@@ -1073,8 +1143,26 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
           </p>
         </div>
       </div>
-      {!invite.revokedAt ? (
+      {!dead ? (
         <div className="row-flex mt-3" style={{ flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => void copyLink()}>
+            Copy link
+          </button>
+          {canShare ? (
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => void share()}>
+              Share
+            </button>
+          ) : null}
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => setPrinting(true)}>
+            🖨 Print
+          </button>
+        </div>
+      ) : null}
+      {/* Delete is here as well as behind the swipe: swiping is a phone
+          gesture, and on a laptop there is nothing to swipe. */}
+      <div className="row-flex mt-3" style={{ flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+        {!invite.revokedAt ? (
+          <>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditingAccess(true)}>
               Edit access
             </button>
@@ -1086,10 +1174,35 @@ function InviteCard({ invite, onChanged }: { invite: Invite; onChanged: () => vo
                 Revoke
               </button>
             ) : null}
-          </div>
+          </>
         ) : null}
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleting(true)}>
+          Delete
+        </button>
+      </div>
     </div>
     </SwipeToDelete>
+
+    {printing
+      ? createPortal(
+          <div className="invite-print">
+            <h1 className="print-title">{invite.label}</h1>
+            <QrCode value={url} size={240} alt={`Invite QR for ${invite.label}`} />
+            <p className="mono strong" style={{ fontSize: '2rem' }}>
+              {invite.token}
+            </p>
+            <ScopeLine scope={invite.scope} />
+            <p className="small mt-2">
+              Scan the QR with your phone camera, type your name, and you are in. No email or
+              password. No camera? Open the SingleTrack app and type the code above when it asks.
+            </p>
+            <p className="tiny mt-2">
+              {invite.expiresAt ? `Works until ${formatDateTime(invite.expiresAt)}.` : 'No end date.'}
+            </p>
+          </div>,
+          document.body,
+        )
+      : null}
 
     {/*
       Outside the swipe wrapper: it moves the card with a transform, and a
@@ -1692,7 +1805,7 @@ function MemberSheet({
           {member.email ?? 'Joined by invite'}.{' '}
           {member.inviteId
             ? 'Saving here changes just them: later changes to their invite will leave them alone.'
-            : 'Their phone picks up a change the next time the app is opened with signal.'}
+            : 'Their device picks up a change the next time the app is opened with signal.'}
         </p>
         <AccessEditor
           draft={draft}
@@ -1722,7 +1835,7 @@ function MemberSheet({
       {removing ? (
         <ConfirmSheet
           title={`Remove ${member.displayName}?`}
-          body="They are signed out the next time their phone checks in, and nothing they recorded is lost. To let them back in, send them an invite."
+          body="They are signed out the next time their device checks in, and nothing they recorded is lost. To let them back in, send them an invite."
           confirmLabel="Remove"
           tone="danger"
           onCancel={() => setRemoving(false)}

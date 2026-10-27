@@ -34,7 +34,7 @@ export const ROLE_BLURBS: Record<Role, string> = {
   admin: 'Full control, including the item catalogue and who else has access.',
   crew: 'Pack, build transport loads and plan food. Given every event, they also run the warehouse: stock, stocktakes and templates.',
   driver: 'See assigned loads and confirm deliveries on the road.',
-  volunteer: 'See one aid station’s packlist and record what actually arrived.',
+  volunteer: 'See only their own station’s packing list and tick off what actually arrived.',
 };
 
 /**
@@ -92,7 +92,7 @@ export interface AccessOption {
 /** In the order the invite sheet lists them: the station first, the warehouse last. */
 export const ACCESS_OPTIONS: AccessOption[] = [
   { key: 'receive', label: 'Record what arrived', hint: 'Tick off deliveries and returns at the station.' },
-  { key: 'pack', label: 'Pack and edit packlists', hint: 'Tick lines packed, add and change lines.' },
+  { key: 'pack', label: 'Pack and change packing lists', hint: 'Tick items packed, add and change items.' },
   { key: 'deliver', label: 'Transport: confirm deliveries', hint: 'See the loads and sign them off on the road.' },
   { key: 'loads', label: 'Transport: plan loads', hint: 'Build and change the truck and van loads.' },
   { key: 'catalogue', label: 'See the stock catalogue', hint: 'Items, categories and templates, read only.' },

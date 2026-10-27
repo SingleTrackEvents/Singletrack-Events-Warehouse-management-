@@ -28,31 +28,42 @@ export function movesFor(truckStage: boolean): Move[] {
 export function moveLabel(move: Move, truckStage: boolean): string {
   switch (move) {
     case 'plan':
-      return 'Plan';
+      return 'Not started';
     case 'truck':
-      return truckStage ? 'Truck' : 'Load';
+      return truckStage ? 'Truck' : 'Packing';
     case 'vans':
       return 'Vans';
     case 'station':
-      return 'Station';
+      return 'At station';
     case 'home':
-      return 'Home';
+      return 'Coming home';
   }
 }
 
-/** The move as a state: where one station's gear is right now. */
-export function moveState(move: Move, truckStage: boolean): string {
+/**
+ * The move as a state: where one station's gear is right now, in words a
+ * first-time packer reads correctly. One tick on a one-stage event is a
+ * list being packed, not a van that has left, so with the list's progress
+ * it says "packing" until every item is in and "packed" after.
+ */
+export function moveState(
+  move: Move,
+  truckStage: boolean,
+  progress?: { done: number; total: number },
+): string {
+  const finished = Boolean(progress && progress.total > 0 && progress.done >= progress.total);
   switch (move) {
     case 'plan':
-      return 'planned';
+      return 'not started';
     case 'truck':
-      return truckStage ? 'on truck' : 'loaded';
+      if (truckStage) return finished ? 'all on the truck' : 'going on the truck';
+      return finished ? 'packed' : 'packing';
     case 'vans':
-      return 'in van';
+      return finished ? 'van packed' : 'packing the van';
     case 'station':
-      return 'at station';
+      return 'at the station';
     case 'home':
-      return 'home';
+      return finished ? 'back in the warehouse' : 'coming home';
   }
 }
 
@@ -124,10 +135,12 @@ export function moveOf(
  */
 export function countAt(line: PacklistLine, move: Move, truckStage: boolean): { got: number; want: number } {
   // Gear moving on from another station is not the warehouse's to load.
-  if (line.fromDestinationId && (move === 'truck' || move === 'vans')) return { got: 1, want: 1 };
+  if (line.fromDestinationId && (move === 'plan' || move === 'truck' || move === 'vans')) return { got: 1, want: 1 };
   switch (move) {
     case 'plan':
-      return { got: line.qtyRequired > 0 ? 1 : 0, want: 1 };
+      // A list nobody has started is 0% packed, not 100% planned: a full
+      // green bar on every untouched station read as "everyone's done".
+      return { got: truckStage ? line.qtyOnTruck ?? 0 : line.qtyPacked, want: line.qtyRequired };
     case 'truck':
       return { got: truckStage ? line.qtyOnTruck ?? 0 : line.qtyPacked, want: line.qtyRequired };
     case 'vans':

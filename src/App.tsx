@@ -36,6 +36,7 @@ const ImportPacklistScreen = lazy(() => import('./screens/ImportPacklistScreen')
 const FoodScreen = lazy(() => import('./screens/FoodScreen'));
 const WarehouseScreen = lazy(() => import('./screens/WarehouseScreen'));
 const VansScreen = lazy(() => import('./screens/VansScreen'));
+const VanSheetScreen = lazy(() => import('./screens/VanSheetScreen'));
 const ReturnsScreen = lazy(() => import('./screens/ReturnsScreen'));
 const PacklistScreen = lazy(() => import('./screens/PacklistScreen'));
 const PrintSheetScreen = lazy(() => import('./screens/PrintSheetScreen'));
@@ -52,6 +53,7 @@ const AccessScreen = lazy(() => import('./screens/AccessScreen'));
 const JoinScreen = lazy(() => import('./screens/JoinScreen'));
 const AssistantScreen = lazy(() => import('./screens/AssistantScreen'));
 const ShoppingScreen = lazy(() => import('./screens/ShoppingScreen'));
+const MissingScreen = lazy(() => import('./screens/MissingScreen'));
 
 /**
  * Bottom tabs, each gated by the permission its screen needs. A volunteer with
@@ -199,6 +201,8 @@ export default function App() {
               <Route path="/events" element={<Guard needs="event:read"><EventsScreen /></Guard>} />
               <Route path="/events/:eventId" element={<Guard needs="event:read"><EventDetailScreen /></Guard>} />
               <Route path="/events/:eventId/warehouse" element={<Guard needs="packlist:manage"><WarehouseScreen /></Guard>} />
+              <Route path="/events/:eventId/missing" element={<Guard needs="packlist:manage"><MissingScreen /></Guard>} />
+              <Route path="/events/:eventId/vans/sheet" element={<Guard needs="packlist:manage"><VanSheetScreen /></Guard>} />
               <Route path="/events/:eventId/vans" element={<Guard needs="packlist:pack"><VansScreen /></Guard>} />
               <Route path="/events/:eventId/units" element={<Guard needs="packlist:pack"><UnitsScreen /></Guard>} />
               <Route path="/events/:eventId/home" element={<Guard needs="packlist:pack"><ReturnsScreen /></Guard>} />
@@ -275,7 +279,8 @@ export function Screen({
             aria-label="Scan a code"
             onClick={() => navigate('/scan')}
           >
-            ⛶
+            {/* Worded, not just an icon: nobody knew what ⛶ did. */}
+            <span className="header-btn-label">Scan</span>
           </button>
         )}
       </header>

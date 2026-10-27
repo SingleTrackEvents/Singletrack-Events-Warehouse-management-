@@ -78,7 +78,9 @@ export default function VansScreen() {
       <section className="section">
         <div className="section-head">
           <h2>Van packs</h2>
-          <span className="small muted">in the order they leave</span>
+          <Link to={`/events/${event.id}/vans/sheet`} className="small">
+            🖨 Van sheets
+          </Link>
         </div>
         <div className="list">
           {remainder.vans.map((van) => {
@@ -93,7 +95,7 @@ export default function VansScreen() {
                       <span className="strong">Leaves {formatLocalWhen(van.destination.schedule.departsAt)} · </span>
                     ) : null}
                     {van.destination.vehicle ? `${van.destination.vehicle} · ` : ''}
-                    {van.linesDone} of {plural(van.linesTotal, 'line')} in the van
+                    {van.linesDone} of {plural(van.linesTotal, 'item')} in the van
                   </span>
                 </span>
                 <span className="row-chevron">›</span>

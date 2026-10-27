@@ -135,7 +135,7 @@ describe('crew given one event', () => {
   it('is described honestly on the access screen', () => {
     const lines = describeRole('crew', { eventId: 'event-1', destinationId: null });
     expect(lines).toContain('View the stock catalogue');
-    expect(lines).toContain('Build and change packlists');
+    expect(lines).toContain('Build and change packing lists');
     expect(lines).not.toContain('Run stocktakes');
     expect(lines).not.toContain('Adjust stock quantities');
     expect(describeRole('crew')).toContain('Run stocktakes');
@@ -305,7 +305,7 @@ describe('role ordering', () => {
 describe('role descriptions', () => {
   it('describes each role in plain language for the access screen', () => {
     expect(describeRole('admin')).toContain('Invite people and set their access');
-    expect(describeRole('volunteer')).toEqual(['Record what arrived on a packlist']);
+    expect(describeRole('volunteer')).toEqual(['Record what arrived on their packing list']);
     expect(describeRole('crew')).not.toContain('Invite people and set their access');
   });
 });

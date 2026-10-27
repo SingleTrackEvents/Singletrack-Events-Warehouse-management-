@@ -5,14 +5,17 @@ import {
   addPlanItems,
   applyPlanToPacklists,
   copyRuleForRace,
+  copyRulesToStations,
   eventDays,
   lineQty,
   lineQtyByDay,
   lineTotal,
   loadFoodPlan,
   parseAmount,
+  planCopyToStations,
   stationRunners,
   stationRunnersByDay,
+  suggestedPerRunner,
   totalsToOrder,
 } from './consumption';
 import { addLine, createPacklist } from './packlists';
@@ -462,5 +465,105 @@ describe('parseAmount', () => {
     expect(parseAmount('abc')).toHaveProperty('error');
     expect(parseAmount('1,5,2')).toHaveProperty('error');
     expect(parseAmount('-3')).toHaveProperty('error');
+  });
+});
+
+describe('adding items with an amount per runner', () => {
+  it('writes the per-runner amount and the fixed amount as given', async () => {
+    const { event, station } = await weekend();
+    const coke = await makeItem('COKE');
+    const salt = await makeItem('SALT');
+    await addPlanItems(event.id, station.id, [
+      { itemId: coke.id, perRunner: 0.2 },
+      { itemId: salt.id, qty: 2 },
+    ]);
+    const lines = await liveWhere(db.consumptionLines, 'destinationId', station.id);
+    expect(lines.find((line) => line.itemId === coke.id)).toMatchObject({ perRunner: 0.2, flatQty: 0 });
+    expect(lines.find((line) => line.itemId === salt.id)).toMatchObject({ perRunner: 0, flatQty: 2 });
+  });
+
+  it('adds an item picked twice in one go only once', async () => {
+    const { event, station } = await weekend();
+    const coke = await makeItem('COKE');
+    expect(
+      await addPlanItems(event.id, station.id, [
+        { itemId: coke.id, perRunner: 0.2 },
+        { itemId: coke.id, perRunner: 0.3 },
+      ]),
+    ).toBe(1);
+  });
+});
+
+describe('suggestedPerRunner', () => {
+  it('knows the food catalogue items by code', () => {
+    expect(suggestedPerRunner({ name: 'Anything', sku: 'FD-05' })).toBe(0.2);
+    expect(suggestedPerRunner({ name: 'Water', sku: 'FD-01' })).toBe(0.5);
+  });
+
+  it('falls back to a word in the name for items added by hand', () => {
+    expect(suggestedPerRunner({ name: 'Coke Zero cans', sku: 'X-1' })).toBe(0.2);
+    expect(suggestedPerRunner({ name: 'Bananas (box)', sku: '' })).toBe(0.25);
+    expect(suggestedPerRunner({ name: 'Energy gels', sku: 'G' })).toBe(0.5);
+  });
+
+  it('has no guess for things that do not change with runners', () => {
+    expect(suggestedPerRunner({ name: 'Salt', sku: 'FD-09' })).toBeNull();
+    expect(suggestedPerRunner({ name: 'Gazebo', sku: 'GAZ-01' })).toBeNull();
+  });
+});
+
+describe('copying a station’s food to the other stations', () => {
+  async function course() {
+    const { event, marathon, kids, station } = await weekend();
+    const other = await makeDestination(event.id, [{ raceId: marathon.id, passes: 1 }]);
+    const noRaces = await makeDestination(event.id, []);
+    const village = await makeDestination(event.id, [{ raceId: marathon.id, passes: 1 }]);
+    await db.destinations.put({ ...village, type: 'event_village' });
+    const coke = await makeItem('COKE');
+    const water = await makeItem('WTR');
+    const soup = await makeItem('SOUP');
+    await addPlanItems(event.id, station.id, [
+      { itemId: coke.id, perRunner: 0.2, qty: 1 },
+      { itemId: water.id, perRunner: 0.5 },
+    ]);
+    await create(db.consumptionLines, {
+      eventId: event.id, destinationId: station.id, itemId: soup.id, perRunner: 0.1, flatQty: 0,
+      note: '', sort: 100, raceId: kids.id,
+    });
+    // The other station's crew already set their own water.
+    await addPlanItems(event.id, other.id, [{ itemId: water.id, perRunner: 0.8 }]);
+    return { event, station, other, noRaces, village, coke, water, soup };
+  }
+
+  it('copies to aid stations with races, skipping items they already have', async () => {
+    const { event, station, other, coke, water } = await course();
+    expect(await copyRulesToStations(station)).toEqual({ stations: 1, rules: 1 });
+
+    const theirs = await liveWhere(db.consumptionLines, 'destinationId', other.id);
+    expect(theirs.find((line) => line.itemId === coke.id)).toMatchObject({
+      perRunner: 0.2,
+      flatQty: 1,
+      eventId: event.id,
+    });
+    // Their own water stays at their figure.
+    expect(theirs.find((line) => line.itemId === water.id)?.perRunner).toBe(0.8);
+  });
+
+  it('leaves out stations with no races, the event village, and races that do not pass', async () => {
+    const { station, noRaces, village, soup } = await course();
+    const plan = await loadFoodPlan(station.eventId);
+    const destinations = await liveWhere(db.destinations, 'eventId', station.eventId);
+    const copy = planCopyToStations(station, destinations, plan.lines, plan.races);
+    const targets = new Set(copy.rules.map((rule) => rule.destinationId));
+    expect(targets.has(noRaces.id)).toBe(false);
+    expect(targets.has(village.id)).toBe(false);
+    // The kids' soup only goes where the kids run.
+    expect(copy.rules.some((rule) => rule.itemId === soup.id)).toBe(false);
+  });
+
+  it('adds nothing the second time', async () => {
+    const { station } = await course();
+    await copyRulesToStations(station);
+    expect(await copyRulesToStations(station)).toEqual({ stations: 0, rules: 0 });
   });
 });

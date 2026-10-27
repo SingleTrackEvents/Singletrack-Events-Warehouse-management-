@@ -20,7 +20,7 @@ type Filter = 'all' | 'todo' | 'short' | 'noRun';
 const FILTER_LABELS: Record<Filter, string> = {
   all: 'Everything',
   todo: 'To pack',
-  short: 'Short in the warehouse',
+  short: 'Not enough stock',
   noRun: 'No vehicle yet',
 };
 
@@ -114,7 +114,8 @@ export default function WarehouseScreen() {
   const filtered = useMemo(() => {
     const lines = list?.lines ?? [];
     if (filter === 'todo') return lines.filter((line) => !isPulled(line, truck));
-    if (filter === 'short') return lines.filter((line) => line.shortfall > 0);
+    // Stock nobody has counted cannot be called enough: it shows here as unknown.
+    if (filter === 'short') return lines.filter((line) => line.shortfall > 0 || line.uncounted);
     if (filter === 'noRun') return lines.filter((line) => line.going.some((entry) => !entry.vehicle));
     return lines;
   }, [list, filter, truck]);
@@ -163,7 +164,7 @@ export default function WarehouseScreen() {
         <EmptyState
           glyph="📦"
           title="Nothing to pull yet"
-          body="Build the packlists for this event's destinations and their totals gather here."
+          body="Build the packing lists for this event's stations and their totals gather here."
           action={
             <Link className="btn btn-primary" to={`/events/${event.id}`}>
               Back to the event
@@ -179,7 +180,7 @@ export default function WarehouseScreen() {
       <div className="card card-pad mb-3">
         <div className="spread mb-2">
           <span className="strong">
-            {plural(list.lines.length, 'item')} across {plural(list.destinationsCovered, 'destination')}
+            {plural(list.lines.length, 'item')} across {plural(list.destinationsCovered, 'station')}
           </span>
           {/*
             "Warehouse covers it" is a claim, and it cannot be made about stock
@@ -188,7 +189,7 @@ export default function WarehouseScreen() {
           {shortCount ? (
             <Pill tone="danger">{shortCount} short</Pill>
           ) : uncounted ? (
-            <Pill>{uncounted} not counted</Pill>
+            <Pill tone="warn">{uncounted} stock unknown</Pill>
           ) : (
             <Pill tone="ok">Warehouse covers it</Pill>
           )}
@@ -215,28 +216,21 @@ export default function WarehouseScreen() {
             ))}
           </ol>
         ) : null}
-        {canTick ? (
-          <button
-            type="button"
-            className="btn btn-primary btn-block mt-3"
-            disabled={!totalPacked}
-            onClick={() => setLoadingTruck(true)}
-          >
-            {event.truckLoadedAt
-              ? `${truck ? 'Truck' : 'Vehicles'} loaded again (take out the rest)`
-              : truck
-                ? 'Truck loaded'
-                : 'Vehicles loaded'}
-          </button>
-        ) : null}
         {list.unassigned.length ? (
           <p className="tiny mt-2" style={{ color: 'var(--warn)' }}>
-            ⚠ {plural(list.unassigned.length, 'destination')} with no vehicle yet:{' '}
+            ⚠ {plural(list.unassigned.length, 'station')} with no vehicle yet:{' '}
             {list.unassigned.map((entry) => entry.name).join(', ')}.{' '}
             <Link to={`/events/${event.id}`}>Set the vehicle on the station</Link>.
           </p>
         ) : null}
       </div>
+
+      {uncounted ? (
+        <p className="small mb-3" style={{ color: 'var(--warn)' }}>
+          ⚠ The warehouse has never counted {plural(uncounted, 'item')} on this list, so it can't say if
+          there are enough. <Link to="/stocktake">Count them in a stocktake</Link>.
+        </p>
+      ) : null}
 
       <div className="chip-row mb-3">
         <button
@@ -262,7 +256,7 @@ export default function WarehouseScreen() {
           <div className="search-bar">
             <input
               className="input grow"
-              placeholder="Find an item or a destination"
+              placeholder="Find an item or a station"
               value={query}
               onChange={(changed) => setQuery(changed.target.value)}
             />
@@ -309,7 +303,7 @@ export default function WarehouseScreen() {
             </div>
           ) : (
             <div className="card card-pad center muted">
-              {filter === 'short' ? '✅ The warehouse covers everything on this list.' : 'Nothing to show.'}
+              {filter === 'short' ? '✅ The warehouse has counted enough of everything on this list.' : 'Nothing to show.'}
             </div>
           )}
         </>
@@ -334,7 +328,7 @@ export default function WarehouseScreen() {
                     <span className="row-body">
                       <span className="row-title truncate">{entry.item?.name ?? 'Unknown item'}</span>
                       <span className="row-sub">
-                        {entry.item?.bin || 'no bin'} · {entry.item?.sku ?? ''}
+                        {entry.item?.bin ? `Shelf ${entry.item.bin}` : ''}
                       </span>
                     </span>
                     <span className="row-end">
@@ -358,6 +352,40 @@ export default function WarehouseScreen() {
           🖨 Print
         </button>
       </div>
+      {/* The one button that takes stock out, kept to the foot of the list
+          and worded as what has happened, so nobody taps it while packing. */}
+      {canTick ? (
+        <section className="section no-print">
+          <div className="btn-grid mb-2">
+            <Link className="btn btn-outline" to={`/events/${event.id}/vans/sheet`}>
+              🖨 Van sheets
+            </Link>
+            <Link className="btn btn-outline" to={`/events/${event.id}/missing`}>
+              ❓ What's missing
+            </Link>
+          </div>
+          <div className="card card-pad">
+            <p className="small mb-2">
+              {truck
+                ? 'When the truck is packed and leaving, take its gear out of the warehouse count here.'
+                : 'When the vehicles are packed and leaving, take their gear out of the warehouse count here.'}
+            </p>
+            <button
+              type="button"
+              className="btn btn-outline btn-block"
+              disabled={!totalPacked}
+              onClick={() => setLoadingTruck(true)}
+            >
+              {event.truckLoadedAt
+                ? 'More went on since: take out the difference'
+                : truck
+                  ? '🚛 The truck has left: take it out of stock'
+                  : '🚐 The vehicles have left: take it out of stock'}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       {loadingTruck ? (
         <ConfirmSheet
           title={truck ? 'Mark the truck loaded?' : 'Mark the vehicles loaded?'}
@@ -441,7 +469,7 @@ function PullRow({
           className="pull-tick"
           aria-pressed={done}
           disabled={!tickable}
-          aria-label={`${done ? 'Untick' : 'Tick'} ${line.item?.name ?? 'item'} ${verb} for every stop`}
+          aria-label={`${done ? 'Untick' : 'Tick'} ${line.item?.name ?? 'item'} ${verb} for every station`}
           onClick={() => tick(line.going, !done)}
         >
           ✓
@@ -451,8 +479,8 @@ function PullRow({
         <span className="row-body">
           <span className="row-title truncate">{line.item?.name ?? 'Unknown item'}</span>
           <span className="row-sub">
-            {line.item?.bin || 'no bin'} · {line.item?.sku ?? ''} ·{' '}
-            {plural(line.going.length, 'stop')}
+            {line.item?.bin ? `Shelf ${line.item.bin} · ` : ''}
+            {plural(line.going.length, 'station')}
           </span>
         </span>
         <span className="row-end stack-sm" style={{ alignItems: 'flex-end' }}>
@@ -465,7 +493,7 @@ function PullRow({
           {line.shortfall > 0 ? (
             <Pill tone="danger">short {line.shortfall}</Pill>
           ) : line.uncounted ? (
-            <Pill>not counted</Pill>
+            <Pill tone="warn">stock unknown</Pill>
           ) : (
             <span className="tiny muted">{line.qtyOnHand} on hand</span>
           )}

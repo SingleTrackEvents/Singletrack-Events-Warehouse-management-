@@ -144,3 +144,23 @@ export function initials(name: string): string {
     .map((part) => part[0].toUpperCase())
     .join('');
 }
+
+const OPENED_EVENT_KEY = 'stw.lastEvent';
+
+/** The event this device last opened, so the Event tab goes back to it. */
+export function lastOpenedEvent(): string | null {
+  try {
+    return localStorage.getItem(OPENED_EVENT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function rememberOpenedEvent(eventId: string | undefined): void {
+  if (!eventId) return;
+  try {
+    localStorage.setItem(OPENED_EVENT_KEY, eventId);
+  } catch {
+    // Private browsing: the Event tab falls back to the next event.
+  }
+}

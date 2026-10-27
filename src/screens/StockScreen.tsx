@@ -164,7 +164,7 @@ export default function StockScreen() {
               <span className="row-body">
                 <span className="row-title truncate">{item.name}</span>
                 <span className="row-sub">
-                  {item.bin || 'no bin'} · {item.sku}
+                  {item.bin ? `Shelf ${item.bin} · ` : ''}{item.sku}
                 </span>
               </span>
               <span className="row-end">

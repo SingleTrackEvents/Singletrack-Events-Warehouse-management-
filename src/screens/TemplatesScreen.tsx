@@ -64,7 +64,7 @@ export default function TemplatesScreen() {
             </span>
             <span className="row-end">
               <Pill>{template.scope === 'event' ? 'Whole event' : DESTINATION_LABELS[template.appliesTo]}</Pill>
-              <div className="tiny muted mt-2">{plural(counts?.get(template.id) ?? 0, 'line')}</div>
+              <div className="tiny muted mt-2">{plural(counts?.get(template.id) ?? 0, 'item')}</div>
             </span>
           </Link>
         ))}
@@ -142,7 +142,7 @@ function NewTemplateSheet({
             />
           )}
         </Field>
-        <Field label="Applies to" hint="Suggested automatically for destinations of this type.">
+        <Field label="Applies to" hint="Suggested automatically for stations of this kind.">
           {(id) => (
             <select
               id={id}

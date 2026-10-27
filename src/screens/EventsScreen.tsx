@@ -63,7 +63,7 @@ export default function EventsScreen() {
           title="No events yet"
           body={
             canAdd
-              ? 'An event holds the aid stations and their packlists for one race.'
+              ? 'An event holds the aid stations and their packing lists for one race.'
               : 'The event you were given has not reached this phone yet. It will appear once the phone has signal.'
           }
           action={
@@ -136,7 +136,10 @@ export default function EventsScreen() {
       ) : null}
 
       {events?.length && canDelete ? (
-        <p className="tiny muted center mt-3">Swipe an event left to delete it.</p>
+        <p className="tiny muted center mt-3">
+          <span className="touch-only">Swipe an event left to delete it.</span>
+          <span className="pointer-only">Use ✕ beside an event to delete it.</span>
+        </p>
       ) : null}
 
       {adding ? <EventSheet onClose={() => setAdding(false)} /> : null}
@@ -146,8 +149,8 @@ export default function EventsScreen() {
           title={`Delete ${removing.event.name}?`}
           body={
             <>
-              This also removes {plural(removing.summary.destinations, 'destination')},{' '}
-              {plural(removing.summary.packlists, 'packlist')} and{' '}
+              This also removes {plural(removing.summary.destinations, 'station')},{' '}
+              {plural(removing.summary.packlists, 'packing list')} and{' '}
               {plural(removing.summary.loads, 'transport run')}.
               <div className="mt-2">
                 Stock movements are kept — the ledger is the record of what actually left the
@@ -179,7 +182,18 @@ function Deletable({
   onDelete: () => void;
   children: React.ReactElement;
 }) {
-  return enabled ? <SwipeToDelete onDelete={onDelete}>{children}</SwipeToDelete> : children;
+  if (!enabled) return children;
+  return (
+    <SwipeToDelete onDelete={onDelete}>
+      {/* A mouse cannot swipe, so a computer gets a button for it. */}
+      <div className="row-flex">
+        <div className="grow">{children}</div>
+        <button type="button" className="btn btn-ghost btn-sm pointer-only" aria-label="Delete event" onClick={onDelete}>
+          ✕
+        </button>
+      </div>
+    </SwipeToDelete>
+  );
 }
 
 /** Create-event form. Kept to the fields you actually know when a race is booked. */

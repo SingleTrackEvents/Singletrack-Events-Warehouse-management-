@@ -74,7 +74,7 @@ export default function ReturnsScreen() {
 
   if (!event || !list) {
     return (
-      <Screen title="Home" back="-1">
+      <Screen title="Count it home" back="-1">
         <p className="muted">Loading…</p>
       </Screen>
     );
@@ -82,7 +82,7 @@ export default function ReturnsScreen() {
 
   if (!list.lines.length) {
     return (
-      <Screen title="Home" subtitle={event.name} back={`/events/${event.id}`}>
+      <Screen title="Count it home" subtitle={event.name} back={`/events/${event.id}`}>
         <EmptyState
           glyph="🏠"
           title="Nothing has gone out yet"
@@ -108,7 +108,7 @@ export default function ReturnsScreen() {
   const percent = list.lines.length ? Math.round((home / list.lines.length) * 100) : 0;
 
   return (
-    <Screen title="Home" subtitle={event.name} back={`/events/${event.id}`}>
+    <Screen title="Count it home" subtitle={event.name} back={`/events/${event.id}`}>
       <div className="card card-pad mb-3">
         <div className="spread mb-2">
           <span className="strong">
@@ -261,7 +261,7 @@ function HomeRow({
           <span className="row-body">
             <span className="row-title truncate">{line.item?.name ?? 'Unknown item'}</span>
             <span className="row-sub">
-              {line.item?.bin || 'no bin'} · sent {formatQty(line.sent, unit)} · {plural(line.going.length, 'station')}
+              {line.item?.bin ? `Shelf ${line.item.bin} · ` : ''}sent {formatQty(line.sent, unit)} · {plural(line.going.length, 'station')}
             </span>
           </span>
           <span className="row-end stack-sm" style={{ alignItems: 'flex-end' }}>

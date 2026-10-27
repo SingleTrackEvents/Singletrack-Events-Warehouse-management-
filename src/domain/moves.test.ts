@@ -108,8 +108,9 @@ describe('moveProgress', () => {
     expect(moveProgress(lines, 'truck', true)).toEqual({ done: 1, total: 3, percent: 33, short: 2, remaining: 7 });
   });
 
-  it('reads planned lines as done once they exist', () => {
-    expect(moveProgress([line(), line()], 'plan', true).percent).toBe(100);
+  it('reads a list nobody has started as not packed, not as done', () => {
+    // A full green bar on every untouched station read as "everyone's finished".
+    expect(moveProgress([line(), line()], 'plan', true).percent).toBe(0);
     expect(moveProgress([], 'plan', true).percent).toBe(0);
   });
 });

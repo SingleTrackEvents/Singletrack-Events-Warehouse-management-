@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Screen } from '../App';
 import { ConfirmSheet, EmptyState, Field, Pill, Sheet, Stepper } from '../components/ui';
 import { ItemPicker } from '../components/ItemPicker';
@@ -22,21 +22,25 @@ import {
   applyPlanToPacklists,
   addPlanItems,
   copyRuleForRace,
+  copyRulesToStations,
   dayLabel,
   dayShort,
   eventDays,
   lineQtyByDay,
   parseAmount,
+  planCopyToStations,
   sortDays,
   stationRunners,
   stationRunnersByDay,
   stationVisits,
+  suggestedPerRunner,
   totalsToOrder,
 } from '../domain/consumption';
+import type { CopyPlan } from '../domain/consumption';
 import { downloadCsv, slugify } from '../domain/backup';
 import { addShortfalls } from '../domain/shopping';
 import { DESTINATION_ICONS, formatQty, plural } from '../domain/format';
-import type { ConsumptionLine, Destination, Race, RaceEvent, RaceVisit } from '../db/types';
+import type { ConsumptionLine, Destination, Item, Race, RaceEvent, RaceVisit } from '../db/types';
 
 /**
  * The food plan: projections in, shopping list and aid station quantities out.
@@ -49,6 +53,7 @@ import type { ConsumptionLine, Destination, Race, RaceEvent, RaceVisit } from '.
  */
 export default function FoodScreen() {
   const { eventId } = useParams();
+  const navigate = useNavigate();
   const toast = useToast();
   const crew = useCrewName();
   const { session } = useSession();
@@ -59,9 +64,13 @@ export default function FoodScreen() {
   const items = useItems();
 
   const [addingRace, setAddingRace] = useState(false);
+  const [renamingRace, setRenamingRace] = useState<Race>();
   const [removingRace, setRemovingRace] = useState<Race>();
   const [linkingRaces, setLinkingRaces] = useState<Destination>();
   const [addingItems, setAddingItems] = useState<Destination>();
+  // Picked items waiting for their amounts, before anything is written.
+  const [amountsFor, setAmountsFor] = useState<{ destination: Destination; items: Item[] }>();
+  const [copying, setCopying] = useState<{ destination: Destination; plan: CopyPlan }>();
   const [editingLine, setEditingLine] = useState<ConsumptionLine>();
   const [applying, setApplying] = useState(false);
   const [working, setWorking] = useState(false);
@@ -102,14 +111,15 @@ export default function FoodScreen() {
       .join(', ');
 
   const runnersLabel = (destination: Destination) => {
-    if (!hasDays) return `${stationRunners(destination, races ?? [])} through`;
+    if (!hasDays) return `${stationRunners(destination, races ?? [])} runners through`;
     const byDay = stationRunnersByDay(destination, races ?? []);
-    if (!byDay.length) return '0 through';
-    return byDay.map(([day, runners]) => `${dayShort(day)} ${runners}`).join(' · ');
+    if (!byDay.length) return 'No runners through yet';
+    // "Sun: 400 runners", not "Sun 400": a bare number by a day read as a code.
+    return byDay.map(([day, runners]) => `${dayShort(day)}: ${runners} runners`).join(' · ');
   };
 
   const splitLabel = (byDay: Array<[string | null, number]>) =>
-    byDay.map(([day, qty]) => `${dayShort(day)} ${qty}`).join(' · ');
+    byDay.map(([day, qty]) => `${dayShort(day)}: ${qty}`).join(' · ');
 
   const exportOrder = () => {
     const dayColumns = hasDays ? days.map((day) => dayLabel(day)) : [];
@@ -145,12 +155,12 @@ export default function FoodScreen() {
     }
     setApplying(false);
     if (!result.stations) {
-      toast('Nothing to send yet — the plan computes to zero', 'warn');
+      toast('Nothing to add yet: the plan works out to zero', 'warn');
       return;
     }
     toast(
-      `${plural(result.stations, 'packlist')} updated` +
-        (result.created ? `, ${result.created} created` : ''),
+      `${plural(result.stations, 'packing list')} updated` +
+        (result.created ? `, ${result.created} new` : ''),
     );
   };
 
@@ -160,12 +170,17 @@ export default function FoodScreen() {
   /**
    * Send the shortfalls to the shopping list, tagged with this event. Safe to
    * tap again after a projection moves: the plan's lines are set to today's
-   * figures rather than topped up.
+   * figures rather than topped up. Then go to the list, because in testing
+   * people tapped this and were left wondering where the items had gone.
    */
   const toShoppingList = async () => {
     setListing(true);
-    const result = await addShortfalls(event.id, totals, crew);
-    setListing(false);
+    let result;
+    try {
+      result = await addShortfalls(event.id, totals, crew);
+    } finally {
+      setListing(false);
+    }
     const changed = result.added + result.updated;
     toast(
       changed
@@ -173,6 +188,20 @@ export default function FoodScreen() {
         : 'The shopping list already has these figures',
       changed ? 'ok' : 'warn',
     );
+    navigate('/shopping');
+  };
+
+  /** Work out the copy first, so the confirm can say how many it adds where. */
+  const askToCopy = (destination: Destination) => {
+    const plan = planCopyToStations(destination, destinations ?? [], lines ?? [], races ?? []);
+    if (!plan.rules.length) {
+      toast(
+        'Nothing to copy: every other aid station with races already has these items, or has no races yet',
+        'warn',
+      );
+      return;
+    }
+    setCopying({ destination, plan });
   };
 
   return (
@@ -190,7 +219,7 @@ export default function FoodScreen() {
           <EmptyState
             glyph="🏃"
             title="No races yet"
-            body="Add each distance and its projected field. Every aid station quantity is worked out from these numbers."
+            body="Add each distance and how many runners you expect. Every aid station amount is worked out from these numbers."
             action={
               <button type="button" className="btn btn-primary" onClick={() => setAddingRace(true)}>
                 Add a race
@@ -222,18 +251,26 @@ export default function FoodScreen() {
                     ))}
                   </select>
                 ) : (
-                  <span className="row-sub">projected starters</span>
+                  <span className="row-sub">expected runners</span>
                 )}
               </span>
               <span className="row-end">
                 <Stepper
-                  label={`${race.name} projection`}
+                  label={`${race.name} expected runners`}
                   value={race.projection}
                   min={0}
                   step={5}
                   onChange={(next) => void update(db.races, race.id, { projection: next })}
                 />
               </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                aria-label={`Rename ${race.name}`}
+                onClick={() => setRenamingRace(race)}
+              >
+                ✎
+              </button>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -249,7 +286,7 @@ export default function FoodScreen() {
               <span className="row-body">
                 <span className="row-title">Total</span>
               </span>
-              <span className="row-end strong">{projected} runners</span>
+              <span className="row-end strong">{projected} expected runners</span>
             </div>
           ) : null}
         </div>
@@ -270,7 +307,7 @@ export default function FoodScreen() {
         {destinations && !destinations.length ? (
           <EmptyState
             glyph="⛺"
-            title="No destinations yet"
+            title="No stations yet"
             body="Add the aid stations on the event page first, then plan what each one feeds."
             action={
               <Link className="btn btn-primary" to={`/events/${event.id}`}>
@@ -311,7 +348,7 @@ export default function FoodScreen() {
                     line.perRunner > 0
                       ? `${trimRatio(line.perRunner)} per ${scope ? `${scope} ` : ''}runner`
                       : null,
-                    line.flatQty > 0 ? `${formatQty(line.flatQty, item.unit)} flat` : null,
+                    line.flatQty > 0 ? `fixed amount ${formatQty(line.flatQty, item.unit)}` : null,
                   ].filter(Boolean);
                   const byDay = lineQtyByDay(line, destination, races ?? []);
                   const total = byDay.reduce((sum, [, qty]) => sum + qty, 0);
@@ -327,7 +364,7 @@ export default function FoodScreen() {
                           {item.name}
                           {scope ? <span className="muted"> · {scope}</span> : null}
                         </span>
-                        <span className="row-sub">{parts.join(' + ') || 'No rule yet — tap to set'}</span>
+                        <span className="row-sub">{parts.join(' + ') || 'No amount yet. Tap to set one'}</span>
                       </span>
                       <span className="row-end">
                         <span className="strong">{formatQty(total, item.unit)}</span>
@@ -342,13 +379,24 @@ export default function FoodScreen() {
                 })}
               </div>
 
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm mt-2"
-                onClick={() => setAddingItems(destination)}
-              >
-                + Add items
-              </button>
+              <div className="btn-row mt-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setAddingItems(destination)}
+                >
+                  + Add items
+                </button>
+                {stationLines.length && destination.type === 'aid_station' ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => askToCopy(destination)}
+                  >
+                    ⧉ Copy to all stations
+                  </button>
+                ) : null}
+              </div>
             </div>
           );
         })}
@@ -415,7 +463,7 @@ export default function FoodScreen() {
             disabled={working}
             onClick={() => setApplying(true)}
           >
-            Send quantities to packlists
+            Add the food to each station&rsquo;s packing list
           </button>
         </div>
       ) : null}
@@ -425,10 +473,19 @@ export default function FoodScreen() {
         <RaceSheet event={event} existing={races ?? []} onClose={() => setAddingRace(false)} />
       ) : null}
 
+      {renamingRace ? (
+        <RaceSheet
+          event={event}
+          existing={races ?? []}
+          race={renamingRace}
+          onClose={() => setRenamingRace(undefined)}
+        />
+      ) : null}
+
       {removingRace ? (
         <ConfirmSheet
           title={`Remove the ${removingRace.name}?`}
-          body="Stations linked to it fall back to their other races, and rules written for it alone go with it. Nothing on any packlist changes until quantities are sent again."
+          body="Stations linked to it fall back to their other races, and amounts set for it alone go with it. Nothing on any packing list changes until the food is added to them again."
           confirmLabel="Remove"
           tone="danger"
           onCancel={() => setRemovingRace(undefined)}
@@ -472,15 +529,53 @@ export default function FoodScreen() {
             .map((line) => line.itemId)}
           onClose={() => setAddingItems(undefined)}
           onPick={(picks) => {
-            const destination = addingItems;
+            // The picker's numbers are only "picked"; the amount is asked for
+            // next, per runner, where a number means something.
+            setAmountsFor({ destination: addingItems, items: picks.map((pick) => pick.item) });
             setAddingItems(undefined);
-            void addPlanItems(
-              event.id,
-              destination.id,
-              picks.map((pick) => ({ itemId: pick.item.id, qty: pick.qty })),
-            ).then((added) => {
-              toast(`${plural(added, 'item')} added — tap a line to set its per-runner rule`);
+          }}
+        />
+      ) : null}
+
+      {amountsFor ? (
+        <AmountsSheet
+          destination={amountsFor.destination}
+          items={amountsFor.items}
+          runners={stationRunners(amountsFor.destination, races ?? [])}
+          onClose={() => setAmountsFor(undefined)}
+          onSave={(picks) => {
+            const destination = amountsFor.destination;
+            setAmountsFor(undefined);
+            void addPlanItems(event.id, destination.id, picks).then((added) => {
+              toast(`${plural(added, 'item')} added to ${destination.name}`);
             });
+          }}
+        />
+      ) : null}
+
+      {copying ? (
+        <ConfirmSheet
+          title={`Copy to ${plural(copying.plan.stations.length, 'station')}?`}
+          body={
+            <>
+              {plural(copying.plan.rules.length, 'food amount')} from {copying.destination.name} go to{' '}
+              {copying.plan.stations.map((station) => station.name).join(', ')}. Stations that already have an
+              item keep their own amount for it. Only aid stations with races through them are included.
+            </>
+          }
+          confirmLabel="Copy"
+          onCancel={() => setCopying(undefined)}
+          onConfirm={() => {
+            const source = copying.destination;
+            setCopying(undefined);
+            void copyRulesToStations(source).then((result) =>
+              toast(
+                result.rules
+                  ? `${plural(result.rules, 'food amount')} copied to ${plural(result.stations, 'station')}`
+                  : 'Nothing new to copy',
+                result.rules ? 'ok' : 'warn',
+              ),
+            );
           }}
         />
       ) : null}
@@ -503,16 +598,16 @@ export default function FoodScreen() {
 
       {applying ? (
         <ConfirmSheet
-          title="Send quantities to packlists?"
+          title="Add the food to each station's packing list?"
           body={
             <>
-              Each station&rsquo;s computed quantities become the required amounts on its packlist —
-              a packlist is created where a station has none. Planned items are set to today&rsquo;s
-              numbers{hasDays ? ', with the day split written into the line note' : ''}; anything
-              added to a packlist by hand is left alone. Safe to run again after a projection changes.
+              Each station&rsquo;s food amounts become what its packing list needs. A station with no
+              packing list gets one. Food items are set to today&rsquo;s numbers
+              {hasDays ? ', with the split by day written in the item note' : ''}. Anything added to a
+              packing list by hand is left alone. Safe to do again after the expected runners change.
             </>
           }
-          confirmLabel={working ? 'Sending…' : 'Send'}
+          confirmLabel={working ? 'Adding…' : 'Add'}
           onCancel={() => setApplying(false)}
           onConfirm={() => void apply()}
         />
@@ -527,22 +622,28 @@ function trimRatio(value: number): string {
   return String(Math.round(value * 100000) / 100000);
 }
 
-/** Add a race distance, its projected field and the day it runs. */
+/**
+ * Add a race distance, its expected runners and the day it runs, or change
+ * them on one already there. Renaming in place keeps every station's link and
+ * every amount set for the race, which deleting and adding it again lost.
+ */
 function RaceSheet({
   event,
   existing,
+  race,
   onClose,
 }: {
   event: RaceEvent;
   existing: Race[];
+  race?: Race;
   onClose: () => void;
 }) {
   const toast = useToast();
   const dayOptions = eventDays(event);
-  const [name, setName] = useState('');
-  const [projection, setProjection] = useState(100);
+  const [name, setName] = useState(race?.name ?? '');
+  const [projection, setProjection] = useState(race?.projection ?? 100);
   // A one-day event needs no asking; a weekend leaves it open until told.
-  const [day, setDay] = useState(dayOptions.length === 1 ? dayOptions[0] : '');
+  const [day, setDay] = useState(race ? (race.day ?? '') : dayOptions.length === 1 ? dayOptions[0] : '');
   // One race per tap on Add, however fast the second tap comes.
   const saving = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -552,24 +653,28 @@ function RaceSheet({
     saving.current = true;
     setBusy(true);
     try {
-      await create(db.races, {
-        eventId: event.id,
-        name: name.trim(),
-        projection,
-        sort: nextSort(existing),
-        day: day || null,
-      });
+      if (race) {
+        await update(db.races, race.id, { name: name.trim(), projection, day: day || null });
+      } else {
+        await create(db.races, {
+          eventId: event.id,
+          name: name.trim(),
+          projection,
+          sort: nextSort(existing),
+          day: day || null,
+        });
+      }
     } finally {
       saving.current = false;
       setBusy(false);
     }
-    toast('Race added');
+    toast(race ? 'Race saved' : 'Race added');
     onClose();
   };
 
   return (
     <Sheet
-      title="New race"
+      title={race ? `Change ${race.name}` : 'New race'}
       onClose={onClose}
       footer={
         <>
@@ -582,7 +687,7 @@ function RaceSheet({
             disabled={!name.trim() || busy}
             onClick={() => void save()}
           >
-            Add
+            {race ? 'Save' : 'Add'}
           </button>
         </>
       }
@@ -600,10 +705,10 @@ function RaceSheet({
             />
           )}
         </Field>
-        <Field label="Projected starters" hint="A projection is fine — it can move any time and the plan follows.">
+        <Field label="Expected runners" hint="A best guess is fine. Change it any time and the plan follows.">
           {(id) => (
             <span id={id}>
-              <Stepper label="projected starters" value={projection} min={0} step={5} onChange={setProjection} />
+              <Stepper label="expected runners" value={projection} min={0} step={5} onChange={setProjection} />
             </span>
           )}
         </Field>
@@ -622,6 +727,140 @@ function RaceSheet({
           </Field>
         ) : null}
       </div>
+    </Sheet>
+  );
+}
+
+/** How one picked item's amount is being given. */
+type AmountKind = 'perRunner' | 'fixed';
+
+/**
+ * How much of each picked item the station needs, asked straight after
+ * picking.
+ *
+ * Per runner first, because that is what makes the plan follow the field:
+ * in testing, items added as a bare number stayed at that number, and a
+ * station planned for 400 runners got one can of Coke. Common items open on
+ * a suggested amount to correct rather than a blank box. A fixed amount is
+ * the second choice, for the things that do not change with runners.
+ */
+function AmountsSheet({
+  destination,
+  items,
+  runners,
+  onClose,
+  onSave,
+}: {
+  destination: Destination;
+  items: Item[];
+  runners: number;
+  onClose: () => void;
+  onSave: (picks: Array<{ itemId: string; perRunner?: number; qty?: number }>) => void;
+}) {
+  const [kinds, setKinds] = useState<Record<string, AmountKind>>({});
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      items.map((item) => {
+        const suggestion = suggestedPerRunner(item);
+        return [item.id, suggestion === null ? '' : String(suggestion)];
+      }),
+    ),
+  );
+
+  const kindOf = (item: Item): AmountKind => kinds[item.id] ?? 'perRunner';
+  const parsedOf = (item: Item) => parseAmount(values[item.id] ?? '');
+  const problems = items.filter((item) => 'error' in parsedOf(item));
+
+  const save = () => {
+    if (problems.length) return;
+    onSave(
+      items.map((item) => {
+        const parsed = parsedOf(item);
+        const value = 'value' in parsed ? (parsed.value ?? 0) : 0;
+        return kindOf(item) === 'perRunner' ? { itemId: item.id, perRunner: value } : { itemId: item.id, qty: value };
+      }),
+    );
+  };
+
+  return (
+    <Sheet
+      title={`How much at ${destination.name}?`}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" disabled={Boolean(problems.length)} onClick={save}>
+            Add {plural(items.length, 'item')}
+          </button>
+        </>
+      }
+    >
+      <p className="small muted mb-2">
+        {runners
+          ? `${runners} expected runners come through here. `
+          : 'No races are linked to this station yet, so per-runner amounts work out to nothing until they are. '}
+        Suggested amounts are starting points: change them to what your last event used.
+      </p>
+      {items.map((item) => {
+        const kind = kindOf(item);
+        const parsed = parsedOf(item);
+        const value = 'value' in parsed ? (parsed.value ?? 0) : 0;
+        const suggestion = suggestedPerRunner(item);
+        const preview = kind === 'perRunner' ? Math.ceil(Math.round(value * runners * 100) / 100) : value;
+        const inputId = `amount-${item.id}`;
+        return (
+          <div key={item.id} className="plan-amount-row">
+            <label className="strong" htmlFor={inputId}>
+              {item.name}
+            </label>
+            <div className="chip-row-inline">
+              <button
+                type="button"
+                className="chip"
+                aria-pressed={kind === 'perRunner'}
+                onClick={() => setKinds((current) => ({ ...current, [item.id]: 'perRunner' }))}
+              >
+                Per runner
+              </button>
+              <button
+                type="button"
+                className="chip"
+                aria-pressed={kind === 'fixed'}
+                onClick={() => setKinds((current) => ({ ...current, [item.id]: 'fixed' }))}
+              >
+                Fixed amount
+              </button>
+            </div>
+            <input
+              id={inputId}
+              className="input"
+              inputMode="decimal"
+              autoComplete="off"
+              value={values[item.id] ?? ''}
+              placeholder={kind === 'perRunner' ? '0.2' : '1'}
+              aria-invalid={'error' in parsed ? true : undefined}
+              onChange={(changed) => setValues((current) => ({ ...current, [item.id]: changed.target.value }))}
+            />
+            {'error' in parsed ? (
+              <span className="small" style={{ color: 'var(--danger)' }}>
+                {parsed.error}. Use a number like 0.2 or 1,5.
+              </span>
+            ) : (
+              <span className="tiny muted">
+                {kind === 'perRunner'
+                  ? `${formatQty(preview, item.unit)} for ${runners} runners${
+                      suggestion !== null && String(suggestion) === (values[item.id] ?? '').trim()
+                        ? '. Suggested, check it'
+                        : ''
+                    }`
+                  : `${formatQty(preview, item.unit)} whatever the runners`}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </Sheet>
   );
 }
@@ -684,7 +923,7 @@ function StationRacesSheet({
             <span className="row-body">
               <span className="row-title">{race.name}</span>
               <span className="row-sub">
-                {race.projection} projected{race.day ? ` · ${dayLabel(race.day)}` : ''}
+                {race.projection} expected runners{race.day ? ` · ${dayLabel(race.day)}` : ''}
               </span>
             </span>
             <span className="row-end">
@@ -814,7 +1053,7 @@ function LineSheet({
         ) : null}
         <Field
           label="Per runner"
-          hint="Units of this item per runner — 0.2 means one between five. Leave 0 for things that don't scale."
+          hint="How much one runner takes: 0.2 means one between five. Leave it blank for things that don't change with runners."
         >
           {(id) => (
             <input
@@ -833,10 +1072,10 @@ function LineSheet({
             {ratioError}. Use a number like 0.2 or 1,5.
           </p>
         ) : null}
-        <Field label="Flat amount" hint="Supplied regardless of numbers — the salt shaker, the tea box.">
+        <Field label="Fixed amount" hint="The same however many runners come: the salt shaker, the tea box.">
           {(id) => (
             <span id={id}>
-              <Stepper label="flat amount" value={flatQty} min={0} onChange={setFlatQty} />
+              <Stepper label="fixed amount" value={flatQty} min={0} onChange={setFlatQty} />
             </span>
           )}
         </Field>
@@ -852,7 +1091,7 @@ function LineSheet({
           <div className="card card-pad">
             <p className="small strong">Another rule for a different race</p>
             <p className="tiny muted mb-2">
-              Starts from this ratio, without the flat amount, so a shaker is not doubled.
+              Starts from this per-runner amount, without the fixed amount, so a shaker is not doubled.
             </p>
             <div className="row-flex">
               <select

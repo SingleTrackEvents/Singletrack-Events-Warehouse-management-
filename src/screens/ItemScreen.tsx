@@ -25,6 +25,8 @@ import {
 import { formatDateTime, formatQty, formatQtyDetail } from '../domain/format';
 import { addShoppingLine, inputForItem, restockQty, shopsUsed } from '../domain/shopping';
 import { useShoppingLines } from '../hooks/useDb';
+import { eventShortfallsFor } from '../domain/missing';
+import { parseAmount } from '../domain/consumption';
 import type { MovementReason, Unit } from '../db/types';
 import { UNITS, unitHasPackSize } from '../db/types';
 import { PackSizeField } from '../components/PackSizeField';
@@ -301,7 +303,7 @@ export default function ItemScreen() {
           unit={item.unit}
           onClose={() => setCounting(false)}
           onSave={(value) => {
-            void setQuantity(item.id, value, 'stocktake', { by: crew, note: 'Spot count' }).then(() =>
+            void setQuantity(item.id, value, 'stocktake', { by: crew, note: 'Spot count', keepZero: true }).then(() =>
               toast('Count recorded'),
             );
             setCounting(false);
@@ -496,9 +498,15 @@ function AdjustSheet({
 /**
  * Put this item on the shopping list.
  *
- * Opens on enough to get back above the reorder point, which is the usual
- * reason for standing on this screen; the shop is optional and offered from
- * the ones the list already uses. Adding again tops the open line up.
+ * If an upcoming event is short of the item, that shortfall is offered
+ * first: someone opening this because Buffalo is three tables short wants to
+ * buy three for Buffalo, not the 41 that would fill the warehouse back to its
+ * reorder point. Both are offered as chips, and the amount can be typed. The
+ * button always says the amount it will add, as typed, so nobody adds 41
+ * after typing 3. A line for an event is tagged with it, the way a packing
+ * list's shortfall is; a restock line is the warehouse's. The shop is
+ * optional and offered from the ones the list already uses. Adding again
+ * tops the open line up.
  */
 function ShopSheet({
   itemName,
@@ -517,8 +525,52 @@ function ShopSheet({
   onClose: () => void;
   onSave: (qty: number, shop: string) => void;
 }) {
-  const [qty, setQty] = useState(suggested);
+  const { itemId } = useParams();
+  const item = useItem(itemId);
+  const crew = useCrewName();
+  const toast = useToast();
+  const shortfalls = useLiveQuery(async () => (itemId ? eventShortfallsFor(itemId) : []), [itemId]);
+  const soonest = shortfalls?.[0];
+  // Which suggestion the amount came from. Null once someone types their own.
+  const [chosen, setChosen] = useState<'event' | 'restock' | null>(null);
+  const [typed, setTyped] = useState<string | null>(null);
   const [shop, setShop] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Until someone picks or types, the sheet follows the best suggestion,
+  // which may arrive a moment after it opens.
+  const mode = chosen ?? (soonest ? 'event' : 'restock');
+  const suggestedQty = mode === 'event' && soonest ? soonest.qty : suggested;
+  const parsed = typed === null ? { value: suggestedQty } : parseAmount(typed);
+  const qty = 'value' in parsed ? (parsed.value ?? 0) : 0;
+  const problem = 'error' in parsed ? parsed.error : undefined;
+  const forEvent = mode === 'event' && soonest ? soonest.event : undefined;
+
+  const pick = (next: 'event' | 'restock') => {
+    setChosen(next);
+    setTyped(null);
+  };
+
+  const save = () => {
+    if (qty <= 0 || problem || saving) return;
+    if (!forEvent || !item) {
+      onSave(qty, shop.trim());
+      return;
+    }
+    setSaving(true);
+    void addShoppingLine(
+      inputForItem(item, qty, { shop: shop.trim(), eventId: forEvent.id, source: 'packlist', by: crew }),
+    )
+      .then(({ line, merged }) => {
+        toast(
+          merged
+            ? `Shopping list now says ${formatQty(line.qty, line.unit)} for ${forEvent.name}`
+            : `${formatQty(qty, unit)} ${itemName} put on the shopping list for ${forEvent.name}`,
+        );
+        onClose();
+      })
+      .finally(() => setSaving(false));
+  };
 
   return (
     <Sheet
@@ -529,7 +581,12 @@ function ShopSheet({
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" disabled={qty <= 0} onClick={() => onSave(qty, shop.trim())}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={qty <= 0 || Boolean(problem) || saving}
+            onClick={save}
+          >
             Add {formatQty(qty, unit)}
           </button>
         </>
@@ -542,11 +599,51 @@ function ShopSheet({
             <span className="muted"> · {formatQty(alreadyListed, unit)} already on the list, this tops it up</span>
           ) : null}
         </p>
-        <Field label="How many" hint={`Counted in ${unit}. Opens on enough to get back to the reorder point.`}>
+        <Field
+          label="How many"
+          hint={
+            forEvent
+              ? `Counted in ${unit}. For ${forEvent.name}, so the list says which event it is for.`
+              : `Counted in ${unit}. For the warehouse, not one event.`
+          }
+        >
           {(id) => (
-            <span id={id}>
-              <Stepper label="quantity to buy" value={qty} min={0} onChange={setQty} />
-            </span>
+            <>
+              <input
+                id={id}
+                className="input"
+                inputMode="decimal"
+                autoComplete="off"
+                value={typed ?? String(suggestedQty)}
+                aria-invalid={problem ? true : undefined}
+                onChange={(event) => setTyped(event.target.value)}
+              />
+              <div className="chip-row-inline mt-2">
+                {soonest ? (
+                  <button
+                    type="button"
+                    className="chip"
+                    aria-pressed={typed === null && mode === 'event'}
+                    onClick={() => pick('event')}
+                  >
+                    {formatQty(soonest.qty, unit)} short for {soonest.event.name}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="chip"
+                  aria-pressed={typed === null && mode === 'restock'}
+                  onClick={() => pick('restock')}
+                >
+                  {formatQty(suggested, unit)} to get back to the reorder point
+                </button>
+              </div>
+              {problem ? (
+                <p className="small mt-2" style={{ color: 'var(--danger)' }}>
+                  {problem}. Type a number like 3.
+                </p>
+              ) : null}
+            </>
           )}
         </Field>
         <Field label="Shop or supplier" hint="Leave blank for anywhere.">
@@ -606,8 +703,10 @@ function CountSheet({
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" disabled={delta === 0} onClick={() => onSave(value)}>
-            Save count
+          {/* Saving the number the system already has is a real answer: it
+              says someone looked, and an empty shelf counted as 0 is counted. */}
+          <button type="button" className="btn btn-primary" onClick={() => onSave(value)}>
+            {delta === 0 ? 'Yes, that is right' : 'Save count'}
           </button>
         </>
       }
@@ -618,7 +717,7 @@ function CountSheet({
       </p>
       <div className="center mb-3">
         <div style={{ display: 'inline-block' }}>
-          <Stepper value={value} onChange={setValue} label={`count in ${unit}`} />
+          <Stepper value={value} onChange={setValue} label={`count in ${unit}`} live whole={unit !== 'kg' && unit !== 'litre'} />
         </div>
       </div>
       <p className="center small">

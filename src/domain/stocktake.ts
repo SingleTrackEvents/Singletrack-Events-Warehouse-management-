@@ -371,7 +371,9 @@ export async function uncountedSummary(): Promise<UncountedSummary | null> {
   return {
     href: '/stocktake',
     title:
-      never.length === 1 ? 'One item has never been counted' : `${never.length} items have never been counted`,
+      never.length === 1
+        ? 'One item in the warehouse has never been counted'
+        : `${never.length} items in the warehouse have never been counted`,
     detail: 'Count them so low stock means low stock',
     remaining: never.length,
     stocktakeId: null,

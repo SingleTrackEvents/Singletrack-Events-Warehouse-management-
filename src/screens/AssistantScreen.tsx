@@ -272,7 +272,7 @@ function NoteSheet({
           {(id) => (
             <select id={id} className="select" value={where} onChange={(event) => setWhere(event.target.value as NoteWhere)}>
               <option value="everywhere">Every list</option>
-              <option value="type">One kind of destination</option>
+              <option value="type">One kind of station</option>
               {events.length ? <option value="event">One event</option> : null}
             </select>
           )}
@@ -291,7 +291,7 @@ function NoteSheet({
           </Field>
         ) : null}
         {where === 'type' ? (
-          <Field label="Kind of destination">
+          <Field label="Kind of station">
             {(id) => (
               <select
                 id={id}
