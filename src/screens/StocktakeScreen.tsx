@@ -112,7 +112,7 @@ export default function StocktakeScreen() {
                     <span className="row-title">{stocktake.name}</span>
                     <span className="row-sub">
                       {formatDateTime(stocktake.completedAt ?? stocktake.createdAt)}
-                      {summary ? ` · ${plural(summary.discrepancies, 'discrepancy', 'discrepancies')}` : ''}
+                      {summary ? ` · ${plural(summary.discrepancies, 'item')} different` : ''}
                     </span>
                   </span>
                   <Pill tone={stocktake.status === 'completed' ? 'ok' : 'default'}>
@@ -138,8 +138,8 @@ export default function StocktakeScreen() {
               {plural(removing.summary.counts, 'count line')} go with it.
               {removing.summary.corrections ? (
                 <div className="mt-2">
-                  The {plural(removing.summary.corrections, 'correction')} it already applied stay on
-                  the stock ledger — that is the record of what was on the shelf, and tidying old
+                  The {plural(removing.summary.corrections, 'count change')} it already made stay in each
+                  item's stock history: that is the record of what was on the shelf, and tidying old
                   counts away is no reason to rewrite it.
                 </div>
               ) : null}
