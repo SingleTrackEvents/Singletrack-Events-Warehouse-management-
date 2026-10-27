@@ -157,6 +157,10 @@ export default function EventDetailScreen() {
         </div>
         {event.notes ? <p className="small">{event.notes}</p> : null}
         <div className="btn-grid mt-3">
+          {/* The question a planner opens the event with comes first. */}
+          <Link className="btn btn-primary btn-sm" to={`/events/${event.id}/missing`}>
+            ❓ What's missing
+          </Link>
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/warehouse`}>
             📦 Warehouse list
           </Link>
@@ -166,7 +170,7 @@ export default function EventDetailScreen() {
             </Link>
           ) : null}
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/home`}>
-            🏠 Home
+            🏠 Count it home
           </Link>
           <Link className="btn btn-outline btn-sm" to={`/events/${event.id}/food`}>
             🍌 Food plan

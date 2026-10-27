@@ -78,7 +78,9 @@ export default function VansScreen() {
       <section className="section">
         <div className="section-head">
           <h2>Van packs</h2>
-          <span className="small muted">in the order they leave</span>
+          <Link to={`/events/${event.id}/vans/sheet`} className="small">
+            🖨 Van sheets
+          </Link>
         </div>
         <div className="list">
           {remainder.vans.map((van) => {
