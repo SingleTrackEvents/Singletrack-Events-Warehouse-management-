@@ -384,7 +384,7 @@ describe('the counting still to do', () => {
     // A shelf confirmed empty is counted, even though it writes no movement.
     await recordCount((await lineFor(stocktake.id, cubes.id)).id, 0);
     await completeStocktake(stocktake);
-    expect((await uncountedSummary())?.title).toBe('One item has never been counted');
+    expect((await uncountedSummary())?.title).toBe('One item in the warehouse has never been counted');
   });
 
   it('has nothing to say once everything has been counted', async () => {
