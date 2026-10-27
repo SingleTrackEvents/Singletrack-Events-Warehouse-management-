@@ -92,7 +92,7 @@ export interface AccessOption {
 /** In the order the invite sheet lists them: the station first, the warehouse last. */
 export const ACCESS_OPTIONS: AccessOption[] = [
   { key: 'receive', label: 'Record what arrived', hint: 'Tick off deliveries and returns at the station.' },
-  { key: 'pack', label: 'Pack and edit packlists', hint: 'Tick lines packed, add and change lines.' },
+  { key: 'pack', label: 'Pack and change packing lists', hint: 'Tick items packed, add and change items.' },
   { key: 'deliver', label: 'Transport: confirm deliveries', hint: 'See the loads and sign them off on the road.' },
   { key: 'loads', label: 'Transport: plan loads', hint: 'Build and change the truck and van loads.' },
   { key: 'catalogue', label: 'See the stock catalogue', hint: 'Items, categories and templates, read only.' },

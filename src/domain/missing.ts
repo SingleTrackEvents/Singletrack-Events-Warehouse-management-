@@ -3,7 +3,7 @@ import { alive, liveWhere } from '../db/repo';
 import type { Destination, Item, Packlist, PacklistLine, RaceEvent } from '../db/types';
 import { loadFoodPlan, totalsToOrder } from './consumption';
 import type { FoodTotal } from './consumption';
-import { localIsoDate } from './format';
+import { lastOpenedEvent, localIsoDate } from './format';
 import { addEventShortfalls } from './shopping';
 import type { EventWant, FeedResult } from './shopping';
 import { round2 } from './stock';
@@ -176,7 +176,8 @@ export interface EventShortfall {
 }
 
 /**
- * The upcoming events that are short of one item, soonest first.
+ * The upcoming events that are short of one item: the event last opened
+ * first, then soonest first.
  *
  * Used where someone is about to buy the item: if Buffalo is three short,
  * three is the number to buy for Buffalo, whatever the reorder point says.
@@ -187,7 +188,9 @@ export interface EventShortfall {
 export async function eventShortfallsFor(itemId: string, today = localIsoDate()): Promise<EventShortfall[]> {
   const events = alive(await db.events.toArray())
     .filter((event) => event.status !== 'closed' && (event.endDate || event.startDate) >= today)
-    .sort((a, b) => a.startDate.localeCompare(b.startDate));
+    // The event being worked on comes first: planning Wilsons Prom, the
+    // item page should not offer to buy for GPT100 because it is sooner.
+    .sort((a, b) => Number(b.id === lastOpenedEvent()) - Number(a.id === lastOpenedEvent()) || a.startDate.localeCompare(b.startDate));
   const listed = alive(await db.shoppingLines.where('itemId').equals(itemId).toArray()).filter(
     (line) => !line.bookedAt,
   );

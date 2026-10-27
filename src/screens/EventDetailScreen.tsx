@@ -206,7 +206,7 @@ export default function EventDetailScreen() {
             body="Add each aid station, the event village and any water drops."
             action={
               <button type="button" className="btn btn-primary" onClick={() => setAddingDestination(true)}>
-                Add a destination
+                Add a station
               </button>
             }
           />
@@ -291,7 +291,7 @@ export default function EventDetailScreen() {
           <div className="section-head">
             <h2>Manage</h2>
             <Link to={`/events/${event.id}/units`} className="small">
-              🏷️ Units
+              🏷️ Starlinks, batteries and other units
             </Link>
           </div>
           <div className="list">

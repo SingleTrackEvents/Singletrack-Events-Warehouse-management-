@@ -22,7 +22,7 @@ export const SHOPPING_SOURCE_LABELS: Record<ShoppingSource, string> = {
   hand: 'added by hand',
   food_plan: 'from the food plan',
   low_stock: 'below reorder point',
-  packlist: 'short while packing',
+  packlist: 'short for the event',
 };
 
 /** What a new line needs. Anything not given takes a sensible blank. */

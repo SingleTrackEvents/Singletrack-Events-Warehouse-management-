@@ -111,14 +111,15 @@ export default function FoodScreen() {
       .join(', ');
 
   const runnersLabel = (destination: Destination) => {
-    if (!hasDays) return `${stationRunners(destination, races ?? [])} through`;
+    if (!hasDays) return `${stationRunners(destination, races ?? [])} runners through`;
     const byDay = stationRunnersByDay(destination, races ?? []);
-    if (!byDay.length) return '0 through';
-    return byDay.map(([day, runners]) => `${dayShort(day)} ${runners}`).join(' · ');
+    if (!byDay.length) return 'No runners through yet';
+    // "Sun: 400 runners", not "Sun 400": a bare number by a day read as a code.
+    return byDay.map(([day, runners]) => `${dayShort(day)}: ${runners} runners`).join(' · ');
   };
 
   const splitLabel = (byDay: Array<[string | null, number]>) =>
-    byDay.map(([day, qty]) => `${dayShort(day)} ${qty}`).join(' · ');
+    byDay.map(([day, qty]) => `${dayShort(day)}: ${qty}`).join(' · ');
 
   const exportOrder = () => {
     const dayColumns = hasDays ? days.map((day) => dayLabel(day)) : [];

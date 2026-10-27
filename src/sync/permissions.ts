@@ -495,8 +495,8 @@ export function describeRole(
   if (has('item:write')) lines.push('Add and edit stock items');
   else if (has('item:read')) lines.push('View the stock catalogue');
   if (has('stock:adjust')) lines.push('Adjust stock quantities');
-  if (has('packlist:manage')) lines.push('Build and change packlists');
-  else if (has('packlist:receive')) lines.push('Record what arrived on a packlist');
+  if (has('packlist:manage')) lines.push('Build and change packing lists');
+  else if (has('packlist:receive')) lines.push('Record what arrived on their packing list');
   if (has('load:manage')) lines.push('Plan transport loads');
   else if (has('load:deliver')) lines.push('Confirm deliveries');
   if (has('event:write')) lines.push('Edit the event and its stations');

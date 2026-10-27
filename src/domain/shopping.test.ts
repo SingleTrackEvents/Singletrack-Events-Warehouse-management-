@@ -382,7 +382,7 @@ describe('the list as text', () => {
 
   it('describes a line for its row', async () => {
     const { line } = await addShoppingLine({ name: 'Ice', qty: 3, unit: 'bag', eventId: 'ev-1', source: 'packlist', note: 'for the eskies' });
-    expect(describeLine(line, 'Hounslow Classic')).toBe('3 bags · Hounslow Classic · short while packing · for the eskies');
+    expect(describeLine(line, 'Hounslow Classic')).toBe('3 bags · Hounslow Classic · short for the event · for the eskies');
     const plain = await addShoppingLine({ name: 'Tape', qty: 1 });
     expect(describeLine(plain.line)).toBe('1 · Warehouse');
   });
