@@ -504,7 +504,7 @@ export default function ShoppingScreen() {
           title={`Clear ${plural(done.length, 'bought item')}?`}
           body={
             waiting.length
-              ? `${plural(waiting.length, 'item')} bought but not booked into stock yet. Clearing them now means the purchase never reaches the ledger. Book them in first if that stock is on the shelf.`
+              ? `${plural(waiting.length, 'item')} bought but not booked into stock yet. Clearing them now means the purchase never reaches the warehouse count. Book them in first if that stock is on the shelf.`
               : 'They come off the list. Anything already booked into stock stays there.'
           }
           confirmLabel="Clear"

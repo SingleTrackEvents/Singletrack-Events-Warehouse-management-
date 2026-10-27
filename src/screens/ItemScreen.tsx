@@ -249,8 +249,7 @@ export default function ItemScreen() {
 
       <section className="section">
         <div className="section-head">
-          <h2>Movement history</h2>
-          <span className="tiny muted">{movementCount ?? 0} total on device</span>
+          <h2>Stock history</h2>
         </div>
         {history?.length ? (
           <div className="list">
@@ -279,7 +278,7 @@ export default function ItemScreen() {
             ))}
           </div>
         ) : (
-          <p className="small muted">No movements recorded yet.</p>
+          <p className="small muted">Nothing has come in or gone out yet.</p>
         )}
       </section>
 
@@ -381,7 +380,7 @@ export default function ItemScreen() {
       {archiving ? (
         <ConfirmSheet
           title={`Archive ${item.name}?`}
-          body="It disappears from search and pickers but stays on past packlists and the ledger."
+          body="It disappears from search and pickers but stays on past packing lists and in the stock history."
           confirmLabel="Archive"
           tone="danger"
           onCancel={() => setArchiving(false)}

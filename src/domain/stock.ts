@@ -174,13 +174,13 @@ export async function itemHistory(itemId: string, limit = 50): Promise<Movement[
 /** Human wording for a ledger reason. */
 export const MOVEMENT_LABELS: Record<MovementReason, string> = {
   receipt: 'Received',
-  issue: 'Issued to event',
-  return: 'Returned from event',
-  stocktake: 'Stocktake correction',
-  adjustment: 'Manual adjustment',
+  issue: 'Went out to an event',
+  return: 'Came back from an event',
+  stocktake: 'Counted',
+  adjustment: 'Changed by hand',
   consumed: 'Used at an event',
   damaged: 'Damaged / written off',
-  transfer: 'Transferred',
+  transfer: 'Moved between stations',
 };
 
 /** Timestamp helper re-exported so screens do not reach into the db module. */

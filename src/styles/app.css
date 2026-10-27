@@ -1345,3 +1345,30 @@ button, input, select, textarea {
   .pack-row .row-end { flex: 0 0 auto; }
   .pack-check { width: 28px; height: 28px; }
 }
+
+/* ---------------------------------------------------- desktop dialogs -- */
+
+/* On a computer a sheet sliding up from the bottom edge is a phone habit:
+   there it sits in the middle as an ordinary dialog, rounded all round,
+   without the drag handle a mouse cannot use. Touch screens keep the sheet. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .sheet-backdrop { align-items: center; padding: var(--space-6); }
+  .sheet {
+    max-width: 560px;
+    max-height: min(88dvh, 820px);
+    border-radius: var(--radius-xl);
+    animation: fade 0.15s ease;
+  }
+  .sheet .grabber { display: none; }
+}
+
+/* A plain sentence in a box, readable at arm's length: where the work goes. */
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--info-bg);
+  color: var(--text);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+.notice-warn { background: var(--warn-bg); }

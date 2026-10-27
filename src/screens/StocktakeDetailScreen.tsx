@@ -32,7 +32,7 @@ const FILTER_LABELS: Record<Filter, string> = {
   todo: 'To count',
   all: 'All',
   counted: 'Counted',
-  variance: 'Discrepancies',
+  variance: 'Different',
 };
 
 /** Which list is showing and when this pass began. See `pass` below. */
@@ -256,14 +256,14 @@ export default function StocktakeDetailScreen() {
             {summary.counted} / {summary.total} counted
           </span>
           <Pill tone={summary.discrepancies ? 'warn' : 'ok'}>
-            {plural(summary.discrepancies, 'discrepancy', 'discrepancies')}
+            {summary.discrepancies ? `${plural(summary.discrepancies, 'item')} different` : 'All match'}
           </Pill>
         </div>
         <ProgressBar percent={summary.percent} done={summary.percent === 100} />
         {summary.discrepancies ? (
           <p className="tiny muted mt-2">
-            Net {summary.netDelta > 0 ? '+' : ''}
-            {summary.netDelta} units across {plural(summary.discrepancies, 'item')}.
+            {plural(summary.discrepancies, 'item')} counted differently from what the app had. Applying
+            changes the warehouse count to what you counted.
           </p>
         ) : null}
         {!open ? (
@@ -355,7 +355,7 @@ export default function StocktakeDetailScreen() {
       {open ? (
         <div className="action-bar no-print">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => setFinishing(true)}>
-            Finish &amp; apply corrections
+            Finish and update the count
           </button>
         </div>
       ) : null}
@@ -375,12 +375,12 @@ export default function StocktakeDetailScreen() {
 
       {finishing ? (
         <ConfirmSheet
-          title="Apply the corrections?"
+          title="Finish and update the warehouse count?"
           body={
             <>
               {summary.discrepancies
-                ? `${plural(summary.discrepancies, 'item')} will be corrected on the ledger.`
-                : 'Nothing differs from the system, so this just closes the count.'}
+                ? `${plural(summary.discrepancies, 'item')} will change to what you counted.`
+                : 'Everything matched what the app had, so this just closes the count.'}
               {summary.remaining ? (
                 <div className="mt-2">
                   {plural(summary.remaining, 'item')} {summary.remaining === 1 ? 'was' : 'were'} never
@@ -393,7 +393,7 @@ export default function StocktakeDetailScreen() {
           onCancel={() => setFinishing(false)}
           onConfirm={() => {
             void completeStocktake(stocktake, crew).then((applied) => {
-              toast(`Stocktake closed · ${plural(applied, 'correction')} applied`);
+              toast(`Stocktake finished · ${plural(applied, 'item')} updated`);
               setFinishing(false);
             });
           }}
@@ -456,7 +456,7 @@ function CountRow({
         <span className="row-title">{item?.name ?? 'Unknown item'}</span>
         <span className="row-sub">
           {item?.bin ? `Shelf ${item.bin}` : 'No shelf yet'}
-          {counted ? <> · system says {formatQty(count.expected, unit)}</> : null}
+          {counted ? <> · the app had {formatQty(count.expected, unit)}</> : null}
           {counted && delta !== 0 ? (
             <span className="strong" style={{ color: delta > 0 ? 'var(--ok)' : 'var(--danger)' }}>
               {' '}

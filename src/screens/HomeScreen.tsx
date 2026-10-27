@@ -557,9 +557,9 @@ function StationHome({
       {/* Whether the phone can go back in the pocket: the volunteer cannot
           see the sync engine, so it is said in words. */}
       {checkIn.checked ? (
-        <p className={`small mb-4 strong${delivery === 'sent' ? '' : ' muted'}`}>
+        <div className={`notice mb-4${delivery === 'sent' ? '' : ' notice-warn'}`}>
           {delivery === 'sent' ? '✅' : delivery === 'sending' ? '⏳' : '📱'} {DELIVERY_LABELS[delivery]}
-        </p>
+        </div>
       ) : (
         <div className="mb-4" />
       )}

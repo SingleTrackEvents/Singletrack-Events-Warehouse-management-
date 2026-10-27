@@ -114,7 +114,7 @@ export default function PacklistScreen() {
     [packlist?.eventId],
   );
 
-  const { session } = useSession();
+  const { session, backend, phase, pending } = useSession();
   /*
    * Two views of one screen.
    *
@@ -727,6 +727,19 @@ export default function PacklistScreen() {
       subtitle={`${destination ? `${DESTINATION_LABELS[destination.type]} · ` : ''}${moveState(move, truckStage, { done: progress.linesDone, total: progress.linesTotal })}`}
       back={stationOnly ? '/' : `/events/${packlist.eventId}`}
     >
+      {/* Where these ticks go, said before anyone does an hour of them: a
+          volunteer otherwise assumes the organiser can see them. */}
+      {!backend ? (
+        <div className="notice notice-warn mb-3">
+          📱 Saved on this device only. Nobody else sees these ticks until it is connected to the
+          shared server. If you are a volunteer, show this screen to your crew lead.
+        </div>
+      ) : phase === 'offline' && pending > 0 ? (
+        <div className="notice mb-3">
+          📶 No signal. Everything is saved here and sends by itself when the phone is next online.
+        </div>
+      ) : null}
+
       <div className="card card-pad mb-3">
         <div className="spread mb-2">
           <span className="strong">
@@ -915,6 +928,14 @@ export default function PacklistScreen() {
               <button type="button" className="btn btn-outline" onClick={() => setChecking(true)}>
                 ✨ Check this list
               </button>
+            ) : null}
+            {can(session, 'member:manage') ? (
+              <Link
+                className="btn btn-outline"
+                to={`/access?invite=1&event=${packlist.eventId}&station=${packlist.destinationId}`}
+              >
+                👤 Invite a volunteer
+              </Link>
             ) : null}
           </div>
         </section>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Screen } from '../App';
 import { QrCode } from '../components/QrCode';
 import { ConfirmSheet, Field, Pill, Sheet } from '../components/ui';
@@ -37,7 +37,12 @@ export default function AccessScreen() {
   const [signingIn, setSigningIn] = useState(false);
   const [passwordSignIn, setPasswordSignIn] = useState(false);
   const [settingPassword, setSettingPassword] = useState(false);
-  const [inviting, setInviting] = useState(false);
+  // "Invite a volunteer" on a station opens here with the station chosen.
+  const [searchParams] = useSearchParams();
+  const invitePreset = searchParams.get('invite')
+    ? { eventId: searchParams.get('event') ?? '', destinationId: searchParams.get('station') ?? '' }
+    : undefined;
+  const [inviting, setInviting] = useState(Boolean(invitePreset));
   const [signingOut, setSigningOut] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyError, setPasskeyError] = useState<string>();
@@ -85,11 +90,13 @@ export default function AccessScreen() {
               Try it on the demo server
             </button>
           )}
-          {SUPABASE_CONFIGURED ? (
-            <p className="tiny muted mt-2">
-              The first person to sign in becomes the admin. Everyone after that needs an invite.
-            </p>
-          ) : null}
+          {/* Said before the tap, not discovered after it: the sign-in that
+              follows is the step testers thought had gone wrong. */}
+          <p className="tiny muted mt-2">
+            {SUPABASE_CONFIGURED
+              ? 'Next you sign in. The first person to sign in becomes the admin; everyone after that needs an invite.'
+              : 'Next you make an account on the demo server with any email and a password. The first account is the admin, and can then invite people.'}
+          </p>
         </div>
 
         <div className="card card-pad mb-4">
@@ -376,7 +383,7 @@ export default function AccessScreen() {
       </button>
 
       {inviting ? (
-        <InviteSheet onClose={() => setInviting(false)} onCreated={refreshInvites} />
+        <InviteSheet preset={invitePreset} onClose={() => setInviting(false)} onCreated={refreshInvites} />
       ) : null}
 
       {renaming ? <RenameSheet onClose={() => setRenaming(false)} /> : null}
@@ -1473,10 +1480,24 @@ function ExpirySheet({
  * not touch transport. Until a box is touched, the ticks follow the role and
  * the event as they change.
  */
-function InviteSheet({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function InviteSheet({
+  preset,
+  onClose,
+  onCreated,
+}: {
+  /** A station's own "Invite a volunteer": the event and station already chosen. */
+  preset?: { eventId: string; destinationId: string };
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const { backend, session } = useSession();
   const toast = useToast();
   const [draft, setDraft] = useAccessDraft(null);
+  useEffect(() => {
+    if (preset?.eventId) setDraft((current) => ({ ...current, ...preset }));
+    // Once, when the sheet opens from a station.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [today] = useState(() => localDate(new Date()));
   const events = useEvents();
   // Until a day is picked by hand, the invite lasts to the end of the chosen

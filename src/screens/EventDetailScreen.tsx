@@ -10,6 +10,7 @@ import { alive, create, nextSort, softDelete, softDeleteChildren, update } from 
 import { useDestinations, useEvent } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { accessPointingAt } from '../sync/types';
+import { can } from '../sync/permissions';
 import {
   defaultTemplateFor,
   describeSource,
@@ -72,6 +73,8 @@ export default function EventDetailScreen() {
   const [buildingLists, setBuildingLists] = useState(false);
   const [removing, setRemoving] = useState<Destination>();
   const { backend, session } = useSession();
+  // Bringing a volunteer in is a station's job, so it starts from the station.
+  const canInvite = can(session, 'member:manage');
   // Invites and people that open the station about to go, so the confirm can
   // say so. Only an admin can see them; for anyone else it stays unsaid.
   const [pointing, setPointing] = useState<{ id: string; invites: number; members: number }>();
@@ -305,6 +308,16 @@ export default function EventDetailScreen() {
                       : destination.accessNotes || 'No schedule yet'}
                   </span>
                 </span>
+                {canInvite ? (
+                  <Link
+                    className="btn btn-ghost btn-sm"
+                    to={`/access?invite=1&event=${event.id}&station=${destination.id}`}
+                    aria-label={`Invite a volunteer for ${destination.name}`}
+                    title="Invite a volunteer for this station"
+                  >
+                    👤+
+                  </Link>
+                ) : null}
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
@@ -370,7 +383,7 @@ export default function EventDetailScreen() {
         <ConfirmSheet
           title={`Remove ${removing.name}?`}
           body={
-            'Its packing list is removed too. Stock already issued stays on the ledger.' +
+            'Its packing list is removed too. Stock that already went out stays in the stock history.' +
             (stillOpen && (stillOpen.invites || stillOpen.members)
               ? ` ${[
                   stillOpen.invites ? plural(stillOpen.invites, 'invite') : '',
@@ -549,7 +562,7 @@ function DestinationSheet({
               className="input"
               autoFocus
               value={name}
-              placeholder="Aid 3 — Buffalo Plateau"
+              placeholder="Aid 3, Buffalo Plateau"
               onChange={(event) => setName(event.target.value)}
             />
           )}

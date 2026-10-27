@@ -100,7 +100,7 @@ export function ItemPicker({
     >
       <input
         className="input mb-3"
-        placeholder="Search name, SKU or bin"
+        placeholder="Search by name, code or shelf"
         value={query}
         autoFocus
         onChange={(event) => setQuery(event.target.value)}
