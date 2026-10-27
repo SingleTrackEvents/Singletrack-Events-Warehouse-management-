@@ -7,12 +7,10 @@ import { MovePill, MoveStrip } from '../components/Moves';
 import { EmptyState, Pill } from '../components/ui';
 import { db } from '../db/db';
 import { alive } from '../db/repo';
-import { useCrewName, useEvents, useItems, useShoppingLines } from '../hooks/useDb';
+import { useEvents } from '../hooks/useDb';
 import { useSession } from '../hooks/sessionContext';
 import { useToast } from '../components/toastContext';
 import { can, isStationOnly } from '../sync/permissions';
-import { countedItemIds, lowStockItems } from '../domain/stock';
-import { addLowStock, awaitingBooking, groupByShop, toBuy } from '../domain/shopping';
 import { uncountedSummary } from '../domain/stocktake';
 import { describeSource, packlistForDestination, primaryPacklist, progressFor, startPacklist } from '../domain/packlists';
 import { boardCounts, currentMove, hasLeft, moveOf, moveProgress, sent } from '../domain/moves';
@@ -37,7 +35,6 @@ import { lastOpenedEvent } from '../domain/format';
 export default function HomeScreen() {
   const navigate = useNavigate();
   const toast = useToast();
-  const crew = useCrewName();
   const { session } = useSession();
   const stationOnly = isStationOnly(session);
   const station = useLiveQuery(
@@ -56,8 +53,6 @@ export default function HomeScreen() {
   );
 
   const events = useEvents();
-  const items = useItems();
-  const counted = useLiveQuery(() => countedItemIds(), [], new Set<string>());
 
   // The event to lead with: the next one that has not finished yet, otherwise
   // the most recent. Anything "live" jumps the queue.
@@ -111,17 +106,9 @@ export default function HomeScreen() {
   const canBuild = can(session, 'packlist:manage', focus ? { eventId: focus.id } : undefined);
   const canPackHere = can(session, 'packlist:pack', focus ? { eventId: focus.id } : undefined);
 
-  // The shopping list is the crew's; its hook already narrows the lines to
-  // what this account may see, so only the card needs gating.
+  // The shopping list is one tap away under the board; its own screen holds
+  // the lines, so the home screen no longer repeats them.
   const canShop = can(session, 'shopping:manage');
-  const shopping = useShoppingLines();
-  const shoppingOpen = shopping ? toBuy(shopping) : [];
-  // Bought but not yet in stock: the card stays until that is done too, or
-  // booking the shop into the warehouse hides under More.
-  const shoppingToBook = shopping ? awaitingBooking(shopping) : [];
-  const shoppingShops = groupByShop(shoppingOpen)
-    .map(([shop]) => shop)
-    .filter(Boolean);
   // Low stock is a warehouse matter: crew given one event read the catalogue
   // but do not restock it, and a restock line carries no event to scope to.
   const canRestock = canShop && can(session, 'stock:adjust');
@@ -142,12 +129,6 @@ export default function HomeScreen() {
   // anything is uncounted it has a card here rather than a button under More.
   const uncounted = useLiveQuery(() => (canRestock ? uncountedSummary() : null), [canRestock]);
   if (stationOnly) return <StationHome station={station} />;
-
-  // Without the counted set every shelf nobody has looked at yet reads as
-  // "below reorder point" — 166 red alarms on a fresh catalogue, which is how
-  // you teach someone to ignore the number. The stock screen already knew
-  // this; the home screen did not.
-  const low = items ? lowStockItems(items, counted) : [];
 
   return (
     // The artwork is white on transparent, so it sits straight on the teal header.
@@ -291,34 +272,6 @@ export default function HomeScreen() {
         </section>
       ) : null}
 
-      {canShop && (shoppingOpen.length || shoppingToBook.length) ? (
-        <section className="section">
-          <div className="section-head">
-            <h2>Shopping list</h2>
-          </div>
-          <div className="list">
-            <Link to="/shopping" className="row">
-              <span className="row-icon">🛒</span>
-              <span className="row-body">
-                <span className="row-title">
-                  {shoppingOpen.length
-                    ? `${plural(shoppingOpen.length, 'thing')} to buy`
-                    : `${plural(shoppingToBook.length, 'thing')} bought, not in stock yet`}
-                </span>
-                <span className="row-sub">
-                  {!shoppingOpen.length
-                    ? 'Tap to book them into the warehouse'
-                    : shoppingShops.length
-                      ? `At ${shoppingShops.join(', ')}`
-                      : 'Tap to open the list'}
-                </span>
-              </span>
-              <span className="row-chevron">›</span>
-            </Link>
-          </div>
-        </section>
-      ) : null}
-
       {uncounted ? (
         <Link to={uncounted.href} className="row card mb-3">
           <span className="row-icon">🔢</span>
@@ -330,52 +283,6 @@ export default function HomeScreen() {
         </Link>
       ) : null}
 
-      {low.length ? (
-        <section className="section">
-          <div className="section-head">
-            <h2>Running low</h2>
-            <Link to="/stock?filter=low" className="small">
-              {plural(low.length, 'item')}
-            </Link>
-          </div>
-          {canRestock && low.some((item) => item.consumable) ? (
-            <div className="btn-row mb-2 no-print">
-              <button
-                type="button"
-                className="btn btn-outline btn-sm"
-                onClick={() => {
-                  void addLowStock(low, crew).then((result) => {
-                    const added = result.added + result.updated;
-                    toast(
-                      added
-                        ? `${plural(added, 'item')} put on the shopping list`
-                        : 'Already on the shopping list',
-                      added ? 'ok' : 'warn',
-                    );
-                  });
-                }}
-              >
-                {/* Consumables only: nobody buys marquees at Bunnings. */}
-                🛒 Put {plural(low.filter((item) => item.consumable).length, 'consumable')} on the shopping list
-              </button>
-            </div>
-          ) : null}
-          <div className="list">
-            {low.slice(0, 5).map((item) => (
-              <Link key={item.id} to={`/stock/${item.id}`} className="row">
-                <span className="row-icon">⚠️</span>
-                <span className="row-body">
-                  <span className="row-title truncate">{item.name}</span>
-                  <span className="row-sub">
-                    {item.qtyOnHand} on hand · reorder at {item.minQty}
-                  </span>
-                </span>
-                <span className="row-chevron">›</span>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
       <BuildStamp />
     </Screen>
   );
