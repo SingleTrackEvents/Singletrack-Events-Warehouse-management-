@@ -12,7 +12,8 @@ import type { Unit } from './types';
  *
  * `hold` follows the same rule as the generated catalogue: the largest
  * single-event requirement — here Wonderland's whole-event totals — becomes
- * the low-stock level. Quantities on hand stay at zero for the same reason as
+ * the low-stock level. The toastie ingredients came later with the GPT100
+ * 2026 sheet, so theirs are that event's totals. Quantities on hand stay at zero for the same reason as
  * everywhere else: the sheet is a plan, not a stocktake.
  */
 
@@ -82,4 +83,24 @@ export const FOOD_CATALOGUE: FoodCatalogueItem[] = [
     hold: 290,
     note: 'Medium potato, about 7 per kg',
   },
+  { name: 'White Bread', sku: 'FD-25', unit: 'each', packSize: 1, hold: 142, note: 'Loaf, for toasties' },
+  {
+    name: 'Cheese Slices',
+    sku: 'FD-26',
+    unit: 'pack',
+    packSize: 30,
+    hold: 65,
+    note: '500 g pack of 30, for toasties',
+  },
+  {
+    name: 'Vegan Cheese Slices',
+    sku: 'FD-27',
+    unit: 'pack',
+    packSize: 10,
+    hold: 22,
+    note: '200 g pack of 10, for toasties',
+  },
+  { name: 'Olive Oil Spray', sku: 'FD-28', unit: 'each', packSize: 1, hold: 22, note: 'Bottle, for toasties' },
+  { name: 'Baked Beans', sku: 'FD-29', unit: 'each', packSize: 1, hold: 94, note: '130 g tin, for toasties' },
+  { name: 'Gluten Free Bread', sku: 'FD-30', unit: 'each', packSize: 1, hold: 9, note: 'Loaf, for toasties' },
 ];

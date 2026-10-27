@@ -1,4 +1,4 @@
-import type { HounslowPacklist } from './hounslowSeed';
+import type { HounslowFoodLine, HounslowPacklist } from './hounslowSeed';
 
 /**
  * GPT100 2026: starting packlists.
@@ -775,4 +775,397 @@ export const GPT_RETIRED: Array<{ station: string; item: string }> = [
   { station: 'Griffin Fireline', item: 'Marquee Walls - 3x3 (or equivalent)' },
   { station: 'Griffin Fireline', item: 'Weights - Steel 20kg' },
   { station: 'Griffin Fireline', item: 'Ratchet Straps' },
+];
+
+/*
+ * The food plan, from GPT_2026_Aid Station Consumptions (projections at the
+ * 12 Oct entry report). The sheet works in blocks of runners, one per day of
+ * racing, and each block becomes the races it counts:
+ *
+ * - Thursday: the 50k and Stage 1 (Mt Zero to Halls Gap) at the same rates,
+ *   and the GPT14k and GPT6k at Wonderland.
+ * - The miler from Friday, at every station Mt Zero to Dunkeld.
+ * - Stage 2 on Friday, Stage 3 on Saturday, and Stage 4 with the GPT33 on
+ *   Sunday, with the 2k kids and 5k family runs at Dunkeld.
+ *
+ * Rates are per runner, as the sheet has them. Coke and ginger beer are
+ * measured in litres there and in cans here (375 ml and 200 ml). Where two
+ * races share a block, the ridgeline's flat electrolyte and lollies go on the
+ * larger field only, so they are not doubled. Sugar, tea, coffee, Milo and
+ * milk are one of each per hot drinks station for the whole event, as the
+ * sheet orders them, on the first race through: the 50k at Mt Difficult Rd
+ * and Halls Gap, the miler everywhere else.
+ *
+ * Toasties are made, not bought, so what goes on the plan is what they are
+ * made from, worked out per jaffle the way the sheet's ingredient rows do:
+ * two slices of bread (about 13 jaffles to a loaf), two cheese slices, one in
+ * ten vegan, a spray bottle per 50 and a tin of beans per 10.
+ *
+ * Two things the sheet does that this does not. Its miler block counts Mt
+ * William and Jimmy Creek against 320 runners rather than its own 246, so
+ * those two stations come out smaller here. And it rounds once per block
+ * where this rounds per race, so a shared block can come out one higher.
+ */
+
+type FoodKey =
+  | 'water'
+  | 'ice'
+  | 'electrolyte'
+  | 'gels'
+  | 'coke'
+  | 'gingerBeer'
+  | 'bananas'
+  | 'oranges'
+  | 'watermelon'
+  | 'sugar'
+  | 'chips'
+  | 'marsSnickers'
+  | 'lollies'
+  | 'potatoes'
+  | 'noodles'
+  | 'noodlesGf'
+  | 'soup'
+  | 'tea'
+  | 'coffee'
+  | 'milo'
+  | 'cowMilk'
+  | 'soyMilk'
+  | 'bread'
+  | 'cheese'
+  | 'veganCheese'
+  | 'oilSpray'
+  | 'bakedBeans'
+  | 'breadGf';
+
+const FOOD_SKU: Record<FoodKey, string> = {
+  water: 'FD-01',
+  ice: 'FD-02',
+  electrolyte: 'FD-03',
+  gels: 'FD-04',
+  coke: 'FD-05',
+  gingerBeer: 'FD-23',
+  bananas: 'FD-06',
+  oranges: 'FD-07',
+  watermelon: 'FD-08',
+  sugar: 'FD-10',
+  chips: 'FD-11',
+  marsSnickers: 'FD-12',
+  lollies: 'FD-13',
+  potatoes: 'FD-24',
+  noodles: 'FD-14',
+  noodlesGf: 'FD-15',
+  soup: 'FD-16',
+  tea: 'FD-17',
+  coffee: 'FD-18',
+  milo: 'FD-19',
+  cowMilk: 'FD-20',
+  soyMilk: 'FD-21',
+  bread: 'FD-25',
+  cheese: 'FD-26',
+  veganCheese: 'FD-27',
+  oilSpray: 'FD-28',
+  bakedBeans: 'FD-29',
+  breadGf: 'FD-30',
+};
+
+type Rates = Partial<Record<FoodKey, number>>;
+
+interface FoodStation {
+  station: string;
+  perRunner: Rates;
+  flat?: Rates;
+}
+
+/** Litres of Coke and ginger beer per runner, as cans. */
+const coke = (litres: number) => litres / 0.375;
+const gingerBeer = (litres: number) => litres / 0.2;
+
+/** The sheet's electrolyte rates: 1 kg packets per runner. */
+const ELECTROLYTE = { full: 0.021067, mid: 0.014045, water: 0.00927 };
+
+/** A full table's fruit, chips and bars, with Coke at the given litres per runner. */
+const table = (cokeLitres: number): Rates => ({
+  gels: 0.8,
+  coke: coke(cokeLitres),
+  gingerBeer: gingerBeer(0.06),
+  bananas: 0.15,
+  oranges: 0.075,
+  watermelon: 0.009,
+  chips: 0.041667,
+  marsSnickers: 0.0125,
+  lollies: 0.007,
+});
+
+/** Noodles, gluten free noodles and soup at a hot food station. */
+const hotFood = (noodles: number): Rates => ({ noodles, noodlesGf: 0.02, soup: 0.0125 });
+
+/** What a jaffle per runner at this rate takes to make. */
+const toasties = (perRunner: number): Rates => ({
+  bread: (perRunner * 2) / 13,
+  cheese: perRunner / 15,
+  veganCheese: perRunner * 0.02,
+  oilSpray: perRunner / 50,
+  bakedBeans: perRunner / 10,
+  breadGf: perRunner * 0.008,
+});
+
+const HOT_DRINKS: Rates = { sugar: 1, tea: 1, coffee: 1, milo: 1, cowMilk: 1, soyMilk: 1 };
+
+const MILER: FoodStation[] = [
+  { station: 'Mt Zero Picnic Area', perRunner: { water: 0.5, ice: 0.066, electrolyte: 0.005618 } },
+  { station: 'Coppermine', perRunner: { water: 1, ice: 0.05, electrolyte: ELECTROLYTE.water, lollies: 0.007 } },
+  {
+    station: 'GAR Trailhead',
+    perRunner: { water: 4, ice: 0.2, electrolyte: ELECTROLYTE.full, ...table(0.12375), potatoes: 0.2 },
+  },
+  { station: 'Mt Difficult Ridgeline', perRunner: { water: 1 }, flat: { electrolyte: 10, lollies: 5 } },
+  {
+    station: 'Mt Difficult Rd',
+    perRunner: { water: 4, ice: 0.2, electrolyte: ELECTROLYTE.full, ...table(0.15), potatoes: 0.25, ...hotFood(0.2) },
+  },
+  {
+    station: 'Halls Gap',
+    perRunner: {
+      water: 3,
+      ice: 0.15,
+      electrolyte: ELECTROLYTE.full,
+      ...table(0.15),
+      potatoes: 0.25,
+      ...hotFood(0.4),
+      ...toasties(0.4),
+    },
+  },
+  {
+    station: 'Rosea Carpark',
+    perRunner: { water: 3.5, ice: 0.15, electrolyte: ELECTROLYTE.full, ...table(0.15), potatoes: 0.25, ...hotFood(0.4) },
+    flat: HOT_DRINKS,
+  },
+  {
+    station: 'Borough Huts',
+    perRunner: {
+      water: 4,
+      ice: 0.15,
+      electrolyte: ELECTROLYTE.full,
+      ...table(0.15),
+      potatoes: 0.25,
+      ...hotFood(0.4),
+      ...toasties(0.5),
+    },
+    flat: HOT_DRINKS,
+  },
+  {
+    station: 'Seven Dials Track',
+    perRunner: { water: 1, ice: 0.05, electrolyte: ELECTROLYTE.water, lollies: 0.007 },
+  },
+  {
+    station: 'Mt William Carpark',
+    perRunner: {
+      water: 4,
+      ice: 0.15,
+      electrolyte: ELECTROLYTE.full,
+      ...table(0.15),
+      potatoes: 0.25,
+      ...hotFood(0.4),
+      ...toasties(0.5),
+    },
+    flat: HOT_DRINKS,
+  },
+  {
+    station: 'Stockyard Track',
+    perRunner: { water: 1.5, ice: 0.1, electrolyte: ELECTROLYTE.mid, lollies: 0.01 },
+  },
+  {
+    station: 'Jimmy Creek Rd',
+    perRunner: {
+      water: 4,
+      ice: 0.15,
+      electrolyte: ELECTROLYTE.full,
+      ...table(0.15),
+      potatoes: 0.25,
+      ...hotFood(0.4),
+      ...toasties(0.5),
+    },
+    flat: HOT_DRINKS,
+  },
+  {
+    station: 'Yarram Gap Rd',
+    perRunner: { water: 3.5, ice: 0.15, electrolyte: ELECTROLYTE.full, lollies: 0.007 },
+  },
+  {
+    station: 'Griffin Fireline',
+    perRunner: {
+      water: 4,
+      ice: 0.15,
+      electrolyte: ELECTROLYTE.full,
+      ...table(0.15),
+      potatoes: 0.25,
+      ...hotFood(0.4),
+      ...toasties(0.5),
+    },
+    flat: HOT_DRINKS,
+  },
+  {
+    station: 'Cassidys Gap',
+    perRunner: {
+      water: 3.5,
+      ice: 0.15,
+      electrolyte: ELECTROLYTE.full,
+      ...table(0.15),
+      potatoes: 0.25,
+      ...hotFood(0.4),
+      ...toasties(0.5),
+    },
+    flat: HOT_DRINKS,
+  },
+  {
+    station: 'Bainggug Carpark',
+    perRunner: { water: 3, ice: 0.15, electrolyte: ELECTROLYTE.full, ...table(0.15), potatoes: 0.25, ...hotFood(0.4) },
+    flat: HOT_DRINKS,
+  },
+  {
+    station: 'Dunkeld Finish',
+    perRunner: {
+      water: 1.5,
+      ice: 0.05,
+      electrolyte: ELECTROLYTE.full,
+      ...table(0.15),
+      gels: 0,
+      ...hotFood(0.4),
+      ...toasties(0.5),
+    },
+    flat: HOT_DRINKS,
+  },
+];
+
+/** The 50k and Stage 1, Thursday, Mt Zero to Halls Gap. */
+const STAGE_1: FoodStation[] = [
+  { station: 'Mt Zero Picnic Area', perRunner: { water: 0.5, electrolyte: 0.002809 } },
+  { station: 'Coppermine', perRunner: { water: 1, ice: 0.05, electrolyte: ELECTROLYTE.water, lollies: 0.007 } },
+  {
+    station: 'GAR Trailhead',
+    perRunner: { water: 4, ice: 0.2, electrolyte: ELECTROLYTE.full, ...table(0.12375), potatoes: 0.2 },
+  },
+  { station: 'Mt Difficult Ridgeline', perRunner: { water: 1 }, flat: { electrolyte: 10, lollies: 10 } },
+  {
+    station: 'Mt Difficult Rd',
+    perRunner: { water: 4, ice: 0.2, electrolyte: ELECTROLYTE.full, ...table(0.12375), potatoes: 0.25, ...hotFood(0.2) },
+    flat: HOT_DRINKS,
+  },
+  {
+    station: 'Halls Gap',
+    perRunner: { water: 1.5, ice: 0.1, electrolyte: ELECTROLYTE.full, ...table(0.15), gels: 0 },
+    flat: HOT_DRINKS,
+  },
+];
+
+/** A stage's halfway hot food table, at the sheet's stage rates. */
+const stageTable = (water: number, potatoes: number, noodles: number): Rates => ({
+  water,
+  ice: 0.2,
+  electrolyte: ELECTROLYTE.full,
+  ...table(0.12375),
+  potatoes,
+  ...(noodles ? hotFood(noodles) : {}),
+});
+
+/** A stage finish: no gels, hot food and drinks. */
+const stageFinish: Rates = {
+  water: 1.5,
+  ice: 0.1,
+  electrolyte: ELECTROLYTE.full,
+  ...table(0.15),
+  gels: 0,
+  potatoes: 0.25,
+  ...hotFood(0.2),
+};
+
+const STAGE_2: FoodStation[] = [
+  { station: 'Rosea Carpark', perRunner: stageTable(4, 0.2, 0) },
+  { station: 'Borough Huts', perRunner: stageTable(4, 0.25, 0.2) },
+  {
+    station: 'Seven Dials Track',
+    perRunner: { water: 1, ice: 0.05, electrolyte: ELECTROLYTE.water, lollies: 0.007 },
+  },
+  { station: 'Mt William Carpark', perRunner: stageFinish },
+];
+
+const STAGE_3: FoodStation[] = [
+  {
+    station: 'Stockyard Track',
+    perRunner: { water: 1, ice: 0.05, electrolyte: ELECTROLYTE.water, lollies: 0.007 },
+  },
+  { station: 'Jimmy Creek Rd', perRunner: stageTable(4, 0.25, 0.2) },
+  {
+    station: 'Yarram Gap Rd',
+    perRunner: { water: 3.5, ice: 0.2, electrolyte: ELECTROLYTE.full, lollies: 0.007 },
+  },
+  { station: 'Griffin Fireline', perRunner: stageFinish },
+];
+
+/** Stage 4 and the GPT33, Sunday, Cassidys Gap to Dunkeld. */
+const STAGE_4: FoodStation[] = [
+  { station: 'Cassidys Gap', perRunner: stageTable(3.5, 0.25, 0.2) },
+  { station: 'Bainggug Carpark', perRunner: stageTable(3.5, 0.25, 0.2) },
+  { station: 'Dunkeld Finish', perRunner: stageFinish },
+];
+
+const KIDS_AND_FAMILY: FoodStation[] = [
+  {
+    station: 'Dunkeld Finish',
+    perRunner: {
+      water: 1,
+      ice: 0.04,
+      electrolyte: ELECTROLYTE.mid,
+      ...table(0.1125),
+      gels: 0,
+    },
+  },
+];
+
+const GPT14K: FoodStation[] = [
+  {
+    station: 'Wonderland Carpark',
+    perRunner: {
+      water: 1,
+      ice: 0.05,
+      electrolyte: ELECTROLYTE.water,
+      coke: coke(0.12375),
+      bananas: 0.15,
+      oranges: 0.075,
+      watermelon: 0.009,
+      lollies: 0.007,
+    },
+  },
+  { station: 'Wonderland Trailhead', perRunner: { water: 1, electrolyte: ELECTROLYTE.water, lollies: 0.007 } },
+];
+
+const GPT6K: FoodStation[] = [
+  { station: 'Wonderland Trailhead', perRunner: { water: 1, electrolyte: ELECTROLYTE.water, lollies: 0.007 } },
+];
+
+/** One race's rules, with the block's flat amounts only where `flats` is set. */
+function foodLines(race: string, stations: FoodStation[], flats = true): HounslowFoodLine[] {
+  const lines: HounslowFoodLine[] = [];
+  for (const { station, perRunner, flat = {} } of stations) {
+    for (const key of Object.keys(FOOD_SKU) as FoodKey[]) {
+      const rate = Math.round((perRunner[key] ?? 0) * 1e6) / 1e6;
+      const flatQty = flats ? (flat[key] ?? 0) : 0;
+      if (rate > 0 || flatQty > 0) lines.push({ station, race, sku: FOOD_SKU[key], perRunner: rate, flatQty });
+    }
+  }
+  return lines;
+}
+
+export const GPT_CONSUMPTION: HounslowFoodLine[] = [
+  ...foodLines('Miler', MILER),
+  ...foodLines('50k', STAGE_1),
+  ...foodLines('Stage 1', STAGE_1, false),
+  ...foodLines('Stage 2', STAGE_2),
+  ...foodLines('Stage 3', STAGE_3),
+  ...foodLines('33k', STAGE_4),
+  ...foodLines('Stage 4', STAGE_4, false),
+  ...foodLines('5k Family', KIDS_AND_FAMILY),
+  ...foodLines('2k Kids', KIDS_AND_FAMILY),
+  ...foodLines('GPT14k', GPT14K),
+  ...foodLines('GPT6k', GPT6K),
 ];
